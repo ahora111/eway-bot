@@ -42,12 +42,14 @@ def extract_product_data(driver, valid_brands):
     for product in product_elements:
         name = product.text.strip().replace("تومانءء", "").replace("تومان", "").replace("نامشخص", "").strip()
         parts = name.split()
-        if len(parts) >= 4:
-            brand = parts[0]
-            price = parts[-1].replace(",", "")
-            ram = parts[-2]
-            color = parts[-3]
-            model = " ".join(parts[1:-3])
+        
+        if len(parts) >= 4:  # برای این که اطمینان پیدا کنیم مدل درست تفکیک شده
+            model = " ".join(parts[1:-3])  # مدل گوشی
+            ram = parts[-2]  # میزان RAM
+            price = parts[-3].replace(",", "")  # قیمت
+            color = parts[-4]  # رنگ گوشی
+            brand = parts[0]  # برند گوشی
+
             if brand in valid_brands:
                 if model not in product_data:
                     product_data[model] = {'brand': brand, 'items': []}
@@ -69,7 +71,7 @@ async def send_telegram_message(product_data):
         message += f"{i}. برند: {data['brand']}\n"
         for item in data['items']:
             price = f"{int(item['price']):,}" if item['price'].isdigit() else item['price']
-            message += f"   مدل: {model} {item['ram']}\n"
+            message += f"   مدل: {model} {item['ram']} RAM\n"
             message += f"   قیمت: {price} تومان  {item['color']}\n\n"
 
     # تقسیم پیام برای محدودیت تلگرام
