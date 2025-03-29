@@ -42,16 +42,20 @@ def extract_product_data(driver, valid_brands):
     for product in product_elements:
         name = product.text.strip().replace("تومانءء", "").replace("تومان", "").replace("نامشخص", "").strip()
         parts = name.split()
-        if len(parts) >= 3:
+        if len(parts) >= 4:
             brand = parts[0]
-            model = " ".join(parts[1:-1])
             price = parts[-1].replace(",", "")
-            color = parts[-2] if len(parts) > 3 else "نامشخص"
+            ram = parts[-2]
+            color = parts[-3]
+            model = " ".join(parts[1:-3])
             if brand in valid_brands:
                 if model not in product_data:
-                    product_data[model] = {'brand': brand, 'prices': [], 'colors': []}
-                product_data[model]['prices'].append(price)
-                product_data[model]['colors'].append(color)
+                    product_data[model] = {'brand': brand, 'items': []}
+                product_data[model]['items'].append({
+                    'price': price,
+                    'color': color,
+                    'ram': ram
+                })
 
     return product_data
 
@@ -60,13 +64,15 @@ async def send_telegram_message(product_data):
     bot = Bot(token=TELEGRAM_TOKEN)
     today = JalaliDate.today().strftime("%Y/%m/%d")
     message = f"✅ بروزرسانی انجام شد!\n📅 تاریخ: {today}\n📱 تعداد مدل‌ها: {len(product_data)} عدد\n\n"
-    
-    for i, (model, data) in enumerate(product_data.items(), start=1):
-        message += f"{i}. برند: {data['brand']}\n   مدل: {model}\n"
-        for price, color in zip(data['prices'], data['colors']):
-            message += f"   قیمت: {price} تومان  {color}\n"
-        message += "\n"
 
+    for i, (model, data) in enumerate(product_data.items(), start=1):
+        message += f"{i}. برند: {data['brand']}\n"
+        for item in data['items']:
+            price = f"{int(item['price']):,}" if item['price'].isdigit() else item['price']
+            message += f"   مدل: {model} {item['ram']}\n"
+            message += f"   قیمت: {price} تومان  {item['color']}\n\n"
+
+    # تقسیم پیام برای محدودیت تلگرام
     if len(message) > 4000:
         for i in range(0, len(message), 4000):
             await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message[i:i+4000])
