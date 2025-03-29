@@ -1,14 +1,15 @@
 import os
 import time
-import telegram
+import asyncio
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from persiantools.jdatetime import JalaliDate
+from telegram import Bot
 
-# تنظیمات
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -53,8 +54,8 @@ def extract_product_data(driver, valid_brands):
     return product_data
 
 
-def send_telegram_message(product_data):
-    bot = telegram.Bot(token=TELEGRAM_TOKEN)
+async def send_telegram_message(product_data):
+    bot = Bot(token=TELEGRAM_TOKEN)
     today = JalaliDate.today().strftime("%Y/%m/%d")
     message = f"✅ بروزرسانی انجام شد!\n📅 تاریخ: {today}\n📱 تعداد مدل‌ها: {len(product_data)} عدد\n\n"
     
@@ -66,12 +67,12 @@ def send_telegram_message(product_data):
 
     if len(message) > 4000:
         for i in range(0, len(message), 4000):
-            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message[i:i+4000])
+            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message[i:i+4000])
     else:
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
 
-def main():
+async def main():
     driver = get_driver()
     driver.get('https://hamrahtel.com/quick-checkout')
     WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
@@ -82,10 +83,10 @@ def main():
     product_data = extract_product_data(driver, valid_brands)
 
     if product_data:
-        send_telegram_message(product_data)
+        await send_telegram_message(product_data)
 
     driver.quit()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
