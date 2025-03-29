@@ -46,10 +46,12 @@ def extract_product_data(driver, valid_brands):
             brand = parts[0]
             model = " ".join(parts[1:-1])
             price = parts[-1].replace(",", "")
+            color = parts[-2] if len(parts) > 3 else "نامشخص"
             if brand in valid_brands:
                 if model not in product_data:
-                    product_data[model] = {'brand': brand, 'prices': []}
+                    product_data[model] = {'brand': brand, 'prices': [], 'colors': []}
                 product_data[model]['prices'].append(price)
+                product_data[model]['colors'].append(color)
 
     return product_data
 
@@ -60,9 +62,9 @@ async def send_telegram_message(product_data):
     message = f"✅ بروزرسانی انجام شد!\n📅 تاریخ: {today}\n📱 تعداد مدل‌ها: {len(product_data)} عدد\n\n"
     
     for i, (model, data) in enumerate(product_data.items(), start=1):
-        message += f"{i}. برند: {data['brand']}\n   مدل: {model}\n   قیمت‌ها:\n"
-        for price in data['prices']:
-            message += f"   - {price} تومان\n"
+        message += f"{i}. برند: {data['brand']}\n   مدل: {model}\n"
+        for price, color in zip(data['prices'], data['colors']):
+            message += f"   قیمت: {price} تومان  {color}\n"
         message += "\n"
 
     if len(message) > 4000:
