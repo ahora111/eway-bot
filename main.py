@@ -1,15 +1,12 @@
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import os
+import time
+import telegram
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from persiantools.jdatetime import JalaliDate
-import telegram
-import json
-import os
-import time
 
 # تنظیمات
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -62,7 +59,7 @@ def send_telegram_message(product_data):
     message = f"✅ بروزرسانی انجام شد!\n📅 تاریخ: {today}\n📱 تعداد مدل‌ها: {len(product_data)} عدد\n\n"
     
     for i, (model, data) in enumerate(product_data.items(), start=1):
-        message += f"{i}. برند: {data['brand']}\n   مدل: {model}\n   رنگ‌ها و قیمت‌ها:\n"
+        message += f"{i}. برند: {data['brand']}\n   مدل: {model}\n   قیمت‌ها:\n"
         for price in data['prices']:
             message += f"   - {price} تومان\n"
         message += "\n"
@@ -74,7 +71,6 @@ def send_telegram_message(product_data):
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
 
-# اجرای اصلی
 def main():
     driver = get_driver()
     driver.get('https://hamrahtel.com/quick-checkout')
