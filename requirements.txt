@@ -1,0 +1,8 @@
+
+requests
+gspread
+google-auth
+selenium
+persiantools
+google-api-python-client
+python-telegram-bot==13.15
