@@ -1,6 +1,7 @@
-import json
 import os
 import time
+import json
+import asyncio
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -19,7 +20,7 @@ def get_driver():
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    service = Service()
+    service = Service('/usr/bin/chromedriver')
     driver = webdriver.Chrome(service=service, options=options)
     return driver
 
@@ -37,7 +38,7 @@ def scroll_page(driver):
 
 def extract_product_data(driver, valid_brands):
     product_elements = driver.find_elements(By.CLASS_NAME, 'mantine-Text-root')
-    brands, models, prices, colors = [], [], [], []
+    brands, models, prices = [], [], []
 
     for product in product_elements:
         name = product.text.strip().replace("تومانءء", "").replace("تومان", "").replace("نامشخص", "").strip()
@@ -46,41 +47,40 @@ def extract_product_data(driver, valid_brands):
             brand = parts[0]
             model = " ".join(parts[1:-1])
             price = parts[-1].replace(",", "")
-            color = parts[-2] if len(parts) > 2 else 'نامشخص'
             if brand in valid_brands and price.isdigit():
                 brands.append(brand)
                 models.append(model)
                 prices.append(price)
-                colors.append(color)
 
-    return brands, models, prices, colors
+    return brands, models, prices
 
 
-def send_telegram_message(brands, models, prices, colors, error_message=None):
+async def send_telegram_message(brands, models, prices, error_message=None):
     bot = Bot(token=TELEGRAM_TOKEN)
     if error_message:
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❗️ خطا در اجرای اسکریپت:\n{error_message}")
+        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❗️ خطا در اجرای اسکریپت:\n{error_message}")
         return
 
     today = JalaliDate.today().strftime("%Y/%m/%d")
-    message = f"✅ بروزرسانی انجام شد!\n📅 تاریخ: {today}\n📱 تعداد مدل‌ها: {len(brands)} عدد\n\n"
+    header = f"✅ بروزرسانی انجام شد!\n📅 تاریخ: {today}\n📱 تعداد مدل‌ها: {len(brands)} عدد\n\n"
     lines = []
-    for i, (brand, model, price, color) in enumerate(zip(brands, models, prices, colors), start=1):
-        line = f"{i}. برند: {brand}\n   مدل: {model}\n   رنگ: {color}\n   قیمت: {int(price):,} تومان\n\n"
+
+    for i, (brand, model, price) in enumerate(zip(brands, models, prices), start=1):
+        line = f"{i}. برند: {brand}\n   مدل: {model}\n   قیمت: {int(price):,} تومان\n\n"
         lines.append(line)
 
-    chunk = message
+    chunk = header
     for line in lines:
         if len(chunk) + len(line) > 4000:
-            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=chunk)
+            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=chunk)
             chunk = line
         else:
             chunk += line
     if chunk:
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=chunk)
+        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=chunk)
 
 
-def main():
+async def main():
     try:
         driver = get_driver()
         driver.get('https://hamrahtel.com/quick-checkout')
@@ -88,16 +88,16 @@ def main():
         scroll_page(driver)
 
         valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel"]
-        brands, models, prices, colors = extract_product_data(driver, valid_brands)
+        brands, models, prices = extract_product_data(driver, valid_brands)
 
         if brands:
-            send_telegram_message(brands, models, prices, colors)
+            await send_telegram_message(brands, models, prices)
 
         driver.quit()
 
     except Exception as e:
-        send_telegram_message([], [], [], [], error_message=str(e))
+        await send_telegram_message([], [], [], error_message=str(e))
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
