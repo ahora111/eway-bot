@@ -187,6 +187,7 @@ def prepare_final_message(category_name, category_lines, update_date):
                 formatted_lines.append(current_product)
                 if product_variants:
                     formatted_lines.extend(product_variants)
+                formatted_lines.append("")  # اضافه کردن یک خط فاصله بین گوشی‌ها
                 product_variants = []
             current_product = line.strip()
             i += 1
