@@ -171,6 +171,8 @@ def remove_extra_blank_lines(lines):
 
 
 
+
+
 # تاریخ شمسی
 date_string = "1404/01/24"
 
@@ -185,7 +187,7 @@ day_of_week = date_object.strftime('%A')  # برای گرفتن روز هفته 
 
 # تاریخ میلادی به شکل صحیح
 date_string = "2025-04-13"
-date_object_gregorian = datetime.datetime.strptime(date_string, "%Y-%m-%d").date()
+date_object_gregorian = datetime.datetime.strptime(date_string, "%Y-%m-%d").date()  # اصلاح خطا با استفاده از datetime
 
 # تبدیل تاریخ میلادی به شمسی
 shamsi_date = JalaliDate(date_object_gregorian).strftime("%A %Y/%m/%d")
@@ -194,7 +196,6 @@ print(shamsi_date)
 # نمایش تاریخ به فرمت "یکشنبه ۱۴۰۴/۰۱/۲۴"
 shamsi_date = f"{day_of_week} {date_object.strftime('%Y/%m/%d')}"
 print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
-
 
 
 
