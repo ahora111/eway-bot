@@ -167,11 +167,6 @@ def remove_extra_blank_lines(lines):
 
 # این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
-    header = (
-        f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
-        f"✅ لیست پخش موبایل اهورا\n\n"
-        f"⬅️ موجودی {category_name} ➡️\n\n"
-    )
 
     formatted_lines = []
     current_product = None
@@ -207,9 +202,6 @@ def prepare_final_message(category_name, category_lines, update_date):
         formatted_lines.append(current_product)
         if product_variants:
             formatted_lines.extend(product_variants)
-
-    footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
-    final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
 
     return final_message
 
