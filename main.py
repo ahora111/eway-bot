@@ -12,7 +12,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from persiantools.jdatetime import JalaliDate
 
 BOT_TOKEN = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
-CHAT_ID = "-1002505490886"
+CHAT_ID = "-1002284274669"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -193,13 +193,6 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
-def sort_by_price(products):
-    """مرتب‌سازی محصولات بر اساس قیمت."""
-    # فرض بر این است که داده‌ها به شکل "قیمت برند" ذخیره شده‌اند
-    # اگر قیمت عددی است، این بخش باید آن را شناسایی کند.
-    products.sort(key=lambda x: process_model(x.split(' ')[0]) if x else float('inf'))
-    return products
-
 def main():
     try:
         driver = get_driver()
@@ -252,32 +245,30 @@ def main():
         tablet_message_id = None  # ذخیره message_id تبلت
         console_message_id = None  # ذخیره message_id کنسول بازی
 
-        driver.quit()
-
         if brands:
-            processed_data = []
-            for i in range(len(brands)):
-                model_str = process_model(models[i])
-                processed_data.append(f"{model_str} {brands[i]}")
+        # بعد از پردازش مدل‌ها، مرتب‌سازی را انجام بده
+        processed_data = []
+        for i in range(len(brands)):
+            model_str = process_model(models[i])
+            processed_data.append(f"{model_str} {brands[i]}")
 
-            # مرتب کردن محصولات بر اساس قیمت
-            processed_data = sort_by_price(processed_data)
+        # مرتب‌سازی داده‌ها به ترتیب از کم به زیاد
+        processed_data.sort(key=lambda x: float(x.split()[0].replace(",", "").replace("٬", "")) if is_number(x.split()[0]) else 0)
 
-            update_date = JalaliDate.today().strftime("%Y-%m-%d")
-            message_lines = []
-            for row in processed_data:
-                decorated = decorate_line(row)
-                message_lines.append(decorated)
+        update_date = JalaliDate.today().strftime("%Y-%m-%d")
+        message_lines = []
+        for row in processed_data:
+            decorated = decorate_line(row)
+            message_lines.append(decorated)
 
-            categories = categorize_messages(message_lines)
+        categories = categorize_messages(message_lines)
 
-            for category, lines in categories.items():
-                if lines:
-                    header, footer = get_header_footer(category, update_date)
-                    message = header + "\n" + "\n".join(lines) + footer
-                    response = send_telegram_message(message, bot_token, chat_id, reply_markup)
-                    msg_id = response.get('message_id')  # استخراج شناسه پیام
-
+        # ارسال پیام‌ها به تلگرام به ترتیب دسته‌بندی‌ها
+        for category, lines in categories.items():
+            if lines:
+                header, footer = get_header_footer(category, update_date)
+                message = header + "\n" + "\n".join(lines) + footer
+                msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
                     if category == "🔵":  # ذخیره message_id سامسونگ
                         samsung_message_id = msg_id
