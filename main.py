@@ -4,6 +4,7 @@ import time
 import requests
 import logging
 import json
+import jdatetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -167,12 +168,17 @@ def remove_extra_blank_lines(lines):
 
 # این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
+        # تبدیل تاریخ میلادی به تاریخ شمسی
+    persian_date = jdatetime.date.fromgregorian(date=update_date)
+    day_of_week = persian_date.strftime('%A')  # نام روز هفته
+    formatted_date = f"{day_of_week} {persian_date.year}/{persian_date.month:02d}/{persian_date.day:02d}"
+
     # گرفتن عنوان دسته از روی ایموجی
     category_title = get_category_name(category_name)
 
     # ساخت هدر پیام
     header = (
-        f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
+        f"📅 {formatted_date} می باشد\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
         f"⬅️ موجودی {category_title} ➡️\n\n"
     )
