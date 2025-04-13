@@ -213,10 +213,14 @@ def prepare_final_message(category_name, category_lines, update_date):
         if product_variants:
             formatted_lines.extend(product_variants)
 
+    # حذف | از سطرهایی که ایموجی دارند
+    formatted_lines = [line for line in formatted_lines if not any(emoji in line for emoji in ["🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮"]) or "|" not in line]
+
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
 
     return final_message
+
 
 
 
