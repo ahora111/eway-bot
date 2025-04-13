@@ -118,6 +118,9 @@ def decorate_line(line):
         return line
 
 
+def sort_lines(lines):
+    return sorted(lines)  # مرتب‌سازی خطوط به ترتیب کم به زیاد
+    
 def categorize_messages(lines):
     categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}  # اضافه کردن 🎮 برای کنسول بازی
     
@@ -139,56 +142,14 @@ def categorize_messages(lines):
         elif line.startswith("🎮"):  # اضافه کردن شرط برای کنسول بازی
             current_category = "🎮"
 
-
         if current_category:
-            categories[current_category].append(f"{line}")
+            categories[current_category].append(line)
+
+    # مرتب‌سازی خطوط در هر دسته‌بندی
+    for category in categories:
+        categories[category] = sort_lines(categories[category])
 
     return categories
-    
-def group_products_by_model_and_color(models, colors, prices):
-    grouped = {}
-    for i in range(len(models)):
-        model = models[i]
-        color = colors[i]
-        price = prices[i]
-        
-        if model not in grouped:
-            grouped[model] = []
-        
-        grouped[model].append((color, price))
-    
-    return grouped
-
-
-# 2. اضافه کردن تابع برای تولید پیام‌های مرتب
-def create_sorted_message(grouped_products):
-    message_lines = []
-    
-    for model, items in grouped_products.items():
-        message_lines.append(f"🔵 {model}")
-        
-        # مرتب‌سازی بر اساس رنگ و قیمت
-        items_sorted = sorted(items, key=lambda x: (x[0], x[1]))  # اول رنگ، بعد قیمت
-        for color, price in items_sorted:
-            message_lines.append(f"{color} {price}")
-    
-    return "\n".join(message_lines)
-
-def sort_category_messages_by_price(messages):
-    def extract_price(message):
-        try:
-            # استخراج عدد قیمت (مثلاً از: "قرمز 25,000,000")
-            parts = message.strip().split(" ")
-            for part in parts:
-                part = part.replace(",", "")
-                if part.isdigit():
-                    return int(part)
-            return float('inf')
-        except:
-            return float('inf')
-
-    return sorted(messages, key=extract_price)
-
 
 def get_header_footer(category, update_date):
     headers = {
@@ -252,10 +213,6 @@ def main():
 
         valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی" ]
         brands, models = extract_product_data(driver, valid_brands)
-
-        print("نمونه مدل:", models[0])
-        print("نوع مدل:", type(models[0]))
-
         
         driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
@@ -295,42 +252,24 @@ def main():
         console_message_id = None  # ذخیره message_id کنسول بازی
 
         if brands:
-            from collections import defaultdict
+            processed_data = []
+            for i in range(len(brands)):
+                model_str = process_model(models[i])
+                processed_data.append(f"{model_str} {brands[i]}")
 
             update_date = JalaliDate.today().strftime("%Y-%m-%d")
-            categorized_data = defaultdict(list)
+            message_lines = []
+            for row in processed_data:
+                decorated = decorate_line(row)
+                message_lines.append(decorated)
 
-            for i in range(len(brands)):
-                model_key = process_model(models[i])
-                categorized_data[(brands[i], model_key)].append(models[i])
+            categories = categorize_messages(message_lines)
 
-            message_lines_by_brand = defaultdict(list)
-
-            for (brand, model_str), items in categorized_data.items():
-                # برای هر مدل، اطلاعات رنگ و قیمت رو کنار هم قرار می‌دیم
-                lines = []
-                lines = []
-                for item in items:
-                    parts = item.strip().split(" ", 1)
-                    if len(parts) == 2:
-                        color, price = parts
-                        lines.append(f"{color} {price}")
-
-                if lines:
-                    decorated_model = decorate_line(model_str + " " + brand)
-                    message_lines_by_brand[brand].append(f"{decorated_model}\n" + "\n".join(lines))
-
-            # دسته‌بندی و مرتب‌سازی بر اساس برند
-            categories = categorize_messages(message_lines_by_brand)
-            sorted_categories = sort_category_messages_by_price(categories)
-
-            # ارسال پیام‌های هر دسته
-            for category, lines in sorted_categories.items():
+            for category, lines in categories.items():
                 if lines:
                     header, footer = get_header_footer(category, update_date)
-                    message = header + "\n\n" + "\n\n".join(lines) + "\n\n" + footer
+                    message = header + "\n" + "\n".join(lines) + footer
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-
 
                     if category == "🔵":  # ذخیره message_id سامسونگ
                         samsung_message_id = msg_id
