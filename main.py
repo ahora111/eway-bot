@@ -167,32 +167,31 @@ def remove_extra_blank_lines(lines):
 
 # این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
-    # ساخت هدر پیام
+    # ساخت هدر
     header = (
         f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
         f"⬅️ موجودی {category_name} ➡️\n\n"
     )
 
-    # متغیرهای کمکی
     formatted_lines = []
     current_product = None
     product_variants = []
 
     for line in category_lines:
         line = line.strip()
+
         if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            # اگر محصول جدید شروع شده
+            # اگر محصول قبلی وجود داشت، اضافه‌اش کن
             if current_product:
-                # اضافه کردن محصول و تنوع‌ها به خروجی
                 formatted_lines.append(current_product)
                 formatted_lines.extend(product_variants)
                 formatted_lines.append("")  # خط خالی بین محصولات
                 product_variants = []
             current_product = line
         else:
-            # پردازش رنگ و قیمت
-            parts = line.split()
+            # تجزیه رنگ و قیمت
+            parts = line.strip().split()
             if len(parts) >= 2:
                 color = parts[0]
                 price = " ".join(parts[1:])
@@ -200,15 +199,16 @@ def prepare_final_message(category_name, category_lines, update_date):
             else:
                 product_variants.append(line)
 
-    # افزودن آخرین محصول
+    # اضافه کردن آخرین محصول
     if current_product:
         formatted_lines.append(current_product)
         formatted_lines.extend(product_variants)
 
-    # ساخت پیام نهایی
-    body = "\n".join(formatted_lines)
+    # ساخت فوتر
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
-    final_message = header + body + footer
+
+    # ادغام نهایی
+    final_message = header + "\n".join(formatted_lines) + footer
     return final_message
 
 
