@@ -167,6 +167,12 @@ def remove_extra_blank_lines(lines):
 
 # این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
+    # ساخت هدر پیام
+    header = (
+        f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
+        f"✅ لیست پخش موبایل اهورا\n\n"
+        f"⬅️ موجودی {get_category_name} ➡️\n\n"
+    )
 
     formatted_lines = []
     current_product = None
@@ -202,9 +208,6 @@ def prepare_final_message(category_name, category_lines, update_date):
     return final_message
 
 
-
-
-
 # این تابع کمکی برای گرفتن اسم دسته‌بندی‌ها
 def get_category_name(emoji):
     mapping = {
@@ -216,8 +219,6 @@ def get_category_name(emoji):
         "🎮": "کنسول‌های بازی"
     }
     return mapping.get(emoji, "محصولات متفرقه")
-
-
 
 def categorize_messages(lines):
     categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}  # اضافه کردن 🎮 برای کنسول بازی
