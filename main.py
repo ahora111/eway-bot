@@ -168,18 +168,17 @@ def remove_extra_blank_lines(lines):
 
 
 
-# تبدیل تاریخ به شیء datetime
+# تاریخ شمسی به صورت رشته
 date_string = "1404/01/24"
-date_object = JalaliDate(date_string).to_gregorian()
 
-# تاریخ میلادی به عنوان ورودی
-gregorian_date = "2025-04-13"  # مثال تاریخ میلادی
+# جدا کردن سال، ماه و روز از تاریخ شمسی
+year, month, day = map(int, date_string.split('/'))
 
-# تبدیل تاریخ میلادی به شیء datetime
-gregorian_date_obj = datetime.strptime(gregorian_date, "%Y-%m-%d").date()
+# تبدیل تاریخ شمسی به میلادی
+date_object = JalaliDate(year, month, day).to_gregorian()
 
-# تبدیل تاریخ میلادی به تاریخ شمسی
-shamsi_date = jdatetime.datetime.fromgregorian(date=gregorian_date_obj).strftime('%A %Y/%m/%d')
+# نمایش تاریخ میلادی
+print(date_object)
 
 print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
 # این تابع برای ساخت پیام نهایی به کار میره
