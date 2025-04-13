@@ -5,6 +5,7 @@ import requests
 import logging
 import json
 import jdatetime
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -166,6 +167,16 @@ def remove_extra_blank_lines(lines):
     return cleaned_lines
 
 
+# تاریخ میلادی به عنوان ورودی
+gregorian_date = "2025-04-13"  # مثال تاریخ میلادی
+
+# تبدیل تاریخ میلادی به شیء datetime
+gregorian_date_obj = datetime.strptime(gregorian_date, "%Y-%m-%d").date()
+
+# تبدیل تاریخ میلادی به تاریخ شمسی
+shamsi_date = jdatetime.datetime.fromgregorian(date=gregorian_date_obj).strftime('%A %Y/%m/%d')
+
+print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
 # این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
         # تبدیل تاریخ میلادی به تاریخ شمسی
