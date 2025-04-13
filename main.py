@@ -171,7 +171,7 @@ def prepare_final_message(category_name, category_lines, update_date):
     header = (
         f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
-        f"⬅️ {category_name} ➡️\n\n"
+        f"⬅️ موجودی {category_name} ➡️\n\n"
     )
 
     # قالب‌دهی خطوط دسته‌بندی‌شده با سبک تازه
@@ -185,7 +185,7 @@ def prepare_final_message(category_name, category_lines, update_date):
             if current_product:
                 formatted_lines.append(current_product)
                 if product_variants:
-                    formatted_lines.append("  |  ".join(product_variants))
+                    formatted_lines.append("\n".join(product_variants))  # برای نمایش رنگ و قیمت‌ها
                 product_variants = []
             current_product = line  # ذخیره محصول جاری
         else:
@@ -200,13 +200,14 @@ def prepare_final_message(category_name, category_lines, update_date):
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
-            formatted_lines.append("  |  ".join(product_variants))
+            formatted_lines.append("\n".join(product_variants))
 
     # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر پیام
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
 
     return final_message
+
 
 # این تابع کمکی برای گرفتن اسم دسته‌بندی‌ها
 def get_category_name(emoji):
