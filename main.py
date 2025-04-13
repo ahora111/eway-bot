@@ -167,10 +167,14 @@ def remove_extra_blank_lines(lines):
 
 # این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
+    # گرفتن عنوان دسته از روی ایموجی
+    category_title = get_category_name(category_name)
+
+    # ساخت هدر پیام
     header = (
         f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
-        f"⬅️ موجودی {category_name} ➡️\n\n"
+        f"⬅️ موجودی {category_title} ➡️\n\n"
     )
 
     formatted_lines = []
