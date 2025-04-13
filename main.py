@@ -224,6 +224,36 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     logging.info("✅ پیام ارسال شد!")
     return last_message_id  # برگشت message_id آخرین پیام
 
+def send_to_telegram(products_by_category):
+    for category, products in products_by_category.items():
+        if not products:
+            continue
+
+        # عنوان دسته و زمان آپدیت
+        now = datetime.now().strftime('%Y-%m-%d %H:%M')
+        if category == 'سامسونگ':
+            header = f"📱 بروزرسانی قیمت گوشی‌های سامسونگ ({now})"
+        elif category == 'شیائومی':
+            header = f"📱 بروزرسانی قیمت گوشی‌های شیائومی ({now})"
+        elif category == 'آیفون':
+            header = f"📱 بروزرسانی قیمت گوشی‌های آیفون ({now})"
+        else:
+            header = f"📱 بروزرسانی قیمت گوشی‌های متفرقه ({now})"
+
+        # ساختن پیام
+        message_lines = [header]
+        for p in products:
+            name = p['name']
+            price = p['price']
+            color = p['color']
+            link = p['link']
+            message_lines.append(f"\n📌 [{name}]({link})\n💸 {price}\n🎨 {color}")
+
+        message_lines.append("\n📞 09123456789")
+        message = '\n'.join(message_lines)
+
+        # ارسال به تلگرام
+        send_telegram_message(message)
 
 def get_last_messages(bot_token, chat_id, limit=5):
     url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
