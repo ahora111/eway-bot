@@ -292,7 +292,17 @@ def main():
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
 
         if not samsung_message_id:
-            logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
+            logging.error("❌ پیام دسته‌بندی سامسونگ ارسال نشد!")
+        if not xiaomi_message_id:
+            logging.error("❌ پیام دسته‌بندی شیائومی ارسال نشد!")
+        if not iphone_message_id:
+            logging.error("❌ پیام دسته‌بندی آیفون ارسال نشد!")
+        if not laptop_message_id:
+            logging.error("❌ پیام دسته‌بندی لپ‌تاپ ارسال نشد!")
+        if not tablet_message_id:
+            logging.error("❌ پیام دسته‌بندی تبلت ارسال نشد!")
+        if not console_message_id:
+            logging.error("❌ پیام دسته‌بندی کنسول بازی ارسال نشد!")
             return
 
         # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
