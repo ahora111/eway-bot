@@ -331,8 +331,9 @@ def main():
 
             for category, lines in categories.items():
                 if lines:
+                    sorted_lines = sort_messages_by_price(lines)
                     header, footer = get_header_footer(category, update_date)
-                    message = header + "\n" + "\n".join(lines) + footer
+                    message = header + "\n" + "\n".join(sorted_lines) + footer
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
                     if category == "🔵":  # ذخیره message_id سامسونگ
