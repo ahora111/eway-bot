@@ -167,7 +167,6 @@ def remove_extra_blank_lines(lines):
 
 # این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
-    # ساخت هدر
     header = (
         f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
@@ -178,39 +177,41 @@ def prepare_final_message(category_name, category_lines, update_date):
     current_product = None
     product_variants = []
 
-    for line in category_lines:
-        line = line.strip()
+    i = 0
+    while i < len(category_lines):
+        line = category_lines[i]
 
         if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
             # اگر محصول قبلی وجود داشت، اضافه‌اش کن
             if current_product:
                 formatted_lines.append(current_product)
-                formatted_lines.extend(product_variants)
-                formatted_lines.append("")  # خط خالی بین محصولات
+                if product_variants:
+                    formatted_lines.extend(product_variants)
                 product_variants = []
-            current_product = line
+            current_product = line.strip()
+            i += 1
         else:
-            # تجزیه رنگ و قیمت
-            parts = line.strip().split()
-            if len(parts) >= 2:
-                color = parts[0]
-                price = " ".join(parts[1:])
+            # ترکیب رنگ و قیمت با فرض اینکه پشت سر هم هستند
+            if i + 1 < len(category_lines):
+                color = line.strip()
+                price = category_lines[i + 1].strip()
                 product_variants.append(f"{color} | {price}")
+                i += 2
             else:
-                product_variants.append(line)
+                # خط ناقص، فقط رنگ یا قیمت موجوده
+                product_variants.append(line.strip())
+                i += 1
 
-    # اضافه کردن آخرین محصول
+    # افزودن آخرین محصول
     if current_product:
         formatted_lines.append(current_product)
-        formatted_lines.extend(product_variants)
+        if product_variants:
+            formatted_lines.extend(product_variants)
 
-    # ساخت فوتر
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
+    final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
 
-    # ادغام نهایی
-    final_message = header + "\n".join(formatted_lines) + footer
     return final_message
-
 
 
 
