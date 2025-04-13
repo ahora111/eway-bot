@@ -173,7 +173,7 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"⬅️ {category_name} ➡️\n\n"
     )
 
-    # قالب‌دهی خطوط هر دسته‌بندی برای نمایش دقیق در تلگرام
+    # قالب‌دهی خطوط دسته‌بندی‌شده
     formatted_lines = []
     current_product = None
     product_variants = []
@@ -184,27 +184,29 @@ def prepare_final_message(category_name, category_lines, update_date):
             if current_product:
                 formatted_lines.append(current_product)
                 if product_variants:
+                    # پیوستن تنوع‌های محصول به‌صورت رنگ | قیمت
                     formatted_lines.append("\n".join(product_variants))
                 product_variants = []
             current_product = line  # عنوان محصول جاری
         else:
-            # اضافه کردن رنگ و قیمت به شکل "رنگ | قیمت"
-            product_variants.append(line.strip())
+            # اضافه کردن رنگ و قیمت در قالب "رنگ | قیمت"
+            parts = line.split()
+            if len(parts) == 2:  # بررسی اینکه خط شامل دو بخش (رنگ و قیمت) باشد
+                product_variants.append(f"{parts[0]} | {parts[1]}")
+            else:
+                product_variants.append(line.strip())
 
-    # افزودن آخرین محصول به لیست قالب‌بندی‌شده
+    # افزودن آخرین محصول و تنوع‌های آن به پیام
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
             formatted_lines.append("\n".join(product_variants))
 
     # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر
-    footer = "\n\n☎️ شماره های تماس:\n📞 09371111558\n📞 02833991417"
-    final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
+    footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
+    final_message = f"{header}{'\n\n'.join(formatted_lines)}{footer}"
 
     return final_message
-
-
-
 
 def categorize_messages(lines):
     categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}  # اضافه کردن 🎮 برای کنسول بازی
