@@ -173,7 +173,7 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"⬅️ {category_name} ➡️\n\n"
     )
 
-    # قالب‌دهی خطوط دسته‌بندی‌شده
+    # قالب‌دهی خطوط دسته‌بندی‌شده با سبک تازه
     formatted_lines = []
     current_product = None
     product_variants = []
@@ -184,13 +184,13 @@ def prepare_final_message(category_name, category_lines, update_date):
             if current_product:
                 formatted_lines.append(current_product)
                 if product_variants:
-                    formatted_lines.append("  ".join(product_variants))  # اتصال متغیرها با فاصله
+                    formatted_lines.append("  |  ".join(product_variants))
                 product_variants = []
-            current_product = line  # خط عنوان محصول
+            current_product = line  # ذخیره محصول جاری
         else:
-            # پردازش رنگ و قیمت در قالب "رنگ | قیمت"
+            # ساختار رنگ و قیمت با جداکننده " | "
             parts = line.split()
-            if len(parts) >= 2:  # اگر حداقل دو بخش وجود دارد
+            if len(parts) >= 2:  # بررسی خطوط با حداقل دو بخش
                 product_variants.append(f"{parts[0]} | {' '.join(parts[1:])}")
             else:
                 product_variants.append(line.strip())
@@ -199,13 +199,14 @@ def prepare_final_message(category_name, category_lines, update_date):
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
-            formatted_lines.append("  ".join(product_variants))
+            formatted_lines.append("  |  ".join(product_variants))
 
-    # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر
+    # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر پیام
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
 
     return final_message
+
 
 
 
