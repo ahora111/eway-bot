@@ -174,48 +174,43 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"⬅️ موجودی {category_name} ➡️\n\n"
     )
 
-    # قالب‌دهی خطوط دسته‌بندی‌شده با سبک دقیق
+    # متغیرهای کمکی
     formatted_lines = []
     current_product = None
     product_variants = []
 
     for line in category_lines:
+        line = line.strip()
         if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            # شروع یک محصول جدید
+            # اگر محصول جدید شروع شده
             if current_product:
+                # اضافه کردن محصول و تنوع‌ها به خروجی
                 formatted_lines.append(current_product)
-                if product_variants:
-                    formatted_lines.extend(product_variants)
+                formatted_lines.extend(product_variants)
+                formatted_lines.append("")  # خط خالی بین محصولات
                 product_variants = []
-            current_product = line.strip()  # عنوان محصول
+            current_product = line
         else:
-            parts = line.strip().split()
+            # پردازش رنگ و قیمت
+            parts = line.split()
             if len(parts) >= 2:
                 color = parts[0]
                 price = " ".join(parts[1:])
                 product_variants.append(f"{color} | {price}")
             else:
-                product_variants.append(line.strip())
+                product_variants.append(line)
 
     # افزودن آخرین محصول
     if current_product:
         formatted_lines.append(current_product)
-        if product_variants:
-            formatted_lines.extend(product_variants)
+        formatted_lines.extend(product_variants)
 
-    # ادغام هدر، بدنه و فوتر
+    # ساخت پیام نهایی
+    body = "\n".join(formatted_lines)
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
-    body = "\n\n".join(
-        formatted_lines[i] + "\n" + "\n".join(
-            formatted_lines[i + 1: j]
-        ) for i, j in zip(
-            [i for i, l in enumerate(formatted_lines) if l.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮"))],
-            [*([i for i, l in enumerate(formatted_lines) if l.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮"))][1:]), len(formatted_lines)]
-        )
-    )
-
     final_message = header + body + footer
     return final_message
+
 
 
 
