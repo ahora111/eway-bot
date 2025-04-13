@@ -193,6 +193,13 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
+def sort_by_price(products):
+    """مرتب‌سازی محصولات بر اساس قیمت."""
+    # فرض بر این است که داده‌ها به شکل "قیمت برند" ذخیره شده‌اند
+    # اگر قیمت عددی است، این بخش باید آن را شناسایی کند.
+    products.sort(key=lambda x: process_model(x.split(' ')[0]) if x else float('inf'))
+    return products
+
 def main():
     try:
         driver = get_driver()
@@ -245,11 +252,16 @@ def main():
         tablet_message_id = None  # ذخیره message_id تبلت
         console_message_id = None  # ذخیره message_id کنسول بازی
 
+        driver.quit()
+
         if brands:
             processed_data = []
             for i in range(len(brands)):
                 model_str = process_model(models[i])
                 processed_data.append(f"{model_str} {brands[i]}")
+
+            # مرتب کردن محصولات بر اساس قیمت
+            processed_data = sort_by_price(processed_data)
 
             update_date = JalaliDate.today().strftime("%Y-%m-%d")
             message_lines = []
@@ -263,7 +275,7 @@ def main():
                 if lines:
                     header, footer = get_header_footer(category, update_date)
                     message = header + "\n" + "\n".join(lines) + footer
-                    msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+                    send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
                     if category == "🔵":  # ذخیره message_id سامسونگ
                         samsung_message_id = msg_id
