@@ -192,7 +192,7 @@ def get_last_messages(bot_token, chat_id, limit=5):
         messages = response.json().get("result", [])
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
-
+    
 def main():
     try:
         driver = get_driver()
@@ -205,7 +205,7 @@ def main():
         logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
         scroll_page(driver)
 
-        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی" ]
+        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
         brands, models = extract_product_data(driver, valid_brands)
         
         driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
@@ -246,29 +246,29 @@ def main():
         console_message_id = None  # ذخیره message_id کنسول بازی
 
         if brands:
-        # بعد از پردازش مدل‌ها، مرتب‌سازی را انجام بده
-        processed_data = []
-        for i in range(len(brands)):
-            model_str = process_model(models[i])
-            processed_data.append(f"{model_str} {brands[i]}")
+            # بعد از پردازش مدل‌ها، مرتب‌سازی را انجام بده
+            processed_data = []
+            for i in range(len(brands)):
+                model_str = process_model(models[i])
+                processed_data.append(f"{model_str} {brands[i]}")
 
-        # مرتب‌سازی داده‌ها به ترتیب از کم به زیاد
-        processed_data.sort(key=lambda x: float(x.split()[0].replace(",", "").replace("٬", "")) if is_number(x.split()[0]) else 0)
+            # مرتب‌سازی داده‌ها به ترتیب از کم به زیاد
+            processed_data.sort(key=lambda x: float(x.split()[0].replace(",", "").replace("٬", "")) if is_number(x.split()[0]) else 0)
 
-        update_date = JalaliDate.today().strftime("%Y-%m-%d")
-        message_lines = []
-        for row in processed_data:
-            decorated = decorate_line(row)
-            message_lines.append(decorated)
+            update_date = JalaliDate.today().strftime("%Y-%m-%d")
+            message_lines = []
+            for row in processed_data:
+                decorated = decorate_line(row)
+                message_lines.append(decorated)
 
-        categories = categorize_messages(message_lines)
+            categories = categorize_messages(message_lines)
 
-        # ارسال پیام‌ها به تلگرام به ترتیب دسته‌بندی‌ها
-        for category, lines in categories.items():
-            if lines:
-                header, footer = get_header_footer(category, update_date)
-                message = header + "\n" + "\n".join(lines) + footer
-                msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+            # ارسال پیام‌ها به تلگرام به ترتیب دسته‌بندی‌ها
+            for category, lines in categories.items():
+                if lines:
+                    header, footer = get_header_footer(category, update_date)
+                    message = header + "\n" + "\n".join(lines) + footer
+                    msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
                     if category == "🔵":  # ذخیره message_id سامسونگ
                         samsung_message_id = msg_id
@@ -282,7 +282,7 @@ def main():
                         tablet_message_id = msg_id
                     elif category == "🎮":  # ذخیره message_id کنسول بازی
                         console_message_id = msg_id
-                        
+
         else:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
 
