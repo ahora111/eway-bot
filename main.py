@@ -118,29 +118,29 @@ def decorate_line(line):
         return line
 
 
-def categorize_messages(lines):
-    categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}  # اضافه کردن 🎮 برای کنسول بازی
+    def categorize_messages(lines):
+        categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}  # اضافه کردن 🎮 برای کنسول بازی
     
-    current_category = None
+        current_category = None
 
-    for line in lines:
-        if line.startswith("🔵"):
-            current_category = "🔵"
-        elif line.startswith("🟡"):
-            current_category = "🟡"
-        elif line.startswith("🍏"):
-            current_category = "🍏"
-        elif line.startswith("🟣"):
-            current_category = "🟣"
-        elif line.startswith("💻"):
-            current_category = "💻"
-        elif line.startswith("🟠"):  # اضافه کردن شرط برای تبلت
-            current_category = "🟠"
-        elif line.startswith("🎮"):  # اضافه کردن شرط برای کنسول بازی
-            current_category = "🎮"
-        if current_category:
-            categories[current_category].append(f"{line}")
-    return categories
+        for line in lines:
+            if line.startswith("🔵"):
+                current_category = "🔵"
+            elif line.startswith("🟡"):
+                    current_category = "🟡"
+            elif line.startswith("🍏"):
+                current_category = "🍏"
+            elif line.startswith("🟣"):
+                current_category = "🟣"
+            elif line.startswith("💻"):
+                current_category = "💻"
+            elif line.startswith("🟠"):  # اضافه کردن شرط برای تبلت
+                current_category = "🟠"
+            elif line.startswith("🎮"):  # اضافه کردن شرط برای کنسول بازی
+                current_category = "🎮"
+            if current_category:
+                    categories[current_category].append(f"{line}")
+        return categories
 
     def sort_messages_by_price(lines):
         def extract_price(line):
