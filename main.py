@@ -181,13 +181,23 @@ date_object = JalaliDate(year, month, day)
 # به دست آوردن روز هفته
 day_of_week = calendar.day_name[date_object.weekday()]
 
+# تاریخ میلادی به شکل صحیح
+date_string = "2025-04-13"
+date_object = datetime.datetime.strptime(date_string, "%Y-%m-%d").date()
+
+# تبدیل تاریخ میلادی به شمسی
+shamsi_date = JalaliDate(date_object).strftime("%A %Y/%m/%d")
+print(shamsi_date)
+
 # نمایش تاریخ به فرمت "یکشنبه ۱۴۰۴/۰۱/۲۴"
 shamsi_date = f"{day_of_week} {date_object.strftime('%Y/%m/%d')}"
 print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
 
 
 
-print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
+
+
+
 # این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
         # تبدیل تاریخ میلادی به تاریخ شمسی
