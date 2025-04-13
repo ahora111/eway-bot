@@ -164,7 +164,16 @@ def remove_extra_blank_lines(lines):
 
     return cleaned_lines
 
-def format_category_messages(category_lines):
+
+def prepare_final_message(category_name, category_lines, update_date):
+    # ساخت هدر پیام
+    header = (
+        f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
+        f"✅ لیست پخش موبایل اهورا\n\n"
+        f"⬅️ {category_name} ➡️\n\n"
+    )
+
+    # پردازش خطوط برای قالب‌دهی به فرم دلخواه
     formatted_lines = []
     current_product = None
     product_variants = []
@@ -173,26 +182,29 @@ def format_category_messages(category_lines):
         if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
             # اگر محصول جدید شروع شده
             if current_product:
-                # افزودن متغیرهای قبلی به لیست
                 formatted_lines.append(current_product)
-                for variant in product_variants:
-                    formatted_lines.append(variant)
+                if product_variants:
+                    formatted_lines.append("\n".join(product_variants))
                 product_variants = []
-            
-            # خط جدید برای محصول اضافه شود
-            current_product = line
+            current_product = line  # خط عنوان محصول
         else:
-            # اضافه کردن رنگ و قیمت به محصول جاری
+            # اضافه کردن رنگ و قیمت به لیست متغیرهای محصول جاری
             product_variants.append(line.replace("\n", " | ").strip())
 
-    # افزودن آخرین محصول و متغیرهای آن
+    # افزودن آخرین محصول به پیام
     if current_product:
         formatted_lines.append(current_product)
-        for variant in product_variants:
-            formatted_lines.append(variant)
+        if product_variants:
+            formatted_lines.append("\n".join(product_variants))
 
-    return formatted_lines
-    
+    # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر
+    footer = "\n\n☎️ شماره های تماس:\n📞 09371111558\n📞 02833991417"
+    final_message = f"{header}{'\n\n'.join(formatted_lines)}{footer}"
+
+    return final_message
+
+
+
 def categorize_messages(lines):
     categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}  # اضافه کردن 🎮 برای کنسول بازی
     
@@ -224,17 +236,6 @@ def categorize_messages(lines):
 
     return categories
 
-def prepare_final_message(category, lines, update_date):
-    # ساخت هدر و فوتر پیام
-    header = f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n✅ لیست پخش موبایل اهورا\n\n⬅️ {category} ➡️\n\n"
-    footer = "\n\n☎️ شماره های تماس:\n📞 09371111558\n📞 02833991417"
-
-    # قالب‌بندی خطوط دسته‌بندی‌شده
-    formatted_lines = format_category_messages(lines)
-
-    # ترکیب هدر، خطوط قالب‌بندی‌شده و فوتر
-    final_message = header + "\n".join(formatted_lines) + footer
-    return final_message
     
 def get_header_footer(category, update_date):
     headers = {
