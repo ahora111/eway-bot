@@ -237,6 +237,10 @@ def main():
 
         valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی" ]
         brands, models = extract_product_data(driver, valid_brands)
+
+        print("نمونه مدل:", models[0])
+        print("نوع مدل:", type(models[0]))
+
         
         driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
