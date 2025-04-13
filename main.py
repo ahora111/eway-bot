@@ -294,11 +294,13 @@ def main():
             for (brand, model_str), items in categorized_data.items():
                 # برای هر مدل، اطلاعات رنگ و قیمت رو کنار هم قرار می‌دیم
                 lines = []
+                lines = []
                 for item in items:
-                    color = item.get('color', '').strip()
-                    price = item.get('price', '').strip()
-                    if color and price:
+                    parts = item.strip().split(" ", 1)
+                    if len(parts) == 2:
+                        color, price = parts
                         lines.append(f"{color} {price}")
+
                 if lines:
                     decorated_model = decorate_line(model_str + " " + brand)
                     message_lines_by_brand[brand].append(f"{decorated_model}\n" + "\n".join(lines))
