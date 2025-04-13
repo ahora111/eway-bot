@@ -117,9 +117,19 @@ def decorate_line(line):
     else:
         return line
 
+def sort_lines_together(lines):
+    def extract_price(line):
+        # این تابع قیمت را از خط استخراج می‌کند
+        # فرض: قیمت در انتهای خط وجود دارد و قابل تبدیل به عدد است
+        parts = line.split()
+        for part in parts:
+            if part.replace('.', '').isdigit():
+                return float(part)
+        return float('inf')  # اگر قیمت موجود نبود، مقدار بزرگ قرار می‌دهیم برای مرتب‌سازی
 
-def sort_lines(lines):
-    return sorted(lines)  # مرتب‌سازی خطوط به ترتیب کم به زیاد
+    # مرتب‌سازی خطوط بر اساس قیمت
+    sorted_lines = sorted(lines, key=lambda x: extract_price(x))
+    return sorted_lines
     
 def categorize_messages(lines):
     categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}  # اضافه کردن 🎮 برای کنسول بازی
@@ -147,7 +157,7 @@ def categorize_messages(lines):
 
     # مرتب‌سازی خطوط در هر دسته‌بندی
     for category in categories:
-        categories[category] = sort_lines(categories[category])
+        categories[category] = sort_lines_together(categories[category])
 
     return categories
 
