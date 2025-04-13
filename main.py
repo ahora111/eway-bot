@@ -174,7 +174,7 @@ def create_sorted_message(grouped_products):
     
     return "\n".join(message_lines)
 
-    def sort_category_messages_by_price(messages):
+def sort_category_messages_by_price(messages):
     def extract_price(message):
         try:
             # استخراج عدد قیمت (مثلاً از: "قرمز 25,000,000")
@@ -188,6 +188,7 @@ def create_sorted_message(grouped_products):
             return float('inf')
 
     return sorted(messages, key=extract_price)
+
 
 def get_header_footer(category, update_date):
     headers = {
