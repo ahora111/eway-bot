@@ -173,7 +173,7 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"⬅️ {category_name} ➡️\n\n"
     )
 
-    # پردازش خطوط برای قالب‌دهی به فرم دلخواه
+    # قالب‌دهی خطوط هر دسته‌بندی برای نمایش دقیق در تلگرام
     formatted_lines = []
     current_product = None
     product_variants = []
@@ -186,12 +186,12 @@ def prepare_final_message(category_name, category_lines, update_date):
                 if product_variants:
                     formatted_lines.append("\n".join(product_variants))
                 product_variants = []
-            current_product = line  # خط عنوان محصول
+            current_product = line  # عنوان محصول جاری
         else:
-            # اضافه کردن رنگ و قیمت به لیست متغیرهای محصول جاری
-            product_variants.append(line.replace("\n", " | ").strip())
+            # اضافه کردن رنگ و قیمت به شکل "رنگ | قیمت"
+            product_variants.append(line.strip())
 
-    # افزودن آخرین محصول به پیام
+    # افزودن آخرین محصول به لیست قالب‌بندی‌شده
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
@@ -202,6 +202,7 @@ def prepare_final_message(category_name, category_lines, update_date):
     final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
 
     return final_message
+
 
 # این تابع کمکی برای گرفتن اسم دسته‌بندی‌ها
 def get_category_name(emoji):
