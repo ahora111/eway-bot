@@ -167,6 +167,11 @@ def remove_extra_blank_lines(lines):
     return cleaned_lines
 
 
+
+# تبدیل تاریخ به شیء datetime
+date_string = "1404/01/24"
+date_object = JalaliDate(date_string).to_gregorian()
+
 # تاریخ میلادی به عنوان ورودی
 gregorian_date = "2025-04-13"  # مثال تاریخ میلادی
 
