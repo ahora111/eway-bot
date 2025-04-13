@@ -146,9 +146,9 @@ def categorize_messages(lines):
     return categories
     
     def format_category_message(lines):
-    formatted_message = ""
-    current_model = None
-    current_colors = []
+        formatted_message = ""
+        current_model = None
+        current_colors = []
 
     for line in lines:
         parts = line.split("\n")  # خطوط را جدا می‌کند
