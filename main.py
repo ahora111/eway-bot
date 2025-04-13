@@ -8,6 +8,7 @@ import jdatetime
 import datetime
 import calendar  # اضافه کردن calendar
 from datetime import datetime
+import locale
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -170,36 +171,19 @@ def remove_extra_blank_lines(lines):
 
 
 
+locale.setlocale(locale.LC_ALL, 'fa_IR')
 
-# تاریخ شمسی
-date_string = "1404/01/24"
+# تاریخ مورد نظر
+date_str = "1404/01/24"
+date_object = datetime.strptime(date_str, "%Y/%m/%d")
 
-# جدا کردن سال، ماه و روز از تاریخ شمسی
-year, month, day = map(int, date_string.split('/'))
-
-# تبدیل تاریخ شمسی به شیء تاریخ شمسی
-date_object = JalaliDate(year, month, day)
-
-# به دست آوردن روز هفته از تاریخ شمسی
-day_of_week = date_object.strftime('%A')  # برای گرفتن روز هفته شمسی استفاده می‌کنیم
-
-# تاریخ میلادی به شکل صحیح
-date_string = "2025-04-13"
-date_object_gregorian = datetime.date.fromisoformat(date_string)  # استفاده از fromisoformat به جای strptime
-
-# تبدیل تاریخ میلادی به شمسی
-shamsi_date = JalaliDate(date_object_gregorian).strftime("%A %Y/%m/%d")
-print(shamsi_date)
-
-# نمایش تاریخ به فرمت "یکشنبه ۱۴۰۴/۰۱/۲۴"
-shamsi_date = f"{day_of_week} {date_object.strftime('%Y/%m/%d')}"
-print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
-
-
+# تبدیل تاریخ به فرمت دلخواه
+formatted_date = date_object.strftime("%A، %d %B %Y")
+print(formatted_date)
 
 # این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
-        # تبدیل تاریخ میلادی به تاریخ شمسی
+    # تبدیل تاریخ میلادی به تاریخ شمسی
     persian_date = jdatetime.date.fromgregorian(date=update_date)
     day_of_week = persian_date.strftime('%A')  # نام روز هفته
     formatted_date = f"{day_of_week} {persian_date.year}/{persian_date.month:02d}/{persian_date.day:02d}"
