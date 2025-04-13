@@ -117,20 +117,21 @@ def decorate_line(line):
     else:
         return line
 
-def sort_lines_together(lines):
-    def extract_price(line):
-        # فرض می‌کنیم قیمت در انتهای خط وجود دارد
-        parts = line.split()
-        for part in parts:
-            if part.replace('.', '').isdigit():
-                return float(part)
-        return float('inf')  # مقدار پیش‌فرض برای خطوط بدون قیمت
+def sort_lines_together_by_price(lines):
+    def extract_price(group):
+        # این تابع قیمت را از آخرین خط هر گروه استخراج می‌کند
+        for line in reversed(group):
+            parts = line.split()
+            for part in parts:
+                if part.replace('.', '').isdigit():
+                    return float(part)
+        return float('inf')  # مقدار پیش‌فرض برای گروه‌های بدون قیمت
 
-    # تبدیل هر خط به یک واحد با حفظ ترتیب
+    # تبدیل خطوط به گروه‌ها (حفظ ارتباط میان اطلاعات هر محصول)
     grouped_lines = []
     current_group = []
     for line in lines:
-        if line.startswith("🎮") or line.startswith("🔵") or line.startswith("🟡") or line.startswith("🍏") or line.startswith("🟣") or line.startswith("💻") or line.startswith("🟠"):
+        if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
             if current_group:
                 grouped_lines.append(current_group)
             current_group = [line]
@@ -139,10 +140,10 @@ def sort_lines_together(lines):
     if current_group:
         grouped_lines.append(current_group)
 
-    # مرتب‌سازی بر اساس قیمت (فرض می‌شود قیمت در آخرین بخش هر گروه قرار دارد)
-    grouped_lines.sort(key=lambda group: extract_price(group[-1]))
+    # مرتب‌سازی گروه‌ها براساس قیمت
+    grouped_lines.sort(key=extract_price)
 
-    # ادغام گروه‌ها به یک لیست خطوط
+    # تبدیل گروه‌های مرتب‌شده به لیستی از خطوط
     sorted_lines = [line for group in grouped_lines for line in group]
     return sorted_lines
     
@@ -166,13 +167,13 @@ def categorize_messages(lines):
             current_category = "🟠"
         elif line.startswith("🎮"):  # اضافه کردن شرط برای کنسول بازی
             current_category = "🎮"
-
+            
         if current_category:
             categories[current_category].append(line)
 
-    # مرتب‌سازی خطوط در هر دسته‌بندی به‌صورت واحدهای متصل
+    # مرتب‌سازی خطوط در هر دسته‌بندی براساس قیمت
     for category in categories:
-        categories[category] = sort_lines_together(categories[category])
+        categories[category] = sort_lines_together_by_price(categories[category])
 
     return categories
 
