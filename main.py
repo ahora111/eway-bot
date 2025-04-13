@@ -119,16 +119,8 @@ def decorate_line(line):
 
 
 def categorize_messages(lines):
-    categories = {
-        "🔵": [],  # سامسونگ
-        "🟡": [],  # شیائومی
-        "🍏": [],  # آیفون
-        "🟣": [],  # متفرقه
-        "💻": [],  # لپ‌تاپ
-        "🟠": [],  # تبلت
-        "🎮": []   # کنسول بازی
-    }
-
+    categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}  # اضافه کردن 🎮 برای کنسول بازی
+    
     current_category = None
 
     for line in lines:
@@ -142,55 +134,32 @@ def categorize_messages(lines):
             current_category = "🟣"
         elif line.startswith("💻"):
             current_category = "💻"
-        elif line.startswith("🟠"):
+        elif line.startswith("🟠"):  # اضافه کردن شرط برای تبلت
             current_category = "🟠"
-        elif line.startswith("🎮"):
+        elif line.startswith("🎮"):  # اضافه کردن شرط برای کنسول بازی
             current_category = "🎮"
-        
+
+
         if current_category:
-            categories[current_category].append(line)
-    
+            categories[current_category].append(f"{line}")
+
     return categories
+# 1. اضافه کردن توابع مرتب‌سازی و استخراج قیمت
+def extract_price_from_message(message):
+    import re
+    match = re.search(r"(\d{1,3}(?:,\d{3})*)", message)
+    if match:
+        return int(match.group(1).replace(",", ""))
+    return 0
 
-
-def sort_messages_by_price(lines):
-    def extract_price(line):
-        try:
-            parts = line.split("\n")
-            price = int(parts[-1].replace(",", "").strip())
-            return price
-        except:
-            return float('inf')  # اگر قیمتی نبود، بفرست آخر
-    return sorted(lines, key=extract_price)
-
-
-def format_category_message(lines):
-    formatted_message = ""
-    current_model = None
-    current_colors = []
-
-    for line in lines:
-        parts = line.split("\n")
-        model = " ".join(parts[0].split()[:-2])  # مدل از خط اول
-        color = parts[1] if len(parts) > 1 else None
-        price = parts[2] if len(parts) > 2 else None
-
-        if model != current_model:
-            if current_model:
-                formatted_message += "\n".join(current_colors) + "\n\n"
-            current_model = model
-            formatted_message += f"🔵 {model}\n"
-            current_colors = []
-
-        if color and price:
-            current_colors.append(f"{color}\n{price}")
-
-    if current_colors:
-        formatted_message += "\n".join(current_colors) + "\n\n"
-
-    return formatted_message
-
-
+def sort_category_messages_by_price(categories):
+    sorted_categories = {}
+    for category, lines in categories.items():
+        # مرتب‌سازی پیام‌های هر دسته‌بندی بر اساس قیمت
+        sorted_lines = sorted(lines, key=extract_price_from_message)
+        sorted_categories[category] = sorted_lines
+    return sorted_categories
+    
 def get_header_footer(category, update_date):
     headers = {
         "🔵": f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n✅ لیست پخش موبایل اهورا\n⬅️ موجودی سامسونگ ➡️\n",
@@ -230,36 +199,6 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     logging.info("✅ پیام ارسال شد!")
     return last_message_id  # برگشت message_id آخرین پیام
 
-def send_to_telegram(products_by_category):
-    for category, products in products_by_category.items():
-        if not products:
-            continue
-
-        # عنوان دسته و زمان آپدیت
-        now = datetime.now().strftime('%Y-%m-%d %H:%M')
-        if category == 'سامسونگ':
-            header = f"📱 بروزرسانی قیمت گوشی‌های سامسونگ ({now})"
-        elif category == 'شیائومی':
-            header = f"📱 بروزرسانی قیمت گوشی‌های شیائومی ({now})"
-        elif category == 'آیفون':
-            header = f"📱 بروزرسانی قیمت گوشی‌های آیفون ({now})"
-        else:
-            header = f"📱 بروزرسانی قیمت گوشی‌های متفرقه ({now})"
-
-        # ساختن پیام
-        message_lines = [header]
-        for p in products:
-            name = p['name']
-            price = p['price']
-            color = p['color']
-            link = p['link']
-            message_lines.append(f"\n📌 [{name}]({link})\n💸 {price}\n🎨 {color}")
-
-        message_lines.append("\n📞 09123456789")
-        message = '\n'.join(message_lines)
-
-        # ارسال به تلگرام
-        send_telegram_message(message)
 
 def get_last_messages(bot_token, chat_id, limit=5):
     url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
@@ -333,13 +272,15 @@ def main():
                 decorated = decorate_line(row)
                 message_lines.append(decorated)
 
+            # در قسمت ارسال پیام‌ها، قبل از ارسال پیام‌ها، باید این تابع رو فراخوانی کنیم.
             categories = categorize_messages(message_lines)
+            sorted_categories = sort_category_messages_by_price(categories)
 
-            for category, lines in categories.items():
+            # حالا می‌تونیم پیام‌ها رو از دسته‌بندی‌های مرتب‌شده ارسال کنیم
+            for category, lines in sorted_categories.items():
                 if lines:
-                    sorted_lines = sort_messages_by_price(lines)
                     header, footer = get_header_footer(category, update_date)
-                    message = header + "\n" + "\n".join(sorted_lines) + footer
+                    message = header + "\n" + "\n".join(lines) + footer
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
                     if category == "🔵":  # ذخیره message_id سامسونگ
