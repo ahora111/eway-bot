@@ -145,7 +145,6 @@ def categorize_messages(lines):
 
     return categories
     
-# 1. ایجاد یک تابع برای مرتب کردن محصولات مشابه در یک دسته
 def group_products_by_model_and_color(models, colors, prices):
     grouped = {}
     for i in range(len(models)):
@@ -159,6 +158,7 @@ def group_products_by_model_and_color(models, colors, prices):
         grouped[model].append((color, price))
     
     return grouped
+
 
 # 2. اضافه کردن تابع برای تولید پیام‌های مرتب
 def create_sorted_message(grouped_products):
