@@ -173,7 +173,7 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"⬅️ {category_name} ➡️\n\n"
     )
 
-    # قالب‌دهی خطوط دسته‌بندی‌شده
+    # قالب‌دهی خطوط دسته‌بندی‌شده برای نمایش دلخواه
     formatted_lines = []
     current_product = None
     product_variants = []
@@ -184,28 +184,32 @@ def prepare_final_message(category_name, category_lines, update_date):
             if current_product:
                 formatted_lines.append(current_product)
                 if product_variants:
-                    formatted_lines.append("  \n".join(product_variants))  # استفاده از "  \n" برای چسباندن خطوط
+                    # پیوستن متغیرها به صورت "رنگ | قیمت"
+                    variant_string = "  ".join(product_variants)
+                    formatted_lines.append(variant_string)
                 product_variants = []
-            current_product = line  # عنوان محصول جاری
+            current_product = line  # خط عنوان محصول جاری
         else:
-            # اضافه کردن رنگ و قیمت به شکل "رنگ | قیمت"
+            # اضافه کردن رنگ و قیمت با ساختار "رنگ | قیمت"
             parts = line.split()
-            if len(parts) == 2:  # اگر خط شامل رنگ و قیمت باشد
-                product_variants.append(f"{parts[0]} | {parts[1]}")
+            if len(parts) >= 2:
+                product_variants.append(f"{parts[0]} | {' '.join(parts[1:])}")
             else:
                 product_variants.append(line.strip())
 
-    # افزودن آخرین محصول و متغیرهای آن
+    # افزودن آخرین محصول و متغیرهای آن به لیست
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
-            formatted_lines.append("  \n".join(product_variants))
+            variant_string = "  ".join(product_variants)
+            formatted_lines.append(variant_string)
 
     # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
 
     return final_message
+
 
 
 def categorize_messages(lines):
