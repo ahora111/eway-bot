@@ -203,7 +203,7 @@ def prepare_final_message(category_name, category_lines, update_date):
 
     # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر
     footer = "\n\n☎️ شماره های تماس:\n📞 09371111558\n📞 02833991417"
-    final_message = f"{header}{'\n\n'.join(formatted_lines)}{footer}"
+    final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
 
     return final_message
 # این تابع کمکی برای گرفتن اسم دسته‌بندی‌ها
