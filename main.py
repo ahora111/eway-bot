@@ -123,8 +123,10 @@ def sort_lines_together_by_price(lines):
         for line in reversed(group):
             parts = line.split()
             for part in parts:
-                if part.replace('.', '').isdigit():
-                    return float(part)
+                try:
+                    return float(part.replace(',', '').replace('،', ''))  # حذف کاما و تبدیل قیمت به عدد
+                except ValueError:
+                    continue
         return float('inf')  # مقدار پیش‌فرض برای گروه‌های بدون قیمت
 
     # تبدیل خطوط به گروه‌ها (حفظ ارتباط میان اطلاعات هر محصول)
