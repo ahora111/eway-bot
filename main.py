@@ -172,38 +172,35 @@ def prepare_final_message(category_name, category_lines, update_date):
     current_product = None
     product_variants = []
 
-    i = 0
-    while i < len(category_lines):
-        line = category_lines[i]
-
+    for line in category_lines:
         if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            # اگر محصول قبلی وجود داشت، اضافه‌اش کن
+            # اگر محصول جدید شروع شده
             if current_product:
                 formatted_lines.append(current_product)
                 if product_variants:
-                    formatted_lines.extend(product_variants)
+                    formatted_lines.append("\n".join(product_variants))
+                formatted_lines.append("")  # اضافه کردن یک خط فاصله بین گوشی‌ها
                 product_variants = []
             current_product = line.strip()
-            i += 1
         else:
-            # ترکیب رنگ و قیمت با فرض اینکه پشت سر هم هستند
-            if i + 1 < len(category_lines):
-                color = line.strip()
-                price = category_lines[i + 1].strip()
-                product_variants.append(f"{color} | {price}")
-                i += 2
+            parts = line.split()
+            if len(parts) >= 2:
+                product_variants.append(f"{parts[0]} | {' '.join(parts[1:])}")
             else:
-                # خط ناقص، فقط رنگ یا قیمت موجوده
                 product_variants.append(line.strip())
-                i += 1
 
     # افزودن آخرین محصول
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
-            formatted_lines.extend(product_variants)
+            formatted_lines.append("\n".join(product_variants))
+
+    # ادغام هدر، بدنه و فوتر
+    footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
+    final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
 
     return final_message
+
 
 
 
