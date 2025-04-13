@@ -168,19 +168,22 @@ def remove_extra_blank_lines(lines):
 
 
 
-# تاریخ شمسی به صورت رشته
+# تاریخ شمسی
 date_string = "1404/01/24"
 
 # جدا کردن سال، ماه و روز از تاریخ شمسی
 year, month, day = map(int, date_string.split('/'))
 
-# تبدیل تاریخ شمسی به میلادی
+# تبدیل تاریخ شمسی به شیء تاریخ شمسی
 date_object = JalaliDate(year, month, day)
 
-# نمایش تاریخ شمسی
-shamsi_date = date_object.strftime("%A %Y/%m/%d")  # نمایش به فرمت مورد نظر
+# به دست آوردن روز هفته
+day_of_week = calendar.day_name[date_object.weekday()]
 
+# نمایش تاریخ به فرمت "یکشنبه ۱۴۰۴/۰۱/۲۴"
+shamsi_date = f"{day_of_week} {date_object.strftime('%Y/%m/%d')}"
 print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
+
 
 
 print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
