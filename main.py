@@ -245,6 +245,11 @@ def main():
         tablet_message_id = None  # ذخیره message_id تبلت
         console_message_id = None  # ذخیره message_id کنسول بازی
 
+
+        if len(brands) != len(models):
+            logging.error(f"❌ طول برندها و مدل‌ها برابر نیست! brands: {len(brands)}, models: {len(models)}")
+            return
+
         if brands:
             # بعد از پردازش مدل‌ها، مرتب‌سازی را انجام بده
             processed_data = []
