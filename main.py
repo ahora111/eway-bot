@@ -173,37 +173,36 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"⬅️ {category_name} ➡️\n\n"
     )
 
-    # قالب‌دهی خطوط دسته‌بندی‌شده
+    # قالب‌دهی خطوط دسته‌بندی‌شده برای نمایش دلخواه
     formatted_lines = []
     current_product = None
     product_variants = []
 
     for line in category_lines:
         if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            # اگر محصول جدید شروع شده
+            # اضافه کردن محصول جدید
             if current_product:
                 formatted_lines.append(current_product)
                 if product_variants:
-                    # پیوستن تنوع‌های محصول به‌صورت رنگ | قیمت
                     formatted_lines.append("\n".join(product_variants))
                 product_variants = []
             current_product = line  # عنوان محصول جاری
         else:
-            # اضافه کردن رنگ و قیمت در قالب "رنگ | قیمت"
+            # اضافه کردن رنگ و قیمت به فرم "رنگ | قیمت"
             parts = line.split()
-            if len(parts) == 2:  # بررسی اینکه خط شامل دو بخش (رنگ و قیمت) باشد
-                product_variants.append(f"{parts[0]} | {parts[1]}")
+            if len(parts) >= 2:  # اگر خط شامل حداقل دو بخش باشد
+                product_variants.append(f"{parts[0]} | {' '.join(parts[1:])}")
             else:
                 product_variants.append(line.strip())
 
-    # افزودن آخرین محصول و تنوع‌های آن به پیام
+    # افزودن آخرین محصول و متغیرهای آن
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
             formatted_lines.append("\n".join(product_variants))
 
     # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر
-    footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
+    footer = "\n\n☎️ شماره های تماس:\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
 
     return final_message
