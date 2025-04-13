@@ -166,13 +166,7 @@ def remove_extra_blank_lines(lines):
 
 
 def prepare_final_message(category_name, category_lines, update_date):
-    # ساخت هدر پیام
-    header = (
-        f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
-        f"✅ لیست پخش موبایل اهورا\n\n"
-        f"⬅️ {category_name} ➡️\n\n"
-    )
-
+    
     # قالب‌دهی خطوط دسته‌بندی‌شده برای نمایش دلخواه
     formatted_lines = []
     current_product = None
@@ -203,11 +197,6 @@ def prepare_final_message(category_name, category_lines, update_date):
         if product_variants:
             variant_string = "  ".join(product_variants)
             formatted_lines.append(variant_string)
-
-    # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر
-    footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
-    final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
-
     return final_message
 
 
