@@ -173,29 +173,25 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"⬅️ {category_name} ➡️\n\n"
     )
 
-    # قالب‌دهی خطوط دسته‌بندی‌شده برای نمایش دلخواه
+    # پردازش خطوط برای قالب‌دهی به فرم دلخواه
     formatted_lines = []
     current_product = None
     product_variants = []
 
     for line in category_lines:
         if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            # اضافه کردن محصول جدید
+            # اگر محصول جدید شروع شده
             if current_product:
                 formatted_lines.append(current_product)
                 if product_variants:
                     formatted_lines.append("\n".join(product_variants))
                 product_variants = []
-            current_product = line  # عنوان محصول جاری
+            current_product = line  # خط عنوان محصول
         else:
-            # اضافه کردن رنگ و قیمت به فرم "رنگ | قیمت"
-            parts = line.split()
-            if len(parts) >= 2:  # اگر خط شامل حداقل دو بخش باشد
-                product_variants.append(f"{parts[0]} | {' '.join(parts[1:])}")
-            else:
-                product_variants.append(line.strip())
+            # اضافه کردن رنگ و قیمت به لیست متغیرهای محصول جاری
+            product_variants.append(line.replace("\n", " | ").strip())
 
-    # افزودن آخرین محصول و متغیرهای آن
+    # افزودن آخرین محصول به پیام
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
@@ -203,9 +199,10 @@ def prepare_final_message(category_name, category_lines, update_date):
 
     # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر
     footer = "\n\n☎️ شماره های تماس:\n📞 09371111558\n📞 02833991417"
-    final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
+    final_message = f"{header}{'\n\n'.join(formatted_lines)}{footer}"
 
     return final_message
+
 # این تابع کمکی برای گرفتن اسم دسته‌بندی‌ها
 def get_category_name(emoji):
     mapping = {
@@ -217,7 +214,6 @@ def get_category_name(emoji):
         "🎮": "کنسول‌های بازی"
     }
     return mapping.get(emoji, "محصولات متفرقه")
-
 
 
 
