@@ -163,6 +163,35 @@ def remove_extra_blank_lines(lines):
             cleaned_lines.append(line)
 
     return cleaned_lines
+
+def format_category_messages(category_lines):
+    formatted_lines = []
+    current_product = None
+    product_variants = []
+
+    for line in category_lines:
+        if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
+            # اگر محصول جدید شروع شده
+            if current_product:
+                # افزودن متغیرهای قبلی به لیست
+                formatted_lines.append(current_product)
+                for variant in product_variants:
+                    formatted_lines.append(variant)
+                product_variants = []
+            
+            # خط جدید برای محصول اضافه شود
+            current_product = line
+        else:
+            # اضافه کردن رنگ و قیمت به محصول جاری
+            product_variants.append(line.replace("\n", " | ").strip())
+
+    # افزودن آخرین محصول و متغیرهای آن
+    if current_product:
+        formatted_lines.append(current_product)
+        for variant in product_variants:
+            formatted_lines.append(variant)
+
+    return formatted_lines
     
 def categorize_messages(lines):
     categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}  # اضافه کردن 🎮 برای کنسول بازی
