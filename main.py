@@ -167,45 +167,52 @@ def remove_extra_blank_lines(lines):
 
 # این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
-    # ساخت هدر پیام
     header = (
         f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
-        f"⬅️ موجودی {get_category_name} ➡️\n\n"
+        f"⬅️ موجودی {category_name} ➡️\n\n"
     )
 
     formatted_lines = []
     current_product = None
     product_variants = []
 
-    for line in category_lines:
+    i = 0
+    while i < len(category_lines):
+        line = category_lines[i]
+
         if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            # اگر محصول جدید شروع شده
+            # اگر محصول قبلی وجود داشت، اضافه‌اش کن
             if current_product:
                 formatted_lines.append(current_product)
                 if product_variants:
-                    formatted_lines.append("\n".join(product_variants))
-                formatted_lines.append("")  # اضافه کردن یک خط فاصله بین گوشی‌ها
+                    formatted_lines.extend(product_variants)
                 product_variants = []
             current_product = line.strip()
+            i += 1
         else:
-            parts = line.split()
-            if len(parts) >= 2:
-                product_variants.append(f"{parts[0]} | {' '.join(parts[1:])}")
+            # ترکیب رنگ و قیمت با فرض اینکه پشت سر هم هستند
+            if i + 1 < len(category_lines):
+                color = line.strip()
+                price = category_lines[i + 1].strip()
+                product_variants.append(f"{color} | {price}")
+                i += 2
             else:
+                # خط ناقص، فقط رنگ یا قیمت موجوده
                 product_variants.append(line.strip())
+                i += 1
 
     # افزودن آخرین محصول
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
-            formatted_lines.append("\n".join(product_variants))
+            formatted_lines.extend(product_variants)
 
-    # ادغام هدر، بدنه و فوتر
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
 
     return final_message
+
 
 
 # این تابع کمکی برای گرفتن اسم دسته‌بندی‌ها
