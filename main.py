@@ -165,6 +165,7 @@ def remove_extra_blank_lines(lines):
     return cleaned_lines
 
 
+# این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
     # ساخت هدر پیام
     header = (
@@ -173,36 +174,39 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"⬅️ {category_name} ➡️\n\n"
     )
 
-    # قالب‌دهی خطوط هر دسته‌بندی برای نمایش دقیق در تلگرام
+    # قالب‌دهی خطوط دسته‌بندی‌شده با سبک تازه
     formatted_lines = []
     current_product = None
     product_variants = []
 
     for line in category_lines:
         if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            # اگر محصول جدید شروع شده
+            # شروع محصول جدید
             if current_product:
                 formatted_lines.append(current_product)
                 if product_variants:
-                    formatted_lines.append("\n".join(product_variants))
+                    formatted_lines.append("  |  ".join(product_variants))
                 product_variants = []
-            current_product = line  # عنوان محصول جاری
+            current_product = line  # ذخیره محصول جاری
         else:
-            # اضافه کردن رنگ و قیمت به شکل "رنگ | قیمت"
-            product_variants.append(line.strip())
+            # ساختار رنگ و قیمت با جداکننده " | "
+            parts = line.split()
+            if len(parts) >= 2:  # بررسی خطوط با حداقل دو بخش
+                product_variants.append(f"{parts[0]} | {' '.join(parts[1:])}")
+            else:
+                product_variants.append(line.strip())
 
-    # افزودن آخرین محصول به لیست قالب‌بندی‌شده
+    # افزودن آخرین محصول
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
-            formatted_lines.append("\n".join(product_variants))
+            formatted_lines.append("  |  ".join(product_variants))
 
-    # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر
-    footer = "\n\n☎️ شماره های تماس:\n📞 09371111558\n📞 02833991417"
+    # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر پیام
+    footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
 
     return final_message
-
 
 # این تابع کمکی برای گرفتن اسم دسته‌بندی‌ها
 def get_category_name(emoji):
