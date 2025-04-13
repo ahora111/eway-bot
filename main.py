@@ -138,13 +138,23 @@ def categorize_messages(lines):
             current_category = "🟠"
         elif line.startswith("🎮"):  # اضافه کردن شرط برای کنسول بازی
             current_category = "🎮"
-
-
         if current_category:
             categories[current_category].append(f"{line}")
-
     return categories
-    
+
+    def sort_messages_by_price(lines):
+        def extract_price(line):
+            try:
+                # استخراج قیمت از خط
+                parts = line.split("\n")
+                price = int(parts[-1].replace(",", "").strip())  # حذف کاما و تبدیل به عدد
+                return price
+            except:
+                    return float('inf')  # برای خطوط بدون قیمت، عدد بزرگی برگردان
+
+        # مرتب‌سازی بر اساس قیمت
+        return sorted(lines, key=extract_price)
+
     def format_category_message(lines):
         formatted_message = ""
         current_model = None
