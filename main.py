@@ -144,6 +144,36 @@ def categorize_messages(lines):
             categories[current_category].append(f"{line}")
 
     return categories
+    
+    def format_category_message(lines):
+    formatted_message = ""
+    current_model = None
+    current_colors = []
+
+    for line in lines:
+        parts = line.split("\n")  # خطوط را جدا می‌کند
+        model = " ".join(parts[0].split()[:-2])  # مدل را استخراج می‌کند
+        color = parts[1] if len(parts) > 1 else None
+        price = parts[2] if len(parts) > 2 else None
+
+        # اگر مدل تغییر کرده
+        if model != current_model:
+            if current_model:  # اضافه کردن مدل قبلی به متن
+                formatted_message += "\n".join(current_colors) + "\n\n"
+            current_model = model
+            formatted_message += f"🔵 {model}\n"
+            current_colors = []
+
+        # اضافه کردن رنگ و قیمت
+        if color and price:
+            current_colors.append(f"{color}\n{price}")
+
+    # اضافه کردن مدل آخر
+    if current_colors:
+        formatted_message += "\n".join(current_colors) + "\n\n"
+
+    return formatted_message
+
 
 def get_header_footer(category, update_date):
     headers = {
@@ -192,7 +222,7 @@ def get_last_messages(bot_token, chat_id, limit=5):
         messages = response.json().get("result", [])
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
-    
+
 def main():
     try:
         driver = get_driver()
@@ -205,7 +235,7 @@ def main():
         logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
         scroll_page(driver)
 
-        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
+        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی" ]
         brands, models = extract_product_data(driver, valid_brands)
         
         driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
@@ -245,20 +275,11 @@ def main():
         tablet_message_id = None  # ذخیره message_id تبلت
         console_message_id = None  # ذخیره message_id کنسول بازی
 
-
-        if len(brands) != len(models):
-            logging.error(f"❌ طول برندها و مدل‌ها برابر نیست! brands: {len(brands)}, models: {len(models)}")
-            return
-
         if brands:
-            # بعد از پردازش مدل‌ها، مرتب‌سازی را انجام بده
             processed_data = []
             for i in range(len(brands)):
                 model_str = process_model(models[i])
                 processed_data.append(f"{model_str} {brands[i]}")
-
-            # مرتب‌سازی داده‌ها به ترتیب از کم به زیاد
-            processed_data.sort(key=lambda x: float(x.split()[0].replace(",", "").replace("٬", "")) if is_number(x.split()[0]) else 0)
 
             update_date = JalaliDate.today().strftime("%Y-%m-%d")
             message_lines = []
@@ -268,7 +289,6 @@ def main():
 
             categories = categorize_messages(message_lines)
 
-            # ارسال پیام‌ها به تلگرام به ترتیب دسته‌بندی‌ها
             for category, lines in categories.items():
                 if lines:
                     header, footer = get_header_footer(category, update_date)
@@ -287,22 +307,12 @@ def main():
                         tablet_message_id = msg_id
                     elif category == "🎮":  # ذخیره message_id کنسول بازی
                         console_message_id = msg_id
-
+                        
         else:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
 
         if not samsung_message_id:
-            logging.error("❌ پیام دسته‌بندی سامسونگ ارسال نشد!")
-        if not xiaomi_message_id:
-            logging.error("❌ پیام دسته‌بندی شیائومی ارسال نشد!")
-        if not iphone_message_id:
-            logging.error("❌ پیام دسته‌بندی آیفون ارسال نشد!")
-        if not laptop_message_id:
-            logging.error("❌ پیام دسته‌بندی لپ‌تاپ ارسال نشد!")
-        if not tablet_message_id:
-            logging.error("❌ پیام دسته‌بندی تبلت ارسال نشد!")
-        if not console_message_id:
-            logging.error("❌ پیام دسته‌بندی کنسول بازی ارسال نشد!")
+            logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
             return
 
         # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
