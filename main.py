@@ -175,10 +175,13 @@ date_string = "1404/01/24"
 year, month, day = map(int, date_string.split('/'))
 
 # تبدیل تاریخ شمسی به میلادی
-date_object = JalaliDate(year, month, day).to_gregorian()
+date_object = JalaliDate(year, month, day)
 
-# نمایش تاریخ میلادی
-print(date_object)
+# نمایش تاریخ شمسی
+shamsi_date = date_object.strftime("%A %Y/%m/%d")  # نمایش به فرمت مورد نظر
+
+print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
+
 
 print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
 # این تابع برای ساخت پیام نهایی به کار میره
