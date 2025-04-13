@@ -144,21 +144,36 @@ def categorize_messages(lines):
             categories[current_category].append(f"{line}")
 
     return categories
-# 1. اضافه کردن توابع مرتب‌سازی و استخراج قیمت
-def extract_price_from_message(message):
-    import re
-    match = re.search(r"(\d{1,3}(?:,\d{3})*)", message)
-    if match:
-        return int(match.group(1).replace(",", ""))
-    return 0
+    
+# 1. ایجاد یک تابع برای مرتب کردن محصولات مشابه در یک دسته
+def group_products_by_model_and_color(models, colors, prices):
+    grouped = {}
+    for i in range(len(models)):
+        model = models[i]
+        color = colors[i]
+        price = prices[i]
+        
+        if model not in grouped:
+            grouped[model] = []
+        
+        grouped[model].append((color, price))
+    
+    return grouped
 
-def sort_category_messages_by_price(categories):
-    sorted_categories = {}
-    for category, lines in categories.items():
-        # مرتب‌سازی پیام‌های هر دسته‌بندی بر اساس قیمت
-        sorted_lines = sorted(lines, key=extract_price_from_message)
-        sorted_categories[category] = sorted_lines
-    return sorted_categories
+# 2. اضافه کردن تابع برای تولید پیام‌های مرتب
+def create_sorted_message(grouped_products):
+    message_lines = []
+    
+    for model, items in grouped_products.items():
+        message_lines.append(f"🔵 {model}")
+        
+        # مرتب‌سازی بر اساس رنگ و قیمت
+        items_sorted = sorted(items, key=lambda x: (x[0], x[1]))  # اول رنگ، بعد قیمت
+        for color, price in items_sorted:
+            message_lines.append(f"{color} {price}")
+    
+    return "\n".join(message_lines)
+
     
 def get_header_footer(category, update_date):
     headers = {
@@ -261,27 +276,40 @@ def main():
         console_message_id = None  # ذخیره message_id کنسول بازی
 
         if brands:
-            processed_data = []
-            for i in range(len(brands)):
-                model_str = process_model(models[i])
-                processed_data.append(f"{model_str} {brands[i]}")
+            from collections import defaultdict
 
             update_date = JalaliDate.today().strftime("%Y-%m-%d")
-            message_lines = []
-            for row in processed_data:
-                decorated = decorate_line(row)
-                message_lines.append(decorated)
+            categorized_data = defaultdict(list)
 
-            # در قسمت ارسال پیام‌ها، قبل از ارسال پیام‌ها، باید این تابع رو فراخوانی کنیم.
-            categories = categorize_messages(message_lines)
+            for i in range(len(brands)):
+                model_key = process_model(models[i])
+                categorized_data[(brands[i], model_key)].append(models[i])
+
+            message_lines_by_brand = defaultdict(list)
+
+            for (brand, model_str), items in categorized_data.items():
+                # برای هر مدل، اطلاعات رنگ و قیمت رو کنار هم قرار می‌دیم
+                lines = []
+                for item in items:
+                    color = item.get('color', '').strip()
+                    price = item.get('price', '').strip()
+                    if color and price:
+                        lines.append(f"{color} {price}")
+                if lines:
+                    decorated_model = decorate_line(model_str + " " + brand)
+                    message_lines_by_brand[brand].append(f"{decorated_model}\n" + "\n".join(lines))
+
+            # دسته‌بندی و مرتب‌سازی بر اساس برند
+            categories = categorize_messages(message_lines_by_brand)
             sorted_categories = sort_category_messages_by_price(categories)
 
-            # حالا می‌تونیم پیام‌ها رو از دسته‌بندی‌های مرتب‌شده ارسال کنیم
+            # ارسال پیام‌های هر دسته
             for category, lines in sorted_categories.items():
                 if lines:
                     header, footer = get_header_footer(category, update_date)
-                    message = header + "\n" + "\n".join(lines) + footer
+                    message = header + "\n\n" + "\n\n".join(lines) + "\n\n" + footer
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+
 
                     if category == "🔵":  # ذخیره message_id سامسونگ
                         samsung_message_id = msg_id
