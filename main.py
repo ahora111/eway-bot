@@ -224,6 +224,18 @@ def categorize_messages(lines):
 
     return categories
 
+def prepare_final_message(category, lines, update_date):
+    # ساخت هدر و فوتر پیام
+    header = f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n✅ لیست پخش موبایل اهورا\n\n⬅️ {category} ➡️\n\n"
+    footer = "\n\n☎️ شماره های تماس:\n📞 09371111558\n📞 02833991417"
+
+    # قالب‌بندی خطوط دسته‌بندی‌شده
+    formatted_lines = format_category_messages(lines)
+
+    # ترکیب هدر، خطوط قالب‌بندی‌شده و فوتر
+    final_message = header + "\n".join(formatted_lines) + footer
+    return final_message
+    
 def get_header_footer(category, update_date):
     headers = {
         "🔵": f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n✅ لیست پخش موبایل اهورا\n⬅️ موجودی سامسونگ ➡️\n",
