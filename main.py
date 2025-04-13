@@ -206,8 +206,6 @@ def prepare_final_message(category_name, category_lines, update_date):
     final_message = f"{header}{'\n\n'.join(formatted_lines)}{footer}"
 
     return final_message
-
-
 # این تابع کمکی برای گرفتن اسم دسته‌بندی‌ها
 def get_category_name(emoji):
     mapping = {
@@ -368,9 +366,10 @@ def main():
 
             for category, lines in categories.items():
                 if lines:
-                    category_name = get_category_name(category)
-                    message = prepare_final_message(category_name, lines, update_date)
+                    # استفاده از تابع جدید برای آماده‌سازی پیام
+                    message = prepare_final_message(category, lines, update_date)
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+
 
                     if category == "🔵":
                         samsung_message_id = msg_id
