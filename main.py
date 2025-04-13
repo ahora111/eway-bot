@@ -165,6 +165,7 @@ def remove_extra_blank_lines(lines):
     return cleaned_lines
 
 
+# این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
     # ساخت هدر پیام
     header = (
@@ -207,6 +208,17 @@ def prepare_final_message(category_name, category_lines, update_date):
 
     return final_message
 
+# این تابع کمکی برای گرفتن اسم دسته‌بندی‌ها
+def get_category_name(emoji):
+    mapping = {
+        "🔵": "گوشی‌های سامسونگ",
+        "🟡": "گوشی‌های شیائومی",
+        "🍏": "گوشی‌های آیفون",
+        "💻": "لپ‌تاپ‌ها",
+        "🟠": "تبلت‌ها",
+        "🎮": "کنسول‌های بازی"
+    }
+    return mapping.get(emoji, "محصولات متفرقه")
 
 
 
@@ -291,6 +303,7 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
+
 def main():
     try:
         driver = get_driver()
@@ -300,48 +313,44 @@ def main():
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+
         logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
         scroll_page(driver)
 
-        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی" ]
+        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
         brands, models = extract_product_data(driver, valid_brands)
         
+        # استخراج داده‌ها برای لپ‌تاپ، تبلت و کنسول
         driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
         scroll_page(driver)
-
         laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
         brands.extend(laptop_brands)
         models.extend(laptop_models)
 
-        driver.get('https://hamrahtel.com/quick-checkout?category=tablet')  # اضافه کردن لینک تبلت
+        driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
         scroll_page(driver)
-
-        tablet_brands, tablet_models = extract_product_data(driver, valid_brands)  # استخراج داده‌های تبلت
+        tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
         brands.extend(tablet_brands)
         models.extend(tablet_models)
 
-        driver.get('https://hamrahtel.com/quick-checkout?category=game-console')  # اضافه کردن لینک کنسول بازی
+        driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
         scroll_page(driver)
-
-        console_brands, console_models = extract_product_data(driver, valid_brands)  # استخراج داده‌های کنسول
+        console_brands, console_models = extract_product_data(driver, valid_brands)
         brands.extend(console_brands)
         models.extend(console_models)
 
-        
         driver.quit()
 
-        samsung_message_id = None  # ذخیره message_id سامسونگ
-        xiaomi_message_id = None  # ذخیره message_id شیایومی
-        iphone_message_id = None  # ذخیره message_id آیفون
-        laptop_message_id = None  # ذخیره message_id لپ‌تاپ
-        tablet_message_id = None  # ذخیره message_id تبلت
-        console_message_id = None  # ذخیره message_id کنسول بازی
+        # ذخیره message_id هر دسته‌بندی
+        samsung_message_id = None
+        xiaomi_message_id = None
+        iphone_message_id = None
+        laptop_message_id = None
+        tablet_message_id = None
+        console_message_id = None
 
         if brands:
             processed_data = []
@@ -359,23 +368,22 @@ def main():
 
             for category, lines in categories.items():
                 if lines:
-                    header, footer = get_header_footer(category, update_date)
-                    message = header + "\n" + "\n".join(lines) + footer
+                    category_name = get_category_name(category)
+                    message = prepare_final_message(category_name, lines, update_date)
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
-                    if category == "🔵":  # ذخیره message_id سامسونگ
+                    if category == "🔵":
                         samsung_message_id = msg_id
-                    elif category == "🟡":  # ذخیره message_id شیایومی
+                    elif category == "🟡":
                         xiaomi_message_id = msg_id
-                    elif category == "🍏":  # ذخیره message_id آیفون
+                    elif category == "🍏":
                         iphone_message_id = msg_id
-                    elif category == "💻":  # ذخیره message_id لپ‌تاپ
+                    elif category == "💻":
                         laptop_message_id = msg_id
-                    elif category == "🟠":  # ذخیره message_id تبلت
+                    elif category == "🟠":
                         tablet_message_id = msg_id
-                    elif category == "🎮":  # ذخیره message_id کنسول بازی
+                    elif category == "🎮":
                         console_message_id = msg_id
-                        
         else:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
 
