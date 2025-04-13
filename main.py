@@ -118,67 +118,73 @@ def decorate_line(line):
         return line
 
 
-    def categorize_messages(lines):
-        categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}  # اضافه کردن 🎮 برای کنسول بازی
-    
-        current_category = None
+def categorize_messages(lines):
+    categories = {
+        "🔵": [],  # سامسونگ
+        "🟡": [],  # شیائومی
+        "🍏": [],  # آیفون
+        "🟣": [],  # متفرقه
+        "💻": [],  # لپ‌تاپ
+        "🟠": [],  # تبلت
+        "🎮": []   # کنسول بازی
+    }
 
-        for line in lines:
-            if line.startswith("🔵"):
-                current_category = "🔵"
-            elif line.startswith("🟡"):
-                    current_category = "🟡"
-            elif line.startswith("🍏"):
-                current_category = "🍏"
-            elif line.startswith("🟣"):
-                current_category = "🟣"
-            elif line.startswith("💻"):
-                current_category = "💻"
-            elif line.startswith("🟠"):  # اضافه کردن شرط برای تبلت
-                current_category = "🟠"
-            elif line.startswith("🎮"):  # اضافه کردن شرط برای کنسول بازی
-                current_category = "🎮"
-            if current_category:
-                    categories[current_category].append(f"{line}")
-        return categories
-
-    def sort_messages_by_price(lines):
-        def extract_price(line):
-            try:
-                # استخراج قیمت از خط
-                parts = line.split("\n")
-                price = int(parts[-1].replace(",", "").strip())  # حذف کاما و تبدیل به عدد
-                return price
-            except:
-                    return float('inf')  # برای خطوط بدون قیمت، عدد بزرگی برگردان
-
-        # مرتب‌سازی بر اساس قیمت
-        return sorted(lines, key=extract_price)
-
-    def format_category_message(lines):
-        formatted_message = ""
-        current_model = None
-        current_colors = []
+    current_category = None
 
     for line in lines:
-        parts = line.split("\n")  # خطوط را جدا می‌کند
-        model = " ".join(parts[0].split()[:-2])  # مدل را استخراج می‌کند
+        if line.startswith("🔵"):
+            current_category = "🔵"
+        elif line.startswith("🟡"):
+            current_category = "🟡"
+        elif line.startswith("🍏"):
+            current_category = "🍏"
+        elif line.startswith("🟣"):
+            current_category = "🟣"
+        elif line.startswith("💻"):
+            current_category = "💻"
+        elif line.startswith("🟠"):
+            current_category = "🟠"
+        elif line.startswith("🎮"):
+            current_category = "🎮"
+        
+        if current_category:
+            categories[current_category].append(line)
+    
+    return categories
+
+
+def sort_messages_by_price(lines):
+    def extract_price(line):
+        try:
+            parts = line.split("\n")
+            price = int(parts[-1].replace(",", "").strip())
+            return price
+        except:
+            return float('inf')  # اگر قیمتی نبود، بفرست آخر
+    return sorted(lines, key=extract_price)
+
+
+def format_category_message(lines):
+    formatted_message = ""
+    current_model = None
+    current_colors = []
+
+    for line in lines:
+        parts = line.split("\n")
+        model = " ".join(parts[0].split()[:-2])  # مدل از خط اول
         color = parts[1] if len(parts) > 1 else None
         price = parts[2] if len(parts) > 2 else None
 
-        # اگر مدل تغییر کرده
         if model != current_model:
-            if current_model:  # اضافه کردن مدل قبلی به متن
+            if current_model:
                 formatted_message += "\n".join(current_colors) + "\n\n"
             current_model = model
             formatted_message += f"🔵 {model}\n"
             current_colors = []
 
-        # اضافه کردن رنگ و قیمت
         if color and price:
             current_colors.append(f"{color}\n{price}")
 
-    # اضافه کردن مدل آخر
     if current_colors:
         formatted_message += "\n".join(current_colors) + "\n\n"
 
