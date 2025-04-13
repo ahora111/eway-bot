@@ -119,16 +119,31 @@ def decorate_line(line):
 
 def sort_lines_together(lines):
     def extract_price(line):
-        # این تابع قیمت را از خط استخراج می‌کند
-        # فرض: قیمت در انتهای خط وجود دارد و قابل تبدیل به عدد است
+        # فرض می‌کنیم قیمت در انتهای خط وجود دارد
         parts = line.split()
         for part in parts:
             if part.replace('.', '').isdigit():
                 return float(part)
-        return float('inf')  # اگر قیمت موجود نبود، مقدار بزرگ قرار می‌دهیم برای مرتب‌سازی
+        return float('inf')  # مقدار پیش‌فرض برای خطوط بدون قیمت
 
-    # مرتب‌سازی خطوط بر اساس قیمت
-    sorted_lines = sorted(lines, key=lambda x: extract_price(x))
+    # تبدیل هر خط به یک واحد با حفظ ترتیب
+    grouped_lines = []
+    current_group = []
+    for line in lines:
+        if line.startswith("🎮") or line.startswith("🔵") or line.startswith("🟡") or line.startswith("🍏") or line.startswith("🟣") or line.startswith("💻") or line.startswith("🟠"):
+            if current_group:
+                grouped_lines.append(current_group)
+            current_group = [line]
+        else:
+            current_group.append(line)
+    if current_group:
+        grouped_lines.append(current_group)
+
+    # مرتب‌سازی بر اساس قیمت (فرض می‌شود قیمت در آخرین بخش هر گروه قرار دارد)
+    grouped_lines.sort(key=lambda group: extract_price(group[-1]))
+
+    # ادغام گروه‌ها به یک لیست خطوط
+    sorted_lines = [line for group in grouped_lines for line in group]
     return sorted_lines
     
 def categorize_messages(lines):
@@ -155,7 +170,7 @@ def categorize_messages(lines):
         if current_category:
             categories[current_category].append(line)
 
-    # مرتب‌سازی خطوط در هر دسته‌بندی
+    # مرتب‌سازی خطوط در هر دسته‌بندی به‌صورت واحدهای متصل
     for category in categories:
         categories[category] = sort_lines_together(categories[category])
 
