@@ -275,7 +275,9 @@ def main():
                 if lines:
                     header, footer = get_header_footer(category, update_date)
                     message = header + "\n" + "\n".join(lines) + footer
-                    send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+                    response = send_telegram_message(message, bot_token, chat_id, reply_markup)
+                    msg_id = response.get('message_id')  # استخراج شناسه پیام
+
 
                     if category == "🔵":  # ذخیره message_id سامسونگ
                         samsung_message_id = msg_id
