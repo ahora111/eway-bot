@@ -166,38 +166,47 @@ def remove_extra_blank_lines(lines):
 
 
 def prepare_final_message(category_name, category_lines, update_date):
-    
-    # قالب‌دهی خطوط دسته‌بندی‌شده برای نمایش دلخواه
+    # ساخت هدر پیام
+    header = (
+        f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
+        f"✅ لیست پخش موبایل اهورا\n\n"
+        f"⬅️ {category_name} ➡️\n\n"
+    )
+
+    # قالب‌دهی خطوط دسته‌بندی‌شده
     formatted_lines = []
     current_product = None
     product_variants = []
 
     for line in category_lines:
         if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            # اگر محصول جدید شروع شده
+            # شروع محصول جدید
             if current_product:
                 formatted_lines.append(current_product)
                 if product_variants:
-                    # پیوستن متغیرها به صورت "رنگ | قیمت"
-                    variant_string = "  ".join(product_variants)
-                    formatted_lines.append(variant_string)
+                    formatted_lines.append("  ".join(product_variants))  # اتصال متغیرها با فاصله
                 product_variants = []
-            current_product = line  # خط عنوان محصول جاری
+            current_product = line  # خط عنوان محصول
         else:
-            # اضافه کردن رنگ و قیمت با ساختار "رنگ | قیمت"
+            # پردازش رنگ و قیمت در قالب "رنگ | قیمت"
             parts = line.split()
-            if len(parts) >= 2:
+            if len(parts) >= 2:  # اگر حداقل دو بخش وجود دارد
                 product_variants.append(f"{parts[0]} | {' '.join(parts[1:])}")
             else:
                 product_variants.append(line.strip())
 
-    # افزودن آخرین محصول و متغیرهای آن به لیست
+    # افزودن آخرین محصول
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
-            variant_string = "  ".join(product_variants)
-            formatted_lines.append(variant_string)
+            formatted_lines.append("  ".join(product_variants))
+
+    # ادغام هدر، خطوط قالب‌بندی‌شده و فوتر
+    footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
+    final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
+
     return final_message
+
 
 
 
