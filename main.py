@@ -174,7 +174,21 @@ def create_sorted_message(grouped_products):
     
     return "\n".join(message_lines)
 
-    
+    def sort_category_messages_by_price(messages):
+    def extract_price(message):
+        try:
+            # استخراج عدد قیمت (مثلاً از: "قرمز 25,000,000")
+            parts = message.strip().split(" ")
+            for part in parts:
+                part = part.replace(",", "")
+                if part.isdigit():
+                    return int(part)
+            return float('inf')
+        except:
+            return float('inf')
+
+    return sorted(messages, key=extract_price)
+
 def get_header_footer(category, update_date):
     headers = {
         "🔵": f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n✅ لیست پخش موبایل اهورا\n⬅️ موجودی سامسونگ ➡️\n",
