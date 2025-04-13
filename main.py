@@ -5,7 +5,8 @@ import requests
 import logging
 import json
 import jdatetime
-import calendar
+import datetime
+import calendar  # اضافه کردن calendar
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -169,6 +170,7 @@ def remove_extra_blank_lines(lines):
 
 
 
+
 # تاریخ شمسی
 date_string = "1404/01/24"
 
@@ -178,21 +180,20 @@ year, month, day = map(int, date_string.split('/'))
 # تبدیل تاریخ شمسی به شیء تاریخ شمسی
 date_object = JalaliDate(year, month, day)
 
-# به دست آوردن روز هفته
-day_of_week = calendar.day_name[date_object.weekday()]
+# به دست آوردن روز هفته از تاریخ شمسی
+day_of_week = date_object.strftime('%A')  # برای گرفتن روز هفته شمسی استفاده می‌کنیم
 
 # تاریخ میلادی به شکل صحیح
 date_string = "2025-04-13"
-date_object = datetime.datetime.strptime(date_string, "%Y-%m-%d").date()
+date_object_gregorian = datetime.datetime.strptime(date_string, "%Y-%m-%d").date()
 
 # تبدیل تاریخ میلادی به شمسی
-shamsi_date = JalaliDate(date_object).strftime("%A %Y/%m/%d")
+shamsi_date = JalaliDate(date_object_gregorian).strftime("%A %Y/%m/%d")
 print(shamsi_date)
 
 # نمایش تاریخ به فرمت "یکشنبه ۱۴۰۴/۰۱/۲۴"
 shamsi_date = f"{day_of_week} {date_object.strftime('%Y/%m/%d')}"
 print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
-
 
 
 
