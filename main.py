@@ -148,6 +148,21 @@ def sort_lines_together_by_price(lines):
     # تبدیل گروه‌های مرتب‌شده به لیستی از خطوط
     sorted_lines = [line for group in grouped_lines for line in group]
     return sorted_lines
+
+def remove_extra_blank_lines(lines):
+    cleaned_lines = []
+    blank_count = 0
+
+    for line in lines:
+        if line.strip() == "":  # بررسی خطوط خالی
+            blank_count += 1
+            if blank_count <= 1:  # فقط یک خط خالی نگه‌دار
+                cleaned_lines.append(line)
+        else:
+            blank_count = 0
+            cleaned_lines.append(line)
+
+    return cleaned_lines
     
 def categorize_messages(lines):
     categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}  # اضافه کردن 🎮 برای کنسول بازی
@@ -173,9 +188,10 @@ def categorize_messages(lines):
         if current_category:
             categories[current_category].append(line)
 
-    # مرتب‌سازی خطوط در هر دسته‌بندی براساس قیمت
+    # مرتب‌سازی و حذف خطوط خالی اضافی در هر دسته‌بندی
     for category in categories:
-        categories[category] = sort_lines_together_by_price(categories[category])
+        categories[category] = sort_lines_together_by_price(categories[category])  # مرتب‌سازی
+        categories[category] = remove_extra_blank_lines(categories[category])  # حذف خطوط خالی
 
     return categories
 
