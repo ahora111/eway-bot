@@ -171,7 +171,6 @@ def remove_extra_blank_lines(lines):
 
 
 
-
 # تاریخ شمسی
 date_string = "1404/01/24"
 
@@ -195,7 +194,6 @@ print(shamsi_date)
 # نمایش تاریخ به فرمت "یکشنبه ۱۴۰۴/۰۱/۲۴"
 shamsi_date = f"{day_of_week} {date_object.strftime('%Y/%m/%d')}"
 print(shamsi_date)  # خروجی: یکشنبه ۱۴۰۴/۰۱/۲۴
-
 
 
 
