@@ -174,7 +174,7 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"⬅️ موجودی {category_name} ➡️\n\n"
     )
 
-    # قالب‌دهی خطوط دسته‌بندی‌شده با سبک تازه
+    # قالب‌دهی خطوط دسته‌بندی‌شده با سبک جدید
     formatted_lines = []
     current_product = None
     product_variants = []
@@ -185,14 +185,16 @@ def prepare_final_message(category_name, category_lines, update_date):
             if current_product:
                 formatted_lines.append(current_product)
                 if product_variants:
-                    formatted_lines.append("\n".join(product_variants))  # برای نمایش رنگ و قیمت‌ها
+                    formatted_lines.append("\n".join(product_variants))  # رنگ و قیمت‌ها به‌صورت جداگانه
                 product_variants = []
             current_product = line  # ذخیره محصول جاری
         else:
             # ساختار رنگ و قیمت با جداکننده " | "
             parts = line.split()
             if len(parts) >= 2:  # بررسی خطوط با حداقل دو بخش
-                product_variants.append(f"{parts[0]} | {' '.join(parts[1:])}")
+                color = parts[0]  # رنگ
+                price = " ".join(parts[1:])  # قیمت
+                product_variants.append(f"{color} | {price}")
             else:
                 product_variants.append(line.strip())
 
@@ -207,6 +209,7 @@ def prepare_final_message(category_name, category_lines, update_date):
     final_message = f"{header}" + "\n\n".join(formatted_lines) + f"{footer}"
 
     return final_message
+
 
 
 # این تابع کمکی برای گرفتن اسم دسته‌بندی‌ها
