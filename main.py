@@ -163,10 +163,9 @@ def remove_extra_blank_lines(lines):
             cleaned_lines.append(line)
 
     return cleaned_lines
-
-# این تابع برای ساخت پیام نهایی به کار میره
+    
 def prepare_final_message(category_name, category_lines, update_date):
-        # دریافت تاریخ امروز به شمسی
+    # دریافت تاریخ امروز به شمسی
     update_date = JalaliDate.today().strftime("%Y/%m/%d")
     # تعریف نگاشت برای روزهای هفته به فارسی
     weekday_mapping = {
@@ -182,15 +181,16 @@ def prepare_final_message(category_name, category_lines, update_date):
     weekday_farsi = list(weekday_mapping.values())[weekday_english]  # تبدیل ایندکس به روز فارسی
     update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
 
-print(f"نام روز هفته به انگلیسی: {weekday_english}")
+    print(f"نام روز هفته به انگلیسی: {weekday_english}")
+    print(update_date_formatted)  # برای تست
 
-print(update_date_formatted)  # برای تست
     # ساخت هدر پیام
     header = (
         f"🗓 بروزرسانی {update_date_formatted}\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
         f"⬅️ موجودی {category_name} ➡️\n\n"
     )
+
     # گرفتن عنوان دسته از روی ایموجی
     category_title = get_category_name(category_name)
 
@@ -231,7 +231,10 @@ print(update_date_formatted)  # برای تست
             formatted_lines.extend(product_variants)
 
     # حذف | از سطرهایی که ایموجی دارند
-    formatted_lines = [line for line in formatted_lines if not any(emoji in line for emoji in ["🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮"]) or "|" not in line]
+    formatted_lines = [
+        line for line in formatted_lines
+        if not any(emoji in line for emoji in ["🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮"]) or "|" not in line
+    ]
 
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
