@@ -171,7 +171,7 @@ def prepare_final_message(category_name, category_lines, update_date):
     weekday_mapping = {
             "Saturday": "💪 شنبه",
             "Sunday": "😃 یکشنبه",
-            "Monday": "🙄 دوشنبه",
+            "Monday": " دوشنبه🙄",
             "Tuesday": "🥱 سه شنبه",
             "Wednesday": "😕 چهارشنبه",
             "Thursday": "☺️ پنج شنبه",
