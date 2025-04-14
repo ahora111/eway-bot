@@ -190,11 +190,8 @@ def prepare_final_message(category_name, category_lines, update_date):
     header = (
         f"🗓 بروزرسانی {update_date_formatted}\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
-        f"⬅️ موجودی {category_name} ➡️\n\n"
+        f"⬅️ موجودی {category_title} ➡️\n\n"
     )
-
-    # گرفتن عنوان دسته از روی ایموجی
-    category_title = get_category_name(category_name)
 
     formatted_lines = []
     current_product = None
