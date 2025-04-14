@@ -177,9 +177,13 @@ weekday_mapping = {
     "Thursday": "پنج‌شنبه",
     "Friday": "جمعه"
 }
+
 weekday_english = JalaliDate.today().strftime('%A')  # گرفتن نام روز هفته به انگلیسی
 weekday_farsi = weekday_mapping.get(weekday_english, "نامشخص")  # تبدیل به فارسی
+
 update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
+
+print(f"نام روز هفته به انگلیسی: {weekday_english}")
 
 print(update_date_formatted)  # برای تست
 
