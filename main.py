@@ -165,7 +165,9 @@ def remove_extra_blank_lines(lines):
     return cleaned_lines
 
 
-update_date = JalaliDate.today().strftime("%Y/%m/%d")  # تاریخ شمسی
+from persiantools.jdatetime import JalaliDate
+
+update_date = JalaliDate.today().strftime("%Y-%m-%d")  # تاریخ شمسی
 weekday_mapping = {
     "Saturday": "شنبه",
     "Sunday": "یکشنبه",
@@ -176,8 +178,10 @@ weekday_mapping = {
     "Friday": "جمعه"
 }
 weekday_english = JalaliDate.today().strftime('%A')  # گرفتن نام روز هفته به انگلیسی
-weekday_farsi = weekday_mapping.get(weekday_english, weekday_english)  # تبدیل نام روز به فارسی
-update_date_formatted = f"{weekday_farsi} {update_date}"  # ترکیب روز هفته و تاریخ
+weekday_farsi = weekday_mapping.get(weekday_english, "نامشخص")  # تبدیل به فارسی
+update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
+
+print(update_date_formatted)  # برای تست
 
 
 
