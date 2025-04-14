@@ -165,6 +165,8 @@ def remove_extra_blank_lines(lines):
     return cleaned_lines
     
 def prepare_final_message(category_name, category_lines, update_date):
+        # گرفتن عنوان دسته از روی ایموجی
+    category_title = get_category_name(category_name)
     # دریافت تاریخ امروز به شمسی
     update_date = JalaliDate.today().strftime("%Y/%m/%d")
     # تعریف نگاشت برای روزهای هفته به فارسی
