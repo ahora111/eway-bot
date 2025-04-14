@@ -164,9 +164,22 @@ def remove_extra_blank_lines(lines):
 
     return cleaned_lines
 
-update_date = JalaliDate.today().strftime("%Y/%m/%d")  # تبدیل تاریخ به فرمت شمسی
-weekday = JalaliDate.today().strftime('%A')  # گرفتن نام روز هفته به زبان فارسی
-update_date_formatted = f"{weekday} {update_date}"  # ترکیب روز هفته و تاریخ
+
+update_date = JalaliDate.today().strftime("%Y/%m/%d")  # تبدیل به تاریخ شمسی
+weekday_mapping = {
+    "Saturday": "💪 شنبه",
+    "Sunday": "😃 یکشنبه",
+    "Monday": "🙄 دوشنبه",
+    "Tuesday": "🥱 سه شنبه",
+    "Wednesday": "😕 چهارشنبه",
+    "Thursday": "☺️ پنج شنبه",
+    "Friday": "😎 جمعه"
+}
+weekday_english = JalaliDate.today().strftime('%A')  # نام روز هفته به انگلیسی
+weekday_farsi = weekday_mapping.get(weekday_english, weekday_english)  # تبدیل به فارسی
+
+update_date_formatted = f"{weekday_farsi} {update_date}"
+
 
 
 # این تابع برای ساخت پیام نهایی به کار میره
