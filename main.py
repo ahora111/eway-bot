@@ -169,13 +169,13 @@ def prepare_final_message(category_name, category_lines, update_date):
     update_date = JalaliDate.today().strftime("%Y/%m/%d")
     # تعریف نگاشت برای روزهای هفته به فارسی
     weekday_mapping = {
-        "Saturday": "شنبه",
-        "Sunday": "یکشنبه",
-        "Monday": "دوشنبه",
-        "Tuesday": "سه‌شنبه",
-        "Wednesday": "چهارشنبه",
-        "Thursday": "پنج‌شنبه",
-        "Friday": "جمعه"
+            "Saturday": "💪 شنبه",
+            "Sunday": "😃 یکشنبه",
+            "Monday": "🙄 دوشنبه",
+            "Tuesday": "🥱 سه شنبه",
+            "Wednesday": "😕 چهارشنبه",
+            "Thursday": "☺️ پنج شنبه",
+            "Friday": "😎 جمعه"
     }
     weekday_english = JalaliDate.today().weekday()  # گرفتن ایندکس روز هفته
     weekday_farsi = list(weekday_mapping.values())[weekday_english]  # تبدیل ایندکس به روز فارسی
