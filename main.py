@@ -164,44 +164,35 @@ def remove_extra_blank_lines(lines):
 
     return cleaned_lines
 
-
-from persiantools.jdatetime import JalaliDate
-
-update_date = JalaliDate.today().strftime("%Y-%m-%d")  # تاریخ شمسی
-weekday_mapping = {
-    "Saturday": "شنبه",
-    "Sunday": "یکشنبه",
-    "Monday": "دوشنبه",
-    "Tuesday": "سه‌شنبه",
-    "Wednesday": "چهارشنبه",
-    "Thursday": "پنج‌شنبه",
-    "Friday": "جمعه"
-}
-
-weekday_english = JalaliDate.today().strftime('%A')  # گرفتن نام روز هفته به انگلیسی
-weekday_farsi = weekday_mapping.get(weekday_english, "نامشخص")  # تبدیل به فارسی
-
-update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
+# این تابع برای ساخت پیام نهایی به کار میره
+def prepare_final_message(category_name, category_lines, update_date):
+        # دریافت تاریخ امروز به شمسی
+    update_date = JalaliDate.today().strftime("%Y/%m/%d")
+    # تعریف نگاشت برای روزهای هفته به فارسی
+    weekday_mapping = {
+        "Saturday": "شنبه",
+        "Sunday": "یکشنبه",
+        "Monday": "دوشنبه",
+        "Tuesday": "سه‌شنبه",
+        "Wednesday": "چهارشنبه",
+        "Thursday": "پنج‌شنبه",
+        "Friday": "جمعه"
+    }
+    weekday_english = JalaliDate.today().weekday()  # گرفتن ایندکس روز هفته
+    weekday_farsi = list(weekday_mapping.values())[weekday_english]  # تبدیل ایندکس به روز فارسی
+    update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
 
 print(f"نام روز هفته به انگلیسی: {weekday_english}")
 
 print(update_date_formatted)  # برای تست
-
-
-
-
-# این تابع برای ساخت پیام نهایی به کار میره
-def prepare_final_message(category_name, category_lines, update_date):
-    # گرفتن عنوان دسته از روی ایموجی
-    category_title = get_category_name(category_name)
-
     # ساخت هدر پیام
     header = (
         f"🗓 بروزرسانی {update_date_formatted}\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
-        f"⬅️ موجودی {category_title} ➡️\n\n"
+        f"⬅️ موجودی {category_name} ➡️\n\n"
     )
-
+    # گرفتن عنوان دسته از روی ایموجی
+    category_title = get_category_name(category_name)
 
     formatted_lines = []
     current_product = None
