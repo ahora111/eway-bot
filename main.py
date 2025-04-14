@@ -164,6 +164,10 @@ def remove_extra_blank_lines(lines):
 
     return cleaned_lines
 
+update_date = JalaliDate.today().strftime("%Y/%m/%d")  # تبدیل تاریخ به فرمت شمسی
+weekday = JalaliDate.today().strftime('%A')  # گرفتن نام روز هفته به زبان فارسی
+update_date_formatted = f"{weekday} {update_date}"  # ترکیب روز هفته و تاریخ
+
 
 # این تابع برای ساخت پیام نهایی به کار میره
 def prepare_final_message(category_name, category_lines, update_date):
@@ -172,10 +176,11 @@ def prepare_final_message(category_name, category_lines, update_date):
 
     # ساخت هدر پیام
     header = (
-        f"📅 بروزرسانی قیمت در تاریخ {update_date} می باشد\n"
+        f"🗓 بروزرسانی {update_date_formatted}\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
         f"⬅️ موجودی {category_title} ➡️\n\n"
     )
+
 
     formatted_lines = []
     current_product = None
