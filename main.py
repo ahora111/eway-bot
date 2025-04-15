@@ -365,10 +365,10 @@ def delete_old_messages_with_phone_icon(bot_token, chat_id):
                 print(f"Delete Response: {del_response.text}")  # پرینت پاسخ خطا از تلگرام
 
 def main():
-                # حذف پیام‌های قدیمی که آیکون ☎️ دارن
-    bot_token = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
-    chat_id = "-1002505490886"
-    delete_old_messages_with_phone_icon(bot_token, chat_id)
+    try: 
+        # اینجا کدهای شما باید با 4 فاصله یا یک تب وارد شوند
+        delete_old_messages_with_phone_icon(BOT_TOKEN, CHAT_ID) 
+        
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
