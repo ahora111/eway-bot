@@ -472,4 +472,4 @@ async def main():
         logging.error(f"❌ خطا: {e}")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
