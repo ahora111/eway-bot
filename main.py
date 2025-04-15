@@ -6,6 +6,8 @@ import logging
 import json
 import pytz
 import sys
+import asyncio  # اینو بالای فایل اضافه کن
+from telethon import TelegramClient
 from datetime import datetime, time as dt_time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -328,52 +330,25 @@ def get_last_messages(bot_token, chat_id, limit=5):
     return []
 
 
-def delete_old_messages_with_phone_icon(bot_token, chat_id):
-    url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
-    response = requests.get(url)
-    data = response.json()
+async def delete_old_messages_with_phone_emoji(channel_username):
+    async for message in client.iter_messages(channel_username, limit=100):
+        if message.text and '☎️' in message.text:
+            try:
+                await client.delete_messages(channel_username, message.id)
+                print(f"✅ Deleted message {message.id} containing ☎️")
+            except Exception as e:
+                print(f"❌ Failed to delete message {message.id}: {e}")
 
-    if not data.get("ok"):
-        logging.error("❌ خطا در دریافت پیام‌ها")
-        print("❌ خطا در دریافت پیام‌ها")
+async def main():
+    await client.start()  # مطمئن شو قبل از استفاده از client اینو صدا بزنی
+
+    await delete_old_messages_with_phone_emoji('your_channel_username')
+
+    driver = get_driver()
+    if not driver:
+        logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
         return
 
-    messages = data.get("result", [])
-    logging.info(f"Messages: {messages}")
-    print(f"Messages: {messages}")
-
-    for item in messages:
-        post = item.get("channel_post")
-        if not post:
-            continue
-
-        message_id = post.get("message_id")
-        text = post.get("text", "")
-
-        if "☎️" in text:
-            print(f"🧹 پیدا شد: پیام {message_id} با متن:\n{text}")
-            delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
-            params = {
-                "chat_id": chat_id,
-                "message_id": message_id
-            }
-            del_response = requests.post(delete_url, json=params)
-            if del_response.status_code == 200:
-                logging.info(f"🗑 پیام با آیکون تلفن حذف شد: {message_id}")
-                print(f"🗑 حذف شد: {message_id}")
-            else:
-                logging.warning(f"❌ نتوانستم پیام را حذف کنم: {del_response.text}")
-                print(f"❌ حذف نشد! {del_response.text}")
-
-def main():
-    try: 
-        # اینجا کدهای شما باید با 4 فاصله یا یک تب وارد شوند
-        delete_old_messages_with_phone_icon(BOT_TOKEN, CHAT_ID) 
-        
-        driver = get_driver()
-        if not driver:
-            logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
-            return
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
