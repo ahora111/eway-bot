@@ -339,9 +339,6 @@ def delete_old_messages_with_phone_icon(bot_token, chat_id):
         return
 
     messages = data.get("result", [])
-    if not messages:
-        logging.info("✅ هیچ پیام جدیدی وجود ندارد.")
-    
     for item in messages:
         message = item.get("message")
         if not message:
@@ -349,7 +346,6 @@ def delete_old_messages_with_phone_icon(bot_token, chat_id):
 
         message_id = message.get("message_id")
         text = message.get("text", "")
-        logging.info(f"بررسی پیام: {message_id} با متن: {text}")  # اضافه کردن برای بررسی پیام‌ها
 
         if "☎️" in text:
             delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
@@ -358,10 +354,16 @@ def delete_old_messages_with_phone_icon(bot_token, chat_id):
                 "message_id": message_id
             }
             del_response = requests.post(delete_url, json=params)
+
+            # بررسی نتیجه درخواست حذف پیام
             if del_response.status_code == 200:
                 logging.info(f"🗑 پیام با آیکون تلفن حذف شد: {message_id}")
             else:
                 logging.warning(f"❌ نتوانستم پیام را حذف کنم: {del_response.text}")
+
+            # اضافه کردن تأخیر کوتاه بین درخواست‌ها برای جلوگیری از بروز مشکلات
+            time.sleep(1)  # تأخیر 1 ثانیه‌ای بین درخواست‌ها
+
 
 def main():
     try:
