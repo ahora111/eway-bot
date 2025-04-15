@@ -6,8 +6,6 @@ import logging
 import json
 import pytz
 import sys
-import asyncio  # اینو بالای فایل اضافه کن
-from telethon import TelegramClient
 from datetime import datetime, time as dt_time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -329,31 +327,41 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
+def delete_previous_messages_with_emoji(bot_token, chat_id, emoji="☎️"):
+    updates_url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+    delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+    
+    response = requests.get(updates_url)
+    if not response.ok:
+        logging.error("❌ خطا در دریافت پیام‌ها!")
+        return
+    
+    updates = response.json().get("result", [])
+    for update in updates:
+        message = update.get("message", {})
+        text = message.get("text", "")
+        message_id = message.get("message_id")
+        
+        if emoji in text:
+            params = {
+                "chat_id": chat_id,
+                "message_id": message_id
+            }
+            delete_response = requests.post(delete_url, data=params)
+            if delete_response.ok:
+                logging.info(f"✅ پیام با آی‌دی {message_id} حذف شد.")
+            else:
+                logging.error(f"❌ خطا در حذف پیام {message_id}: {delete_response.text}")
 
 
-async def delete_old_messages_with_phone_emoji(channel_username):
-    async for message in client.iter_messages(channel_username, limit=100):
-        if message.text and '☎️' in message.text:
-            try:
-                await client.delete_messages(channel_username, message.id)
-                print(f"✅ Deleted message {message.id} containing ☎️")
-            except Exception as e:
-                print(f"❌ Failed to delete message {message.id}: {e}")
-
-# تابع اصلی که async هست
-async def main():
-    await client.start()
-
+def main():
     try:
-        await delete_old_messages_with_phone_emoji('your_channel_username')
+        delete_previous_messages_with_emoji(BOT_TOKEN, CHAT_ID)
 
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
-        
-
-
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
@@ -445,7 +453,7 @@ async def main():
             "🔷 بلو بانک   حسین گرئی\n\n"
             "⭕️ حتما رسید واریز به ایدی تلگرام زیر ارسال شود .\n"
             "🆔 @lhossein1\n\n"
-            "☎️شماره تماس ثبت سفارش :\n"
+            "✅شماره تماس ثبت سفارش :\n"
             "📞 09371111558\n"
             "📞 09386373926\n"
             "📞 09308529712\n"
@@ -472,4 +480,4 @@ async def main():
         logging.error(f"❌ خطا: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
