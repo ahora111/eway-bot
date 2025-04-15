@@ -363,7 +363,7 @@ def main():
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
                 # پیش از هر کاری، پیام‌های کانال را بررسی کن
-        preview_messages_with_emoji(BOT_TOKEN, "@test1236547")  # نام کاربری کانال را اینجا جایگزین کنید
+        delete_previous_messages_with_emoji(BOT_TOKEN, "@test1236547")  # نام کاربری کانال را اینجا جایگزین کنید
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
