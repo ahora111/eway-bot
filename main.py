@@ -19,33 +19,6 @@ CHAT_ID = "-1002505490886"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# منطقه زمانی ایران
-iran_tz = pytz.timezone('Asia/Tehran')
-now = datetime.now(iran_tz)
-current_time = now.time()
-weekday = now.weekday()  # 0=دوشنبه، ..., 4=پنج‌شنبه، 5=جمعه, 6=شنبه
-
-# بازه مجاز در روزهای عادی
-start_time = dt_time(9, 30)
-end_time = dt_time(22, 30)
-
-# بازه زمانی روزهای خاص 
-friday_allowed_times = [
-    dt_time(12, 0),
-    dt_time(14, 0),
-    dt_time(16, 0),
-    dt_time(18, 0),
-    dt_time(20, 0),
-]
-
-if weekday == 4:  # جمعه (در تقویم میلادی، جمعه=4 وقتی اول هفته رو شنبه بگیریم)
-    if not any(abs((datetime.combine(now.date(), t) - datetime.combine(now.date(), current_time)).total_seconds()) < 150 for t in friday_allowed_times):
-        print("🕌 امروز جمعه‌ست و الان جزو ۵ زمان مجاز نیست. اسکریپت متوقف شد.")
-        sys.exit()
-else:
-    if not (start_time <= current_time <= end_time):
-        print("🕒 خارج از بازه مجاز اجرا (۹:۳۰ تا ۲۲:۳۰). اسکریپت متوقف شد.")
-        sys.exit()
 
 def get_driver():
     try:
@@ -355,8 +328,43 @@ def get_last_messages(bot_token, chat_id, limit=5):
     return []
 
 
+
+def delete_old_messages_with_phone_icon(bot_token, chat_id):
+    url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+    response = requests.get(url)
+    data = response.json()
+
+    if not data.get("ok"):
+        logging.error("❌ خطا در دریافت پیام‌ها")
+        return
+
+    messages = data.get("result", [])
+    for item in messages:
+        message = item.get("message")
+        if not message:
+            continue
+
+        message_id = message.get("message_id")
+        text = message.get("text", "")
+
+        if "☎️" in text:
+            delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+            params = {
+                "chat_id": chat_id,
+                "message_id": message_id
+            }
+            del_response = requests.post(delete_url, json=params)
+            if del_response.status_code == 200:
+                logging.info(f"🗑 پیام با آیکون تلفن حذف شد: {message_id}")
+            else:
+                logging.warning(f"❌ نتوانستم پیام را حذف کنم: {del_response.text}")
+
+
 def main():
     try:
+                # حذف پیام‌های قدیمی که آیکون ☎️ دارن
+        delete_old_messages_with_phone_icon(BOT_TOKEN, CHAT_ID)  # این رو اضافه کن
+        
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
