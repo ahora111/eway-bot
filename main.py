@@ -327,7 +327,7 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
-def preview_messages_with_emoji(bot_token, channel_username, emoji="☎️"):
+def delete_previous_messages_with_emoji(bot_token, channel_username, emoji="☎️"):
     updates_url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
     response = requests.get(updates_url)
     if not response.ok:
@@ -455,7 +455,7 @@ def main():
             "🔷 بلو بانک   حسین گرئی\n\n"
             "⭕️ حتما رسید واریز به ایدی تلگرام زیر ارسال شود .\n"
             "🆔 @lhossein1\n\n"
-            "✅شماره تماس ثبت سفارش :\n"
+            "☎️ شماره تماس ثبت سفارش :\n"
             "📞 09371111558\n"
             "📞 09386373926\n"
             "📞 09308529712\n"
