@@ -327,41 +327,43 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
-def delete_previous_messages_with_emoji(bot_token, chat_id, emoji="☎️"):
+def preview_messages_with_emoji(bot_token, channel_username, emoji="☎️"):
     updates_url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
-    delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
-    
     response = requests.get(updates_url)
     if not response.ok:
         logging.error("❌ خطا در دریافت پیام‌ها!")
         return
     
     updates = response.json().get("result", [])
+    messages_to_delete = []  # لیست پیام‌هایی که شامل ایموجی هستند
+    
     for update in updates:
         message = update.get("message", {})
         text = message.get("text", "")
         message_id = message.get("message_id")
         
-        if emoji in text:
-            params = {
-                "chat_id": chat_id,
-                "message_id": message_id
-            }
-            delete_response = requests.post(delete_url, data=params)
-            if delete_response.ok:
-                logging.info(f"✅ پیام با آی‌دی {message_id} حذف شد.")
-            else:
-                logging.error(f"❌ خطا در حذف پیام {message_id}: {delete_response.text}")
-
+        if emoji in text and message.get("chat", {}).get("username") == channel_username:
+            messages_to_delete.append((message_id, text))  # افزودن پیام به لیست
+    
+    # پرینت پیام‌هایی که شناسایی شده‌اند
+    if messages_to_delete:
+        print("🔍 پیام‌هایی که شامل ایموجی ☎️ هستند و برای حذف آماده‌اند:")
+        for msg_id, msg_text in messages_to_delete:
+            print(f"🆔 ID پیام: {msg_id}\n📄 متن پیام: {msg_text}\n")
+    else:
+        print("✅ هیچ پیام شامل ایموجی ☎️ یافت نشد.")
 
 def main():
     try:
         delete_previous_messages_with_emoji(BOT_TOKEN, CHAT_ID)
 
+        
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
+                # پیش از هر کاری، پیام‌های کانال را بررسی کن
+        preview_messages_with_emoji(BOT_TOKEN, "@test1236547")  # نام کاربری کانال را اینجا جایگزین کنید
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
