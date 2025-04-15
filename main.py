@@ -328,7 +328,6 @@ def get_last_messages(bot_token, chat_id, limit=5):
     return []
 
 
-
 def delete_old_messages_with_phone_icon(bot_token, chat_id):
     url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
     response = requests.get(url)
@@ -336,9 +335,11 @@ def delete_old_messages_with_phone_icon(bot_token, chat_id):
 
     if not data.get("ok"):
         logging.error("❌ خطا در دریافت پیام‌ها")
+        print(f"Response: {data}")  # پرینت داده‌های پاسخ برای اشکال زدایی
         return
 
     messages = data.get("result", [])
+    print(f"Messages: {messages}")  # پرینت پیام‌ها برای بررسی
     for item in messages:
         message = item.get("message")
         if not message:
@@ -347,6 +348,8 @@ def delete_old_messages_with_phone_icon(bot_token, chat_id):
         message_id = message.get("message_id")
         text = message.get("text", "")
 
+        print(f"Checking message: {text}")  # پرینت متن پیام برای بررسی آیکون
+
         if "☎️" in text:
             delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
             params = {
@@ -354,22 +357,18 @@ def delete_old_messages_with_phone_icon(bot_token, chat_id):
                 "message_id": message_id
             }
             del_response = requests.post(delete_url, json=params)
-
-            # بررسی نتیجه درخواست حذف پیام
             if del_response.status_code == 200:
                 logging.info(f"🗑 پیام با آیکون تلفن حذف شد: {message_id}")
             else:
+                # پرینت وضعیت خطا
                 logging.warning(f"❌ نتوانستم پیام را حذف کنم: {del_response.text}")
-
-            # اضافه کردن تأخیر کوتاه بین درخواست‌ها برای جلوگیری از بروز مشکلات
-            time.sleep(1)  # تأخیر 1 ثانیه‌ای بین درخواست‌ها
-
+                print(f"Delete Response: {del_response.text}")  # پرینت پاسخ خطا از تلگرام
 
 def main():
-    try:
                 # حذف پیام‌های قدیمی که آیکون ☎️ دارن
-        delete_old_messages_with_phone_icon(BOT_TOKEN, CHAT_ID)  # این رو اضافه کن
-        
+    bot_token = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
+    chat_id = "-1002505490886"
+    delete_old_messages_with_phone_icon(bot_token, chat_id)
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
