@@ -335,22 +335,23 @@ def delete_old_messages_with_phone_icon(bot_token, chat_id):
 
     if not data.get("ok"):
         logging.error("❌ خطا در دریافت پیام‌ها")
-        print(f"Response: {data}")  # پرینت داده‌های پاسخ برای اشکال زدایی
+        print("❌ خطا در دریافت پیام‌ها")
         return
 
     messages = data.get("result", [])
-    print(f"Messages: {messages}")  # پرینت پیام‌ها برای بررسی
+    logging.info(f"Messages: {messages}")
+    print(f"Messages: {messages}")
+
     for item in messages:
-        message = item.get("message")
-        if not message:
+        post = item.get("channel_post")
+        if not post:
             continue
 
-        message_id = message.get("message_id")
-        text = message.get("text", "")
-
-        print(f"Checking message: {text}")  # پرینت متن پیام برای بررسی آیکون
+        message_id = post.get("message_id")
+        text = post.get("text", "")
 
         if "☎️" in text:
+            print(f"🧹 پیدا شد: پیام {message_id} با متن:\n{text}")
             delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
             params = {
                 "chat_id": chat_id,
@@ -359,10 +360,10 @@ def delete_old_messages_with_phone_icon(bot_token, chat_id):
             del_response = requests.post(delete_url, json=params)
             if del_response.status_code == 200:
                 logging.info(f"🗑 پیام با آیکون تلفن حذف شد: {message_id}")
+                print(f"🗑 حذف شد: {message_id}")
             else:
-                # پرینت وضعیت خطا
                 logging.warning(f"❌ نتوانستم پیام را حذف کنم: {del_response.text}")
-                print(f"Delete Response: {del_response.text}")  # پرینت پاسخ خطا از تلگرام
+                print(f"❌ حذف نشد! {del_response.text}")
 
 def main():
     try: 
