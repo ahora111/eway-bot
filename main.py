@@ -340,6 +340,7 @@ async def delete_old_messages_with_phone_emoji(channel_username):
             except Exception as e:
                 print(f"❌ Failed to delete message {message.id}: {e}")
 
+# تابع اصلی که async هست
 async def main():
     await client.start()
 
@@ -350,6 +351,7 @@ async def main():
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
+        
 
 
         
