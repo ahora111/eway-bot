@@ -330,6 +330,7 @@ def get_last_messages(bot_token, chat_id, limit=5):
     return []
 
 
+
 async def delete_old_messages_with_phone_emoji(channel_username):
     async for message in client.iter_messages(channel_username, limit=100):
         if message.text and '☎️' in message.text:
@@ -340,14 +341,16 @@ async def delete_old_messages_with_phone_emoji(channel_username):
                 print(f"❌ Failed to delete message {message.id}: {e}")
 
 async def main():
-    await client.start()  # مطمئن شو قبل از استفاده از client اینو صدا بزنی
+    await client.start()
 
-    await delete_old_messages_with_phone_emoji('your_channel_username')
+    try:
+        await delete_old_messages_with_phone_emoji('your_channel_username')
 
-    driver = get_driver()
-    if not driver:
-        logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
-        return
+        driver = get_driver()
+        if not driver:
+            logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
+            return
+
 
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
