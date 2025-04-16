@@ -6,7 +6,6 @@ import logging
 import json
 import pytz
 import sys
-import subprocess
 from datetime import datetime, time as dt_time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -17,8 +16,6 @@ from persiantools.jdatetime import JalaliDate
 
 BOT_TOKEN = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
 CHAT_ID = "-1002505490886"
-CHANNEL_ID = "@test1236547"  # آیدی کانال شما
-MESSAGE_FILE = "data/message_ids.json"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -322,52 +319,9 @@ def categorize_messages(lines):
 
     return categories
 
-
-
-
-
-
-def delete_previous_messages(bot_token, chat_id):
-    if not os.path.exists(MESSAGE_FILE):
-        return
-
-    with open(MESSAGE_FILE, "r", encoding="utf-8") as f:
-        try:
-            message_ids = json.load(f)
-        except json.JSONDecodeError:
-            logging.error("❌ فایل message_ids.json خراب است.")
-            message_ids = []
-
-    for msg_id in message_ids:
-        url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
-        payload = {"chat_id": chat_id, "message_id": msg_id}
-        response = requests.post(url, json=payload)
-        if response.ok:
-            logging.info(f"🗑 پیام {msg_id} حذف شد.")
-        else:
-            logging.warning(f"⚠️ حذف پیام {msg_id} ناموفق بود: {response.text}")
-
-def save_message_ids_and_commit(message_ids):
-    os.makedirs("data", exist_ok=True)
-    with open(MESSAGE_FILE, "w", encoding="utf-8") as f:
-        json.dump(message_ids, f)
-
-    try:
-        subprocess.run(["git", "config", "--global", "user.email", "bot@github.com"])
-        subprocess.run(["git", "config", "--global", "user.name", "AutoBot"])
-        subprocess.run(["git", "add", MESSAGE_FILE], check=True)
-        subprocess.run(["git", "commit", "-m", "🔁 به‌روزرسانی message_ids.json"], check=True)
-        subprocess.run(["git", "push"], check=True)
-        logging.info("✅ فایل message_ids.json با موفقیت push شد.")
-    except subprocess.CalledProcessError as e:
-        logging.warning(f"⚠️ خطا در commit/push فایل: {e}")
-
 def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
-    delete_previous_messages(bot_token, chat_id)
-
     message_parts = split_message(message)
-    message_ids = []
-
+    last_message_id = None
     for part in message_parts:
         part = escape_markdown(part)
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -377,31 +331,57 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
             "parse_mode": "MarkdownV2"
         }
         if reply_markup:
-            params["reply_markup"] = json.dumps(reply_markup)
+            params["reply_markup"] = json.dumps(reply_markup)  # ✅ تبدیل `reply_markup` به JSON
 
-        headers = {"Content-Type": "application/json"}
-        response = requests.post(url, json=params, headers=headers)
+        headers = {"Content-Type": "application/json"}  # ✅ اضافه کردن `headers` برای `POST`
+        response = requests.post(url, json=params, headers=headers)  
         response_data = response.json()
         if response_data.get('ok'):
-            msg_id = response_data["result"]["message_id"]
-            message_ids.append(msg_id)
+            last_message_id = response_data["result"]["message_id"]
         else:
             logging.error(f"❌ خطا در ارسال پیام: {response_data}")
             return None
 
-    save_message_ids_and_commit(message_ids)
-    return message_ids[-1] if message_ids else None
+    logging.info("✅ پیام ارسال شد!")
+    return last_message_id  # برگشت message_id آخرین پیام
 
+
+def get_last_messages(bot_token, chat_id, limit=5):
+    url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+    response = requests.get(url)
+    if response.json().get("ok"):
+        messages = response.json().get("result", [])
+        return [msg for msg in messages if "message" in msg][-limit:]
+    return []
+
+
+def delete_previous_messages(bot_token, chat_id):
+    try:
+        # دریافت تاریخچه پیام‌ها
+        url = f"https://api.telegram.org/bot{bot_token}/getChatHistory?chat_id={chat_id}&limit=100"
+        response = requests.get(url)
+        messages = response.json().get("result", [])
+
+        # حذف پیام‌های قبلی
+        for message in messages:
+            message_id = message["message_id"]
+            delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage?chat_id={chat_id}&message_id={message_id}"
+            requests.get(delete_url)
+
+        logging.info("✅ پیام‌های قبلی حذف شدند!")
+    except Exception as e:
+        logging.error(f"❌ خطا در حذف پیام‌ها: {e}")
 
 def main():
-
-    # اجرای بخش استخراج داده‌ها
     try:
+        # ابتدا پیام‌های قبلی را حذف می‌کنیم
+        delete_previous_messages(BOT_TOKEN, CHAT_ID)
+
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
-            
+        
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
@@ -492,7 +472,7 @@ def main():
             "🔷 بلو بانک   حسین گرئی\n\n"
             "⭕️ حتما رسید واریز به ایدی تلگرام زیر ارسال شود .\n"
             "🆔 @lhossein1\n\n"
-            "☎️ شماره تماس ثبت سفارش :\n"
+            "✅شماره تماس ثبت سفارش :\n"
             "📞 09371111558\n"
             "📞 09386373926\n"
             "📞 09308529712\n"
