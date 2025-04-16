@@ -2,7 +2,7 @@ name: Run Scraper
 
 on:
   schedule:
-    - cron: "*/5 6-18 * * *"  # هر 5 دقیقه از ساعت 6 صبح تا 6 عصر اجرا می‌شود
+    - cron: "*/5 6-18 * * *"
   workflow_dispatch:  # این مورد به شما امکان می‌دهد به‌صورت دستی هم اجرا کنید
 
 jobs:
@@ -25,22 +25,4 @@ jobs:
 
     - name: Run scraper
       run: |
-        python main.py  # نام فایل اسکریپت خود را به جای main.py بگذارید
-      env:
-        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-        CHAT_ID: ${{ secrets.CHAT_ID }}
-
-    - name: Set up GitHub token
-      run: git config --global credential.helper store
-      env:
-        GH_TOKEN: ${{ secrets.GH_TOKEN }}
-
-    - name: Commit and push updated message_ids.json
-      run: |
-        git config --global user.email "bot@github.com"
-        git config --global user.name "AutoBot"
-        git add data/message_ids.json
-        git commit -m "🔁 به‌روزرسانی message_ids.json"
-        git push
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        python main.py  # نام فایل اسکریپت خود را به جای your_script.py بگذارید
