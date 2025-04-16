@@ -20,6 +20,13 @@ CHAT_ID = "-1002505490886"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
+import json
+
+data = {"id": 123, "message": "Hello, World!"}
+
+with open("message_ids.json", "w") as file:
+    json.dump(data, file)
+    
 def get_driver():
     try:
         options = webdriver.ChromeOptions()
