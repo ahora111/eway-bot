@@ -19,6 +19,33 @@ CHAT_ID = "-1002505490886"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+# منطقه زمانی ایران
+iran_tz = pytz.timezone('Asia/Tehran')
+now = datetime.now(iran_tz)
+current_time = now.time()
+weekday = now.weekday()  # 0=دوشنبه، ..., 4=پنج‌شنبه، 5=جمعه, 6=شنبه
+
+# بازه مجاز در روزهای عادی
+start_time = dt_time(9, 30)
+end_time = dt_time(22, 30)
+
+# بازه زمانی روزهای خاص 
+friday_allowed_times = [
+    dt_time(12, 0),
+    dt_time(14, 0),
+    dt_time(16, 0),
+    dt_time(18, 0),
+    dt_time(20, 0),
+]
+
+if weekday == 4:  # جمعه (در تقویم میلادی، جمعه=4 وقتی اول هفته رو شنبه بگیریم)
+    if not any(abs((datetime.combine(now.date(), t) - datetime.combine(now.date(), current_time)).total_seconds()) < 150 for t in friday_allowed_times):
+        print("🕌 امروز جمعه‌ست و الان جزو ۵ زمان مجاز نیست. اسکریپت متوقف شد.")
+        sys.exit()
+else:
+    if not (start_time <= current_time <= end_time):
+        print("🕒 خارج از بازه مجاز اجرا (۹:۳۰ تا ۲۲:۳۰). اسکریپت متوقف شد.")
+        sys.exit()
 
 def get_driver():
     try:
@@ -327,44 +354,68 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
-def delete_previous_messages_with_emoji(bot_token, channel_username, emoji="☎️"):
-    updates_url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
-    response = requests.get(updates_url)
-    if not response.ok:
-        logging.error("❌ خطا در دریافت پیام‌ها!")
+
+
+
+
+def delete_old_messages_with_phone_emoji(bot_token, chat_id):
+    print("📥 در حال دریافت پیام‌های کانال...")
+
+    url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+    response = requests.get(url)
+
+    if response.status_code != 200:
+        print("❌ خطا در ارتباط با سرور تلگرام:", response.status_code)
         return
-    
-    updates = response.json().get("result", [])
-    messages_to_delete = []  # لیست پیام‌هایی که شامل ایموجی هستند
-    
-    for update in updates:
-        message = update.get("message", {})
-        text = message.get("text", "")
-        message_id = message.get("message_id")
-        
-        if emoji in text and message.get("chat", {}).get("username") == channel_username:
-            messages_to_delete.append((message_id, text))  # افزودن پیام به لیست
-    
-    # پرینت پیام‌هایی که شناسایی شده‌اند
-    if messages_to_delete:
-        print("🔍 پیام‌هایی که شامل ایموجی ☎️ هستند و برای حذف آماده‌اند:")
-        for msg_id, msg_text in messages_to_delete:
-            print(f"🆔 ID پیام: {msg_id}\n📄 متن پیام: {msg_text}\n")
-    else:
-        print("✅ هیچ پیام شامل ایموجی ☎️ یافت نشد.")
+
+    data = response.json()
+    if not data.get("ok"):
+        print("❌ دریافت داده با خطا مواجه شد:", data.get("description", "خطای نامشخص"))
+        return
+
+    messages = data["result"]
+    found_any = False  # برای اینکه بدونیم چیزی برای حذف بوده یا نه
+
+    for msg in messages:
+        message = msg.get("channel_post")
+        if message:
+            text = message.get("text", "")
+            message_id = message["message_id"]
+
+            if "☎️" in text:
+                found_any = True
+                short_text = text[:30].replace("\n", " ") + "..."
+                print(f"🔍 پیدا شد: [{message_id}] {short_text}")
+
+                del_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+                payload = {
+                    "chat_id": chat_id,
+                    "message_id": message_id
+                }
+
+                del_resp = requests.post(del_url, data=payload)
+
+                if del_resp.status_code == 200:
+                    print(f"✅ حذف شد: پیام {message_id}")
+                else:
+                    err = del_resp.json().get("description", "نامشخص")
+                    print(f"❌ خطا در حذف پیام {message_id}: {err}")
+                time.sleep(0.5)  # برای جلوگیری از محدودیت API
+
+    if not found_any:
+        print("ℹ️ هیچ پیامی با ایموجی ☎️ پیدا نشد.")
+
 
 def main():
     try:
-        delete_previous_messages_with_emoji(BOT_TOKEN, CHAT_ID)
+        # ابتدا حذف پیام‌های قدیمی با ایموجی ☎️
+        delete_old_messages_with_phone_emoji(BOT_TOKEN, CHAT_ID)
 
-        
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
-                # پیش از هر کاری، پیام‌های کانال را بررسی کن
-        delete_previous_messages_with_emoji(BOT_TOKEN, "@test1236547")  # نام کاربری کانال را اینجا جایگزین کنید
-        
+            
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
