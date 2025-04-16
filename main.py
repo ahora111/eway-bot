@@ -405,6 +405,24 @@ def delete_old_messages_with_phone_emoji(bot_token, chat_id):
     if not found_any:
         print("ℹ️ هیچ پیامی با ایموجی ☎️ پیدا نشد.")
 
+import requests
+
+def get_message_sender(bot_token, chat_id):
+    # دریافت پیام‌ها
+    url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+    response = requests.get(url)
+    updates = response.json()
+
+    for update in updates["result"]:
+        # بررسی اینکه پیام کانال (یا چت) هست یا نه
+        message = update.get("channel_post")  # برای پیام‌های کانال
+        if message:
+            message_id = message["message_id"]
+            sender_id = message["from"]["id"]  # ایدی فرستنده
+            sender_name = message["from"].get("first_name", "ناشناس")  # اسم فرستنده
+
+            print(f"پیام {message_id} از {sender_name} (ID: {sender_id}) ارسال شده.")
+
 
 def main():
     try:
