@@ -509,4 +509,3 @@ def edit_telegram_message(message, token, chat_id, message_id):
     else:
         logging.error(f"❌ خطا در ویرایش پیام: {result.get('description')}")
         return message_id
-
