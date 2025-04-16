@@ -405,22 +405,34 @@ def send_or_edit_message(bot_token, chat_id, category, message, message_ids):
         logging.error(f"❌ خطای عمومی در ارسال/ویرایش پیام [{category}]: {e}")
 
 
+
 def save_message_ids(message_ids, filename="message_ids.json"):
     try:
-        # مسیر کامل فایل
+        # مسیر فایل جیسون
         file_path = os.path.join(os.getcwd(), filename)
+
+        # بررسی اینکه آیا مسیر فایل موجود است یا خیر
+        if not os.path.exists(os.getcwd()):
+            logging.error("❌ مسیر فعلی موجود نیست!")
+            return
+        
         logging.info(f"📁 تلاش برای ذخیره‌سازی message_ids در: {file_path}")
 
+        # ذخیره‌سازی داده‌ها در فایل جیسون
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(message_ids, f, indent=2, ensure_ascii=False)
 
         logging.info(f"📁 message_ids ذخیره شد در {file_path}")
+
     except Exception as e:
         logging.error(f"❌ خطا در ذخیره‌سازی message_ids: {e}")
 
 # تست ذخیره‌سازی
 message_ids = {'samsung': 1596, 'xiaomi': 1597}
 save_message_ids(message_ids)
+
+
+
 def get_last_messages(bot_token, chat_id, limit=5):
     url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
     response = requests.get(url)
