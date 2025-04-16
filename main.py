@@ -372,6 +372,14 @@ def check_and_update_messages(categories, bot_token, chat_id, message_ids_file="
                         print(f"✅ پیام جدید ارسال شد برای {category}: {new_message_id}")
                     updated_message_ids[category] = new_message_id
             else:
+                # اگر دسته‌بندی در message_ids وجود نداشته باشد
+                new_message_id = send_telegram_message(message, bot_token, chat_id)
+                if new_message_id:
+                    print(f"✅ پیام جدید ارسال شد برای {category}: {new_message_id}")
+                updated_message_ids[category] = new_message_id
+
+    # ذخیره message_ids جدید
+    save_message_ids(message_ids_file, updated_message_ids)
                 
 def main():
     try:
