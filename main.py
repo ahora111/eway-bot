@@ -6,8 +6,6 @@ import logging
 import json
 import pytz
 import sys
-from telegram import Bot
-from telegram.ext import Updater
 from datetime import datetime, time as dt_time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -218,6 +216,8 @@ def prepare_final_message(category_name, category_lines, update_date):
     weekday_farsi = list(weekday_mapping.values())[weekday_english]  # تبدیل ایندکس به روز فارسی
     update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
 
+    print(f"نام روز هفته به انگلیسی: {weekday_english}")
+    print(update_date_formatted)  # برای تست
 
     # ساخت هدر پیام
     header = (
@@ -355,51 +355,13 @@ def get_last_messages(bot_token, chat_id, limit=5):
     return []
 
 
-
-# توکن ربات تلگرام خود را وارد کنید
-TOKEN = '8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ'
-chat_id = '-1002505490886'
-
-# ایجاد بات
-bot = Bot(TOKEN)
-
-# تابعی برای حذف پیام‌ها با ایموجی "☎️"
-def delete_messages_with_phone():
-    # فهرستی از پیام‌ها که شامل "☎️" هستند
-    messages_to_delete = []
-    
-    # دریافت به‌روزرسانی‌ها از چت
-    updates = bot.get_updates(limit=10)  # تعیین محدودیت تعداد به‌روزرسانی‌ها (به دلخواه)
-    
-    for update in updates:
-        if "message" in update:
-            message = update["message"]
-            chat_id = message["chat"]["id"]
-            if "☎️" in message["text"]:
-                messages_to_delete.append(message["message_id"])
-    
-    # حذف پیام‌ها
-    for message_id in messages_to_delete:
-        try:
-            bot.delete_message(chat_id=chat_id, message_id=message_id)
-            print(f"Message {message_id} deleted successfully.")
-            time.sleep(1)  # اضافه کردن تاخیر برای جلوگیری از درخواست‌های زیاد
-        except Exception as e:
-            print(f"Failed to delete message {message_id}: {str(e)}")
-
-
-
 def main():
     try:
-        print("✅ شروع عملیات اصلی برنامه...")
-        # اینجا کدهای شما باید با 4 فاصله یا یک تب وارد شوند
-        delete_messages_with_phone()
-        print("✅ حذف پیام‌های قبلی تکمیل شد، ادامه می‌دهیم...")
-        
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
+        
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
@@ -459,29 +421,41 @@ def main():
                 if lines:
                     # استفاده از تابع جدید برای آماده‌سازی پیام
                     message = prepare_final_message(category, lines, update_date)
-                    msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
+                    # اگر پیام قبلی موجود باشد، ویرایش می‌کنیم
+                    if category == "🔵" and samsung_message_id:
+                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=samsung_message_id)
+                    elif category == "🟡" and xiaomi_message_id:
+                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=xiaomi_message_id)
+                    elif category == "🍏" and iphone_message_id:
+                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=iphone_message_id)
+                    elif category == "💻" and laptop_message_id:
+                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=laptop_message_id)
+                    elif category == "🟠" and tablet_message_id:
+                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=tablet_message_id)
+                    elif category == "🎮" and console_message_id:
+                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=console_message_id)
+                    else:
+                        # ارسال پیام جدید اگر پیام قبلی وجود نداشته باشد
+                        msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
-                    if category == "🔵":
-                        samsung_message_id = msg_id
-                    elif category == "🟡":
-                        xiaomi_message_id = msg_id
-                    elif category == "🍏":
-                        iphone_message_id = msg_id
-                    elif category == "💻":
-                        laptop_message_id = msg_id
-                    elif category == "🟠":
-                        tablet_message_id = msg_id
-                    elif category == "🎮":
-                        console_message_id = msg_id
+                        # ذخیره message_id جدید برای هر دسته‌بندی
+                        if category == "🔵":
+                            samsung_message_id = msg_id
+                        elif category == "🟡":
+                            xiaomi_message_id = msg_id
+                        elif category == "🍏":
+                            iphone_message_id = msg_id
+                        elif category == "💻":
+                            laptop_message_id = msg_id
+                        elif category == "🟠":
+                            tablet_message_id = msg_id
+                        elif category == "🎮":
+                            console_message_id = msg_id
         else:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
 
-        if not samsung_message_id:
-            logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
-            return
-
-        # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
+        # ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
@@ -490,7 +464,7 @@ def main():
             "🔷 بلو بانک   حسین گرئی\n\n"
             "⭕️ حتما رسید واریز به ایدی تلگرام زیر ارسال شود .\n"
             "🆔 @lhossein1\n\n"
-            "☎️ شماره تماس ثبت سفارش :\n"
+            "✅شماره تماس ثبت سفارش :\n"
             "📞 09371111558\n"
             "📞 09386373926\n"
             "📞 09308529712\n"
@@ -518,3 +492,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
