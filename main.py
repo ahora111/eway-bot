@@ -368,14 +368,13 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
 
 
 # تعریف تابعی برای بررسی و ویرایش پیام‌ها
-def edit_or_skip_message(bot, chat_id, message_id, old_message_content, new_message_content, keyboard):
+# تابع برای ارسال یا ویرایش پیام‌ها
+def send_or_edit_message(bot, chat_id, message_id, old_message_content, new_message_content, keyboard):
     try:
         if old_message_content != new_message_content:
-            # اگر محتوای پیام تغییر کرده باشد، پیام را ویرایش می‌کنیم
             bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=new_message_content, reply_markup=keyboard)
             logging.info(f"✅ پیام ویرایش شد: {message_id}")
         else:
-            # اگر محتوای پیام تغییر نکرده باشد، پیام را نادیده می‌گیریم
             logging.info(f"❌ پیام تغییر نکرد: {message_id}")
     except Exception as e:
         logging.error(f"❌ خطا در ارسال/ویرایش پیام: {e}")
@@ -415,19 +414,14 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
-# حلقه برای بررسی و ویرایش پیام‌ها
-def process_messages(bot, chat_id, message_ids, messages_content, new_messages_content, keyboard):
-    for category, old_message_content in messages_content.items():
-        message_id = message_ids.get(category)
-        new_message_content = new_messages_content.get(category)
+# تابع برای پردازش پیام‌ها
+def process_messages(bot, chat_id, message_ids, old_messages, new_messages, keyboard):
+    for category, message_id in message_ids.items():
+        old_message_content = old_messages.get(category)
+        new_message_content = new_messages.get(category)
+        send_or_edit_message(bot, chat_id, message_id, old_message_content, new_message_content, keyboard)
 
-        # ویرایش یا رد پیام با توجه به تغییرات
-        edit_or_skip_message(bot, chat_id, message_id, old_message_content, new_message_content, keyboard)
-        
-        # زمان تأخیر بین ارسال‌ها
-        time.sleep(1)
-
-# فراخوانی تابع برای همه دسته‌بندی‌ها
+# فراخوانی تابع برای پردازش پیام‌ها
 process_messages(bot, chat_id, message_ids, old_messages, new_messages, keyboard)
 
 def main():
