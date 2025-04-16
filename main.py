@@ -340,40 +340,18 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     return last_message_id  # برگشت message_id آخرین پیام
 
 
-def send_or_edit_message(bot_token, chat_id, category, message, message_ids):
-    bot = Bot(token=bot_token)
-
-    # بررسی اینکه آیا message_id قبلاً وجود دارد یا نه
-    message_id = message_ids.get(category)
-
+# تعریف تابعی برای بررسی و ویرایش پیام‌ها
+def edit_or_skip_message(bot, chat_id, message_id, old_message_content, new_message_content, keyboard):
     try:
-        if message_id:
-            # تلاش برای ویرایش پیام قبلی
-            bot.edit_message_text(
-                text=message,
-                chat_id=chat_id,
-                message_id=message_id,
-                parse_mode="HTML"
-            )
-            logging.info(f"✅ پیام ویرایش شد: {category} (ID: {message_id})")
+        if old_message_content != new_message_content:
+            # اگر محتوای پیام تغییر کرده باشد، پیام را ویرایش می‌کنیم
+            bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=new_message_content, reply_markup=keyboard)
+            logging.info(f"✅ پیام ویرایش شد: {message_id}")
         else:
-            # ارسال پیام جدید
-            sent_message = bot.send_message(
-                chat_id=chat_id,
-                text=message,
-                parse_mode="HTML"
-            )
-            # ذخیره شناسه پیام در message_ids
-            message_ids[category] = sent_message.message_id
-            logging.info(f"✅ پیام ارسال شد: {category} (ID: {sent_message.message_id})")
-            save_message_ids(message_ids)  # ذخیره شناسه پیام در فایل
-
-    except TelegramError as e:
-        logging.error(f"❌ خطای تلگرام در ارسال/ویرایش پیام [{category}]: {e}")
+            # اگر محتوای پیام تغییر نکرده باشد، پیام را نادیده می‌گیریم
+            logging.info(f"❌ پیام تغییر نکرد: {message_id}")
     except Exception as e:
-        logging.error(f"❌ خطای عمومی در ارسال/ویرایش پیام [{category}]: {e}")
-
-
+        logging.error(f"❌ خطا در ارسال/ویرایش پیام: {e}")
 
 def save_message_ids(message_ids, filename="message_ids.json"):
     try:
@@ -409,6 +387,21 @@ def get_last_messages(bot_token, chat_id, limit=5):
         messages = response.json().get("result", [])
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
+
+# حلقه برای بررسی و ویرایش پیام‌ها
+def process_messages(bot, chat_id, message_ids, messages_content, new_messages_content, keyboard):
+    for category, old_message_content in messages_content.items():
+        message_id = message_ids.get(category)
+        new_message_content = new_messages_content.get(category)
+
+        # ویرایش یا رد پیام با توجه به تغییرات
+        edit_or_skip_message(bot, chat_id, message_id, old_message_content, new_message_content, keyboard)
+        
+        # زمان تأخیر بین ارسال‌ها
+        time.sleep(1)
+
+# فراخوانی تابع برای همه دسته‌بندی‌ها
+process_messages(bot, chat_id, message_ids, old_messages, new_messages, keyboard)
 
 def main():
     logging.basicConfig(
