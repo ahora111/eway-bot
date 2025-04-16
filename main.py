@@ -3,8 +3,8 @@ import datetime
 import requests
 import os
 
-BOT_TOKEN = os.environ['8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ']
-CHAT_ID = os.environ['-1002505490886']
+BOT_TOKEN = os.environ['BOT_TOKEN']
+CHAT_ID = os.environ['CHAT_ID']
 MESSAGE_IDS_FILE = 'message_ids.json'
 
 def load_message_ids():
