@@ -18,6 +18,7 @@ from persiantools.jdatetime import JalaliDate
 
 BOT_TOKEN = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
 CHAT_ID = "-1002505490886"
+MESSAGE_IDS_FILE = "message_ids.json"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
