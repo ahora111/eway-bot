@@ -24,6 +24,25 @@ bot = Bot(token="8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+# محتوای قدیمی و جدید پیام‌ها
+old_messages = {
+    "samsung": "Old message content for samsung",
+    "xiaomi": "Old message content for xiaomi",
+    "iphone": "Old message content for iphone",
+    "laptop": "Old message content for laptop",
+    "tablet": "Old message content for tablet",
+    "motefareghe": "Old message content for motefareghe"
+}
+
+new_messages = {
+    "samsung": "New message content for samsung",
+    "xiaomi": "New message content for xiaomi",
+    "iphone": "New message content for iphone",
+    "laptop": "New message content for laptop",
+    "tablet": "New message content for tablet",
+    "motefareghe": "New message content for motefareghe"
+}
+
 def get_driver():
     try:
         options = webdriver.ChromeOptions()
