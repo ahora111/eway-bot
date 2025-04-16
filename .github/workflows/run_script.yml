@@ -20,7 +20,14 @@ jobs:
 
       - name: Install dependencies
         run: pip install requests
+        
+      - name: Upload message_ids.json as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: message_ids
+          path: message_ids.json
 
+        
       - name: Run script
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
