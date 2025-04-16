@@ -30,6 +30,11 @@ jobs:
         BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         CHAT_ID: ${{ secrets.CHAT_ID }}
 
+    - name: Set up GitHub token
+      run: git config --global credential.helper store
+      env:
+        GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
     - name: Commit and push updated message_ids.json
       run: |
         git config --global user.email "bot@github.com"
