@@ -374,7 +374,9 @@ def check_and_update_messages(categories, bot_token, chat_id, message_ids_file="
             else:
 
     # ذخیره message_ids جدید
+if condition:
     save_message_ids(message_ids_file, updated_message_ids)
+
 
 def main():
     try:
