@@ -22,7 +22,7 @@ jobs:
         run: pip install requests
         
       - name: Upload message_ids.json as artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v2.2.4
         with:
           name: message_ids
           path: message_ids.json
