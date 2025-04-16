@@ -6,7 +6,7 @@ import os
 # دریافت توکن و شناسه چت از متغیرهای محیطی
 BOT_TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = os.environ['CHAT_ID']
-MESSAGE_IDS_FILE = 'message_ids.json'
+MESSAGE_IDS_FILE = 'message_ids.json'  # یا مسیر کامل فایل
 
 def load_message_ids():
     if os.path.exists(MESSAGE_IDS_FILE):
@@ -69,3 +69,6 @@ else:
     # پیام قبلاً ارسال شده، فقط ویرایش کن
     edit_telegram_message(message_ids["main"], text)
     print("پیام ویرایش شد.")
+
+# چاپ مسیر فعلی برای بررسی
+print("Current directory:", os.getcwd())
