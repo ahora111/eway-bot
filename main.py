@@ -373,10 +373,6 @@ def check_and_update_messages(categories, bot_token, chat_id, message_ids_file="
                     updated_message_ids[category] = new_message_id
             else:
 
-if condition:
-    # بلاک کد مورد نیاز
-    print("شرط برقرار است.")
-    save_message_ids(message_ids_file, updated_message_ids)
 
 
 
