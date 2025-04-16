@@ -355,22 +355,18 @@ def get_last_messages(bot_token, chat_id, limit=5):
     return []
 
 
-def delete_previous_messages(bot_token, chat_id):
-    try:
-        # دریافت تاریخچه پیام‌ها
-        url = f"https://api.telegram.org/bot{bot_token}/getChatHistory?chat_id={chat_id}&limit=100"
-        response = requests.get(url)
-        messages = response.json().get("result", [])
-
-        # حذف پیام‌های قبلی
-        for message in messages:
-            message_id = message["message_id"]
-            delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage?chat_id={chat_id}&message_id={message_id}"
-            requests.get(delete_url)
-
-        logging.info("✅ پیام‌های قبلی حذف شدند!")
-    except Exception as e:
-        logging.error(f"❌ خطا در حذف پیام‌ها: {e}")
+# توابع برای حذف پیام‌ها از تلگرام
+def delete_telegram_message(message_id, chat_id, bot_token):
+    url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+    params = {
+        "chat_id": chat_id,
+        "message_id": message_id
+    }
+    response = requests.post(url, data=params)
+    if response.status_code == 200:
+        logging.info(f"✅ پیام با شناسه {message_id} حذف شد.")
+    else:
+        logging.error(f"❌ خطا در حذف پیام با شناسه {message_id}: {response.text}")
 
 def main():
     try:
