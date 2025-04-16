@@ -6,6 +6,8 @@ import logging
 import json
 import pytz
 import sys
+from telegram import Bot
+from telegram.ext import Updater
 from datetime import datetime, time as dt_time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -352,13 +354,11 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
-import time
-from telegram import Bot
-from telegram.ext import Updater
+
 
 # توکن ربات تلگرام خود را وارد کنید
-TOKEN = 'YOUR_BOT_API_TOKEN'
-chat_id = 'YOUR_CHAT_ID'
+TOKEN = '8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ'
+
 
 # ایجاد بات
 bot = Bot(TOKEN)
