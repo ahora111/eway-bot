@@ -6,6 +6,7 @@ import logging
 import json
 import pytz
 import sys
+from telegram import Bot
 from datetime import datetime, time as dt_time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -319,6 +320,29 @@ def categorize_messages(lines):
 
     return categories
 
+
+
+
+def load_message_ids():
+    try:
+        with open('message_ids.json', 'r', encoding='utf-8') as file:
+            return json.load(file)
+    except FileNotFoundError:
+        return {
+            "samsung": None,
+            "xiaomi": None,
+            "iphone": None,
+            "laptop": None,
+            "tablet": None,
+            "console": None
+            "motefareghe": None
+        }
+
+def save_message_ids(message_ids):
+    with open('message_ids.json', 'w', encoding='utf-8') as file:
+        json.dump(message_ids, file, ensure_ascii=False, indent=4)
+
+
 def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     message_parts = split_message(message)
     last_message_id = None
@@ -346,6 +370,22 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     return last_message_id  # برگشت message_id آخرین پیام
 
 
+def send_or_edit_message(bot_token, chat_id, category, message, message_ids):
+    bot = Bot(token=bot_token)
+    
+    message_id = message_ids.get(category)
+    
+    if message_id:
+        # اگر پیام قبلاً ارسال شده، آن را ویرایش می‌کنیم
+        bot.edit_message_text(text=message, chat_id=chat_id, message_id=message_id)
+    else:
+        # اگر پیام جدید است، آن را ارسال می‌کنیم
+        sent_message = bot.send_message(chat_id=chat_id, text=message)
+        message_ids[category] = sent_message.message_id
+    
+    # ذخیره‌سازی ID پیام‌ها
+    save_message_ids(message_ids)
+
 def get_last_messages(bot_token, chat_id, limit=5):
     url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
     response = requests.get(url)
@@ -354,11 +394,11 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
-# این رو اضافه می‌کنیم برای خطایابی بهتر
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def main():
     try:
+        message_ids = load_message_ids()
+        
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
@@ -404,6 +444,7 @@ def main():
         laptop_message_id = None
         tablet_message_id = None
         console_message_id = None
+        motefareghe_message_id = None
 
         if brands:
             processed_data = []
@@ -423,24 +464,8 @@ def main():
                 if lines:
                     # استفاده از تابع جدید برای آماده‌سازی پیام
                     message = prepare_final_message(category, lines, update_date)
-                    
-                    # بررسی اینکه آیا پیام قبلی ارسال شده است یا نه
-                    if category == "🔵" and samsung_message_id:
-                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, samsung_message_id)
-                    elif category == "🟡" and xiaomi_message_id:
-                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, xiaomi_message_id)
-                    elif category == "🍏" and iphone_message_id:
-                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, iphone_message_id)
-                    elif category == "💻" and laptop_message_id:
-                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, laptop_message_id)
-                    elif category == "🟠" and tablet_message_id:
-                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, tablet_message_id)
-                    elif category == "🎮" and console_message_id:
-                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, console_message_id)
-                    else:
-                        msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+                    msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
-                    logging.info(f"پیام ارسال شده برای دسته‌بندی {category}: {message}")
 
                     if category == "🔵":
                         samsung_message_id = msg_id
@@ -461,6 +486,16 @@ def main():
             logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
             return
 
+            # ارسال یا ویرایش پیام‌ها برای هر دسته
+    send_or_edit_message(BOT_TOKEN, CHAT_ID, "samsung", samsung_message, message_ids)
+    send_or_edit_message(BOT_TOKEN, CHAT_ID, "xiaomi", xiaomi_message, message_ids)
+    send_or_edit_message(BOT_TOKEN, CHAT_ID, "iphone", iphone_message, message_ids)
+    send_or_edit_message(BOT_TOKEN, CHAT_ID, "laptop", laptop_message, message_ids)
+    send_or_edit_message(BOT_TOKEN, CHAT_ID, "tablet", tablet_message, message_ids)
+    send_or_edit_message(BOT_TOKEN, CHAT_ID, "console", console_message, message_ids)
+    send_or_edit_message(BOT_TOKEN, CHAT_ID, "console", motefareghe_message, message_ids)
+
+    
         # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
@@ -496,22 +531,5 @@ def main():
     except Exception as e:
         logging.error(f"❌ خطا: {e}")
 
-def edit_telegram_message(message, token, chat_id, message_id):
-    url = f"https://api.telegram.org/bot{token}/editMessageText"
-    data = {
-        "chat_id": chat_id,
-        "message_id": message_id,
-        "text": message,
-        "parse_mode": "HTML"
-    }
-    response = requests.post(url, data=data)
-    result = response.json()
-    
-    logging.info(f"Response: {result}")  # برای خطایابی بیشتر
-    if result.get("ok"):
-        logging.info("✅ پیام ویرایش شد!")
-        return message_id  # بازگشت همان message_id برای ویرایش‌های بعدی
-    else:
-        logging.error(f"❌ خطا در ویرایش پیام: {result.get('description')}")
-        return message_id
-
+if __name__ == "__main__":
+    main()
