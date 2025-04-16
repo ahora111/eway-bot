@@ -421,41 +421,43 @@ def main():
                 if lines:
                     # استفاده از تابع جدید برای آماده‌سازی پیام
                     message = prepare_final_message(category, lines, update_date)
-
-                    # اگر پیام قبلی موجود باشد، ویرایش می‌کنیم
+                    
+                    # بررسی اینکه آیا پیام قبلی ارسال شده است یا نه
                     if category == "🔵" and samsung_message_id:
-                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=samsung_message_id)
+                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, samsung_message_id)
                     elif category == "🟡" and xiaomi_message_id:
-                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=xiaomi_message_id)
+                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, xiaomi_message_id)
                     elif category == "🍏" and iphone_message_id:
-                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=iphone_message_id)
+                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, iphone_message_id)
                     elif category == "💻" and laptop_message_id:
-                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=laptop_message_id)
+                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, laptop_message_id)
                     elif category == "🟠" and tablet_message_id:
-                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=tablet_message_id)
+                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, tablet_message_id)
                     elif category == "🎮" and console_message_id:
-                        send_telegram_message(message, BOT_TOKEN, CHAT_ID, message_id=console_message_id)
+                        msg_id = edit_telegram_message(message, BOT_TOKEN, CHAT_ID, console_message_id)
                     else:
-                        # ارسال پیام جدید اگر پیام قبلی وجود نداشته باشد
                         msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
-                        # ذخیره message_id جدید برای هر دسته‌بندی
-                        if category == "🔵":
-                            samsung_message_id = msg_id
-                        elif category == "🟡":
-                            xiaomi_message_id = msg_id
-                        elif category == "🍏":
-                            iphone_message_id = msg_id
-                        elif category == "💻":
-                            laptop_message_id = msg_id
-                        elif category == "🟠":
-                            tablet_message_id = msg_id
-                        elif category == "🎮":
-                            console_message_id = msg_id
+                    if category == "🔵":
+                        samsung_message_id = msg_id
+                    elif category == "🟡":
+                        xiaomi_message_id = msg_id
+                    elif category == "🍏":
+                        iphone_message_id = msg_id
+                    elif category == "💻":
+                        laptop_message_id = msg_id
+                    elif category == "🟠":
+                        tablet_message_id = msg_id
+                    elif category == "🎮":
+                        console_message_id = msg_id
         else:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
 
-        # ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
+        if not samsung_message_id:
+            logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
+            return
+
+        # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
@@ -490,6 +492,21 @@ def main():
     except Exception as e:
         logging.error(f"❌ خطا: {e}")
 
-if __name__ == "__main__":
-    main()
+# تابع برای ویرایش پیام
+def edit_telegram_message(message, token, chat_id, message_id):
+    url = f"https://api.telegram.org/bot{token}/editMessageText"
+    data = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+    response = requests.post(url, data=data)
+    result = response.json()
+    if result.get("ok"):
+        logging.info("✅ پیام ویرایش شد!")
+        return message_id  # بازگشت همان message_id برای ویرایش‌های بعدی
+    else:
+        logging.error(f"❌ خطا در ویرایش پیام: {result.get('description')}")
+        return message_id
 
