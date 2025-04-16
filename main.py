@@ -368,13 +368,15 @@ def delete_messages_with_phone():
     # فهرستی از پیام‌ها که شامل "☎️" هستند
     messages_to_delete = []
     
-    # دریافت پیام‌ها از چت (از هر منبعی که دارید)
-    updates = bot.get_updates(chat_id=chat_id)
+    # دریافت به‌روزرسانی‌ها از چت
+    updates = bot.get_updates(limit=10)  # تعیین محدودیت تعداد به‌روزرسانی‌ها (به دلخواه)
     
     for update in updates:
-        message = update.message
-        if "☎️" in message.text:
-            messages_to_delete.append(message.message_id)
+        if "message" in update:
+            message = update["message"]
+            chat_id = message["chat"]["id"]
+            if "☎️" in message["text"]:
+                messages_to_delete.append(message["message_id"])
     
     # حذف پیام‌ها
     for message_id in messages_to_delete:
@@ -385,7 +387,6 @@ def delete_messages_with_phone():
         except Exception as e:
             print(f"Failed to delete message {message_id}: {str(e)}")
 
-# اجرای تابع
 
 
 def main():
