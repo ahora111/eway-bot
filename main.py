@@ -216,8 +216,6 @@ def prepare_final_message(category_name, category_lines, update_date):
     weekday_farsi = list(weekday_mapping.values())[weekday_english]  # تبدیل ایندکس به روز فارسی
     update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
 
-    print(f"نام روز هفته به انگلیسی: {weekday_english}")
-    print(update_date_formatted)  # برای تست
 
     # ساخت هدر پیام
     header = (
@@ -492,7 +490,7 @@ def main():
             "🔷 بلو بانک   حسین گرئی\n\n"
             "⭕️ حتما رسید واریز به ایدی تلگرام زیر ارسال شود .\n"
             "🆔 @lhossein1\n\n"
-            "✅شماره تماس ثبت سفارش :\n"
+            "☎️ شماره تماس ثبت سفارش :\n"
             "📞 09371111558\n"
             "📞 09386373926\n"
             "📞 09308529712\n"
