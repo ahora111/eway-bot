@@ -22,34 +22,6 @@ MESSAGE_IDS_FILE = "message_ids.json"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# منطقه زمانی ایران
-iran_tz = pytz.timezone('Asia/Tehran')
-now = datetime.now(iran_tz)
-current_time = now.time()
-weekday = now.weekday()  # 0=دوشنبه، ..., 4=پنج‌شنبه، 5=جمعه, 6=شنبه
-
-# بازه مجاز در روزهای عادی
-start_time = dt_time(9, 30)
-end_time = dt_time(22, 30)
-
-# بازه زمانی روزهای خاص 
-friday_allowed_times = [
-    dt_time(12, 0),
-    dt_time(14, 0),
-    dt_time(16, 0),
-    dt_time(18, 0),
-    dt_time(20, 0),
-]
-
-if weekday == 4:  # جمعه (در تقویم میلادی، جمعه=4 وقتی اول هفته رو شنبه بگیریم)
-    if not any(abs((datetime.combine(now.date(), t) - datetime.combine(now.date(), current_time)).total_seconds()) < 150 for t in friday_allowed_times):
-        print("🕌 امروز جمعه‌ست و الان جزو ۵ زمان مجاز نیست. اسکریپت متوقف شد.")
-        sys.exit()
-else:
-    if not (start_time <= current_time <= end_time):
-        print("🕒 خارج از بازه مجاز اجرا (۹:۳۰ تا ۲۲:۳۰). اسکریپت متوقف شد.")
-        sys.exit()
-
 def get_driver():
     try:
         options = webdriver.ChromeOptions()
