@@ -334,7 +334,7 @@ def load_message_ids():
             "iphone": None,
             "laptop": None,
             "tablet": None,
-            "console": None
+            "console": None,
             "motefareghe": None
         }
 
