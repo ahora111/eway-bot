@@ -354,6 +354,8 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
+# این رو اضافه می‌کنیم برای خطایابی بهتر
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def main():
     try:
@@ -438,6 +440,8 @@ def main():
                     else:
                         msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
+                    logging.info(f"پیام ارسال شده برای دسته‌بندی {category}: {message}")
+
                     if category == "🔵":
                         samsung_message_id = msg_id
                     elif category == "🟡":
@@ -492,7 +496,6 @@ def main():
     except Exception as e:
         logging.error(f"❌ خطا: {e}")
 
-# تابع برای ویرایش پیام
 def edit_telegram_message(message, token, chat_id, message_id):
     url = f"https://api.telegram.org/bot{token}/editMessageText"
     data = {
@@ -503,9 +506,12 @@ def edit_telegram_message(message, token, chat_id, message_id):
     }
     response = requests.post(url, data=data)
     result = response.json()
+    
+    logging.info(f"Response: {result}")  # برای خطایابی بیشتر
     if result.get("ok"):
         logging.info("✅ پیام ویرایش شد!")
         return message_id  # بازگشت همان message_id برای ویرایش‌های بعدی
     else:
         logging.error(f"❌ خطا در ویرایش پیام: {result.get('description')}")
         return message_id
+
