@@ -358,7 +358,7 @@ def get_last_messages(bot_token, chat_id, limit=5):
 
 # توکن ربات تلگرام خود را وارد کنید
 TOKEN = '8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ'
-
+CHAT_ID = '-1002505490886'
 
 # ایجاد بات
 bot = Bot(TOKEN)
