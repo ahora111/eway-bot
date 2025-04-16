@@ -292,31 +292,6 @@ def categorize_messages(lines):
 
     return categories
 
-def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
-    message_parts = split_message(message)
-    last_message_id = None
-    for part in message_parts:
-        part = escape_markdown(part)
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        params = {
-            "chat_id": chat_id,
-            "text": part,
-            "parse_mode": "MarkdownV2"
-        }
-        if reply_markup:
-            params["reply_markup"] = json.dumps(reply_markup)  # ✅ تبدیل `reply_markup` به JSON
-
-        headers = {"Content-Type": "application/json"}  # ✅ اضافه کردن `headers` برای `POST`
-        response = requests.post(url, json=params, headers=headers)  
-        response_data = response.json()
-        if response_data.get('ok'):
-            last_message_id = response_data["result"]["message_id"]
-        else:
-            logging.error(f"❌ خطا در ارسال پیام: {response_data}")
-            return None
-
-    logging.info("✅ پیام ارسال شد!")
-    return last_message_id  # برگشت message_id آخرین پیام
 
 
 def get_last_messages(bot_token, chat_id, limit=5):
@@ -339,6 +314,35 @@ def save_message_ids(file_path, message_ids):
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(message_ids, f, ensure_ascii=False, indent=4)
 
+def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
+    message_parts = split_message(message)
+    last_message_id = None
+    for part in message_parts:
+        part = escape_markdown(part)
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        params = {
+            "chat_id": chat_id,
+            "text": part,
+            "parse_mode": "MarkdownV2"
+        }
+        if reply_markup:
+            params["reply_markup"] = json.dumps(reply_markup)  # ✅ تبدیل `reply_markup` به JSON
+
+        headers = {"Content-Type": "application/json"}  # ✅ اضافه کردن `headers` برای `POST`
+        response = requests.post(url, json=params, headers=headers)  
+        response_data = response.json()
+        
+        if response_data.get('ok'):
+            last_message_id = response_data["result"]["message_id"]
+            print(f"✅ پیام ارسال شد: {last_message_id}")
+        else:
+            logging.error(f"❌ خطا در ارسال پیام: {response_data}")
+            print(f"❌ خطا در ارسال پیام: {response_data}")
+            return None
+
+    logging.info("✅ پیام ارسال شد!")
+    return last_message_id  # برگشت message_id آخرین پیام
+
 def check_and_update_messages(categories, bot_token, chat_id, message_ids_file="message_ids.json"):
     message_ids = load_message_ids(message_ids_file)
     updated_message_ids = {}
@@ -353,20 +357,22 @@ def check_and_update_messages(categories, bot_token, chat_id, message_ids_file="
                 
                 # چک کردن تغییرات
                 last_messages = get_last_messages(bot_token, chat_id)
+                found = False
                 for last_msg in last_messages:
                     if last_msg["message"]["message_id"] == last_message_id and last_msg["message"]["text"] == message:
                         logging.info(f"پیام {category} بدون تغییر است.")
+                        print(f"ℹ️ پیام {category} بدون تغییر است. message_id: {last_message_id}")
                         updated_message_ids[category] = last_message_id  # حفظ پیام قبلی
+                        found = True
                         break
-                else:
+                if not found:
                     # پیام تغییر کرده، ارسال پیام جدید
                     new_message_id = send_telegram_message(message, bot_token, chat_id)
+                    if new_message_id:
+                        print(f"✅ پیام جدید ارسال شد برای {category}: {new_message_id}")
                     updated_message_ids[category] = new_message_id
             else:
-                # پیام جدید برای دسته‌بندی ارسال می‌شود
-                new_message_id = send_telegram_message(message, bot_token, chat_id)
-                updated_message_ids[category] = new_message_id
-    
+
     # ذخیره message_ids جدید
     save_message_ids(message_ids_file, updated_message_ids)
 
