@@ -24,8 +24,12 @@ def save_message_ids(message_ids):
 
     data[get_today()] = message_ids
 
-    with open(MESSAGE_IDS_FILE, 'w') as f:
-        json.dump(data, f)
+    try:
+        with open(MESSAGE_IDS_FILE, 'w') as f:
+            json.dump(data, f)
+            print(f"File '{MESSAGE_IDS_FILE}' saved successfully.")
+    except Exception as e:
+        print(f"Error saving file: {e}")
 
 def get_today():
     return datetime.datetime.now().strftime('%Y-%m-%d')
