@@ -11,6 +11,7 @@ from telegram import Bot
 from datetime import datetime, time as dt_time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -42,6 +43,11 @@ new_messages = {
     "tablet": "New message content for tablet",
     "motefareghe": "New message content for motefareghe"
 }
+
+
+keyboard = InlineKeyboardMarkup([
+    [InlineKeyboardButton("Click me", callback_data="button_click")]
+])
 
 def get_driver():
     try:
