@@ -11,4 +11,3 @@ jdatetime
 requests
 pytz
 telethon
-json
