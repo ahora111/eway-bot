@@ -355,27 +355,31 @@ def get_last_messages(bot_token, chat_id, limit=5):
     return []
 
 
-# تابع حذف پیام‌ها از تلگرام
-def delete_telegram_message(message_id, chat_id, bot_token):
-    url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
-    params = {
-        "chat_id": chat_id,
-        "message_id": message_id
-    }
-    response = requests.post(url, data=params)
-    if response.status_code == 200:
-        logging.info(f"✅ پیام با شناسه {message_id} حذف شد.")
-    else:
-        logging.error(f"❌ خطا در حذف پیام با شناسه {message_id}: {response.text}")
+def delete_previous_messages(bot_token, chat_id):
+    # دریافت لیست پیام‌های اخیر
+    messages = get_last_messages(bot_token, chat_id, limit=100)
+    for msg in messages:
+        if "message_id" in msg["message"]:
+            message_id = msg["message"]["message_id"]
+            url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+            params = {
+                "chat_id": chat_id,
+                "message_id": message_id
+            }
+            response = requests.post(url, params=params)
+            if response.status_code == 200:
+                logging.info(f"✅ پیام {message_id} با موفقیت حذف شد.")
+            else:
+                logging.error(f"❌ خطا در حذف پیام {message_id}: {response.json()}")
 
 def main():
     try:
+        delete_previous_messages(BOT_TOKEN, CHAT_ID)  # فراخوانی حذف پیام‌های قبلی
 
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
-        
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
@@ -409,8 +413,7 @@ def main():
 
         driver.quit()
 
-
-        # شناسه‌های پیام‌ها
+        # ذخیره message_id هر دسته‌بندی
         samsung_message_id = None
         xiaomi_message_id = None
         iphone_message_id = None
@@ -418,7 +421,6 @@ def main():
         tablet_message_id = None
         console_message_id = None
 
-        # ارسال پیام‌ها و حذف پیام‌های قبلی
         if brands:
             processed_data = []
             for i in range(len(brands)):
@@ -435,25 +437,11 @@ def main():
 
             for category, lines in categories.items():
                 if lines:
-                    # آماده‌سازی پیام
+                    # استفاده از تابع جدید برای آماده‌سازی پیام
                     message = prepare_final_message(category, lines, update_date)
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
-                    # حذف پیام‌های قبلی قبل از ارسال پیام جدید
-                    if category == "🔵" and samsung_message_id:
-                        delete_telegram_message(samsung_message_id, CHAT_ID, BOT_TOKEN)
-                    elif category == "🟡" and xiaomi_message_id:
-                        delete_telegram_message(xiaomi_message_id, CHAT_ID, BOT_TOKEN)
-                    elif category == "🍏" and iphone_message_id:
-                        delete_telegram_message(iphone_message_id, CHAT_ID, BOT_TOKEN)
-                    elif category == "💻" and laptop_message_id:
-                        delete_telegram_message(laptop_message_id, CHAT_ID, BOT_TOKEN)
-                    elif category == "🟠" and tablet_message_id:
-                        delete_telegram_message(tablet_message_id, CHAT_ID, BOT_TOKEN)
-                    elif category == "🎮" and console_message_id:
-                        delete_telegram_message(console_message_id, CHAT_ID, BOT_TOKEN)
 
-                    # ذخیره شناسه پیام جدید
                     if category == "🔵":
                         samsung_message_id = msg_id
                     elif category == "🟡":
@@ -469,7 +457,11 @@ def main():
         else:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
 
-        # ارسال پیام نهایی
+        if not samsung_message_id:
+            logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
+            return
+
+        # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
