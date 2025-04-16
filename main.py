@@ -401,13 +401,15 @@ def main():
     logging.basicConfig(level=logging.INFO)
     logging.info("📥 در حال دریافت پیام‌های کانال...")
 
-    messages = get_messages()  # دریافت پیام‌ها از کانال
+    # دریافت پیام‌ها از کانال
+    messages = get_messages()  
     if messages:
         delete_messages_with_emoji(messages)  # حذف پیام‌هایی که شامل ایموجی ☎️ یا دکمه شیشه‌ای هستند
     else:
         logging.info("هیچ پیامی برای حذف پیدا نشد.")
-
-        
+    
+    # اجرای بخش استخراج داده‌ها
+    try:
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
