@@ -398,53 +398,37 @@ def get_last_messages(bot_token, chat_id, limit=5):
 def main():
     try:
         message_ids = load_message_ids()
-        
+
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
-        
+
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-
         logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
         scroll_page(driver)
 
         valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
         brands, models = extract_product_data(driver, valid_brands)
-        
+
         # استخراج داده‌ها برای لپ‌تاپ، تبلت و کنسول
-        driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
-        brands.extend(laptop_brands)
-        models.extend(laptop_models)
-
-        driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
-        brands.extend(tablet_brands)
-        models.extend(tablet_models)
-
-        driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        console_brands, console_models = extract_product_data(driver, valid_brands)
-        brands.extend(console_brands)
-        models.extend(console_models)
+        for cat_url in [
+            'https://hamrahtel.com/quick-checkout?category=laptop',
+            'https://hamrahtel.com/quick-checkout?category=tablet',
+            'https://hamrahtel.com/quick-checkout?category=game-console'
+        ]:
+            driver.get(cat_url)
+            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+            scroll_page(driver)
+            extra_brands, extra_models = extract_product_data(driver, valid_brands)
+            brands.extend(extra_brands)
+            models.extend(extra_models)
 
         driver.quit()
 
-        # ذخیره message_id هر دسته‌بندی
-        samsung_message_id = None
-        xiaomi_message_id = None
-        iphone_message_id = None
-        laptop_message_id = None
-        tablet_message_id = None
-        console_message_id = None
-        motefareghe_message_id = None
+        # ذخیره پیام هر دسته
+        samsung_message = xiaomi_message = iphone_message = laptop_message = tablet_message = console_message = motefareghe_message = None
 
         if brands:
             processed_data = []
@@ -453,38 +437,33 @@ def main():
                 processed_data.append(f"{model_str} {brands[i]}")
 
             update_date = JalaliDate.today().strftime("%Y-%m-%d")
-            message_lines = []
-            for row in processed_data:
-                decorated = decorate_line(row)
-                message_lines.append(decorated)
-
+            message_lines = [decorate_line(row) for row in processed_data]
             categories = categorize_messages(message_lines)
 
             for category, lines in categories.items():
                 if lines:
-                    # استفاده از تابع جدید برای آماده‌سازی پیام
                     message = prepare_final_message(category, lines, update_date)
-                    msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-
 
                     if category == "🔵":
-                        samsung_message_id = msg_id
+                        samsung_message = message
                     elif category == "🟡":
-                        xiaomi_message_id = msg_id
+                        xiaomi_message = message
                     elif category == "🍏":
-                        iphone_message_id = msg_id
+                        iphone_message = message
                     elif category == "💻":
-                        laptop_message_id = msg_id
+                        laptop_message = message
                     elif category == "🟠":
-                        tablet_message_id = msg_id
+                        tablet_message = message
                     elif category == "🎮":
-                        console_message_id = msg_id
+                        console_message = message
+                    else:
+                        motefareghe_message = message
         else:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
-            
+            return
 
-        if not samsung_message_id:
-            logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
+        if not samsung_message:
+            logging.error("❌ پیام سامسونگ آماده نشد، دکمه اضافه نخواهد شد!")
             return
 
         # ارسال یا ویرایش پیام‌ها برای هر دسته
@@ -496,8 +475,7 @@ def main():
         send_or_edit_message(BOT_TOKEN, CHAT_ID, "console", console_message, message_ids)
         send_or_edit_message(BOT_TOKEN, CHAT_ID, "motefareghe", motefareghe_message, message_ids)
 
-    
-        # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
+        # پیام نهایی
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
@@ -513,24 +491,23 @@ def main():
             "📞 028-3399-1417"
         )
 
+        # دکمه‌های مربوط به هر دسته
         button_markup = {"inline_keyboard": []}
-        if samsung_message_id:
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست سامسونگ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{samsung_message_id}"}])
-        if xiaomi_message_id:
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست شیایومی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{xiaomi_message_id}"}])
-        if iphone_message_id:
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست آیفون", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{iphone_message_id}"}])
-        if laptop_message_id:
-            button_markup["inline_keyboard"].append([{"text": "💻 لیست لپ‌تاپ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{laptop_message_id}"}])
-        if tablet_message_id:
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست تبلت", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{tablet_message_id}"}])
-        if console_message_id:
-            button_markup["inline_keyboard"].append([{"text": "🎮 کنسول بازی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{console_message_id}"}])
+        if "samsung" in message_ids:
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست سامسونگ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{message_ids['samsung']}"}])
+        if "xiaomi" in message_ids:
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست شیائومی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{message_ids['xiaomi']}"}])
+        if "iphone" in message_ids:
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست آیفون", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{message_ids['iphone']}"}])
+        if "laptop" in message_ids:
+            button_markup["inline_keyboard"].append([{"text": "💻 لیست لپ‌تاپ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{message_ids['laptop']}"}])
+        if "tablet" in message_ids:
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست تبلت", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{message_ids['tablet']}"}])
+        if "console" in message_ids:
+            button_markup["inline_keyboard"].append([{"text": "🎮 کنسول بازی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{message_ids['console']}"}])
 
         send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
 
     except Exception as e:
-        logging.error(f"❌ خطا: {e}")
+        logging.error(f"❌ خطا در اجرای برنامه: {e}")
 
-if __name__ == "__main__":
-    main()
