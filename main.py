@@ -352,48 +352,47 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
-def delete_old_messages_with_phone_icon(bot_token, chat_id):
-    url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
-    response = requests.get(url)
-    data = response.json()
+import time
+from telegram import Bot
+from telegram.ext import Updater
 
-    if not data.get("ok"):
-        logging.error("❌ خطا در دریافت پیام‌ها")
-        print("❌ خطا در دریافت پیام‌ها")
-        return
+# توکن ربات تلگرام خود را وارد کنید
+TOKEN = 'YOUR_BOT_API_TOKEN'
+chat_id = 'YOUR_CHAT_ID'
 
-    messages = data.get("result", [])
-    logging.info(f"Messages: {messages}")
-    print(f"Messages: {messages}")
+# ایجاد بات
+bot = Bot(TOKEN)
 
-    for item in messages:
-        post = item.get("channel_post")
-        if not post:
-            continue
+# تابعی برای حذف پیام‌ها با ایموجی "☎️"
+def delete_messages_with_phone():
+    # فهرستی از پیام‌ها که شامل "☎️" هستند
+    messages_to_delete = []
+    
+    # دریافت پیام‌ها از چت (از هر منبعی که دارید)
+    updates = bot.get_updates(chat_id=chat_id)
+    
+    for update in updates:
+        message = update.message
+        if "☎️" in message.text:
+            messages_to_delete.append(message.message_id)
+    
+    # حذف پیام‌ها
+    for message_id in messages_to_delete:
+        try:
+            bot.delete_message(chat_id=chat_id, message_id=message_id)
+            print(f"Message {message_id} deleted successfully.")
+            time.sleep(1)  # اضافه کردن تاخیر برای جلوگیری از درخواست‌های زیاد
+        except Exception as e:
+            print(f"Failed to delete message {message_id}: {str(e)}")
 
-        message_id = post.get("message_id")
-        text = post.get("text", "")
+# اجرای تابع
 
-        if "☎️" in text:
-            print(f"🧹 پیدا شد: پیام {message_id} با متن:\n{text}")
-            delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
-            params = {
-                "chat_id": chat_id,
-                "message_id": message_id
-            }
-            del_response = requests.post(delete_url, json=params)
-            if del_response.status_code == 200:
-                logging.info(f"🗑 پیام با آیکون تلفن حذف شد: {message_id}")
-                print(f"🗑 حذف شد: {message_id}")
-            else:
-                logging.warning(f"❌ نتوانستم پیام را حذف کنم: {del_response.text}")
-                print(f"❌ حذف نشد! {del_response.text}")
 
 def main():
     try:
         print("✅ شروع عملیات اصلی برنامه...")
         # اینجا کدهای شما باید با 4 فاصله یا یک تب وارد شوند
-        delete_old_messages_with_phone_icon(BOT_TOKEN, CHAT_ID)
+        delete_messages_with_phone(BOT_TOKEN, CHAT_ID)
         print("✅ حذف پیام‌های قبلی تکمیل شد، ادامه می‌دهیم...")
         
         driver = get_driver()
