@@ -392,7 +392,7 @@ def main():
     try:
         print("✅ شروع عملیات اصلی برنامه...")
         # اینجا کدهای شما باید با 4 فاصله یا یک تب وارد شوند
-        delete_messages_with_phone(BOT_TOKEN, CHAT_ID)
+        delete_messages_with_phone()
         print("✅ حذف پیام‌های قبلی تکمیل شد، ادامه می‌دهیم...")
         
         driver = get_driver()
