@@ -372,9 +372,7 @@ def check_and_update_messages(categories, bot_token, chat_id, message_ids_file="
                         print(f"✅ پیام جدید ارسال شد برای {category}: {new_message_id}")
                     updated_message_ids[category] = new_message_id
             else:
-
-
-
+                
 def main():
     try:
         driver = get_driver()
