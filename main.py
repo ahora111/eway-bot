@@ -6,6 +6,7 @@ import logging
 import json
 import pytz
 import sys
+from telegram.error import TelegramError
 from telegram import Bot
 from datetime import datetime, time as dt_time
 from selenium import webdriver
@@ -370,21 +371,51 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     return last_message_id  # برگشت message_id آخرین پیام
 
 
+
 def send_or_edit_message(bot_token, chat_id, category, message, message_ids):
     bot = Bot(token=bot_token)
-    
+
+    # بررسی اینکه آیا message_id قبلاً وجود دارد یا نه
     message_id = message_ids.get(category)
+
+    try:
+        if message_id:
+            # تلاش برای ویرایش پیام قبلی
+            bot.edit_message_text(
+                text=message,
+                chat_id=chat_id,
+                message_id=message_id,
+                parse_mode="HTML"
+            )
+            logging.info(f"✅ پیام ویرایش شد: {category} (ID: {message_id})")
+        else:
+            # ارسال پیام جدید
+            sent_message = bot.send_message(
+                chat_id=chat_id,
+                text=message,
+                parse_mode="HTML"
+            )
+            # ذخیره شناسه پیام در message_ids
+            message_ids[category] = sent_message.message_id
+            logging.info(f"✅ پیام ارسال شد: {category} (ID: {sent_message.message_id})")
+            save_message_ids(message_ids)
+
+    except TelegramError as e:
+        logging.error(f"❌ خطای تلگرام در ارسال/ویرایش پیام [{category}]: {e}")
+    except Exception as e:
+        logging.error(f"❌ خطای عمومی در ارسال/ویرایش پیام [{category}]: {e}")
+
     
-    if message_id:
-        # اگر پیام قبلاً ارسال شده، آن را ویرایش می‌کنیم
-        bot.edit_message_text(text=message, chat_id=chat_id, message_id=message_id)
-    else:
-        # اگر پیام جدید است، آن را ارسال می‌کنیم
-        sent_message = bot.send_message(chat_id=chat_id, text=message)
-        message_ids[category] = sent_message.message_id
-    
-    # ذخیره‌سازی ID پیام‌ها
-    save_message_ids(message_ids)
+
+
+def save_message_ids(message_ids, filename="message_ids.json"):
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(message_ids, f, indent=2, ensure_ascii=False)
+        logging.info("📁 message_ids ذخیره شد.")
+    except Exception as e:
+        logging.error(f"❌ خطا در ذخیره‌سازی message_ids: {e}")
+
 
 def get_last_messages(bot_token, chat_id, limit=5):
     url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
@@ -396,6 +427,10 @@ def get_last_messages(bot_token, chat_id, limit=5):
 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
     try:
         message_ids = load_message_ids()
 
