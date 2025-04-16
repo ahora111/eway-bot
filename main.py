@@ -16,6 +16,7 @@ from persiantools.jdatetime import JalaliDate
 
 BOT_TOKEN = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
 CHAT_ID = "-1002505490886"
+CHANNEL_ID = "@test1236547"  # آیدی کانال شما
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -356,54 +357,56 @@ def get_last_messages(bot_token, chat_id, limit=5):
 
 
 
+EMOJI = "☎️"  # ایموجی مورد نظر
 
-# تابع برای حذف پیام‌های قدیمی که ایموجی ☎️ دارند
-def delete_old_messages_with_phone_emoji(bot_token, chat_id):
-    url = f"https://api.telegram.org/bot{bot_token}/getChatHistory"
-    
+def get_messages():
+    # دریافت پیام‌ها از کانال
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMessages"
     params = {
-        "chat_id": chat_id,
-        "limit": 100  # تعداد پیام‌ها برای بررسی
+        "chat_id": CHANNEL_ID,  # آیدی کانال
+        "limit": 100,  # حداکثر تعداد پیام‌هایی که می‌خواهید دریافت کنید
     }
-    
     response = requests.get(url, params=params)
-    
-    if response.status_code == 200:
-        messages = response.json().get('result', [])
-        for message in messages:
-            # چک کردن اینکه پیام ایموجی ☎️ رو داشته باشه
-            if '☎️' in message.get('text', ''):
-                message_id = message['message_id']
-                logging.info(f"🔍 پیدا شد: [{message_id}] {message['text']}")
-                delete_response = delete_message(bot_token, chat_id, message_id)
-                if delete_response:
-                    logging.info(f"✅ حذف شد: پیام {message_id}")
-                else:
-                    logging.error(f"❌ خطا در حذف پیام {message_id}: {delete_response}")
-            else:
-                logging.info(f"✅ پیام با ایموجی ☎️ پیدا نشد: {message['message_id']}")
-    else:
-        logging.error(f"❌ خطا در دریافت پیام‌ها: {response.status_code}")
+    data = response.json()
 
-# تابع برای حذف یک پیام با شناسه مشخص
-def delete_message(bot_token, chat_id, message_id):
-    url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+    if not data["ok"]:
+        logging.error(f"خطا در دریافت پیام‌ها: {data['description']}")
+        return []
+    
+    messages = data["result"]
+    return messages
+
+def delete_messages_with_emoji(messages):
+    for message in messages:
+        if EMOJI in message.get("text", "") or "inline_keyboard" in message:
+            message_id = message["message_id"]
+            delete_message(message_id)
+
+def delete_message(message_id):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
     params = {
-        "chat_id": chat_id,
-        "message_id": message_id
+        "chat_id": CHANNEL_ID,  # آیدی کانال
+        "message_id": message_id,  # آیدی پیام
     }
-    response = requests.post(url, params=params)
-    
-    if response.status_code == 200:
-        return True
-    else:
-        return response.text
 
-# تابع اصلی که به روز رسانی را انجام می‌دهد
+    response = requests.post(url, data=params)
+    data = response.json()
+
+    if data["ok"]:
+        logging.info(f"✅ پیام با آیدی {message_id} حذف شد.")
+    else:
+        logging.error(f"❌ خطا در حذف پیام {message_id}: {data['description']}")
+
 def main():
-    try:
-        logging.info("📥 در حال دریافت پیام‌های کانال...")
-        delete_old_messages_with_phone_emoji(BOT_TOKEN, CHAT_ID)
+    logging.basicConfig(level=logging.INFO)
+    logging.info("📥 در حال دریافت پیام‌های کانال...")
+
+    messages = get_messages()  # دریافت پیام‌ها از کانال
+    if messages:
+        delete_messages_with_emoji(messages)  # حذف پیام‌هایی که شامل ایموجی ☎️ یا دکمه شیشه‌ای هستند
+    else:
+        logging.info("هیچ پیامی برای حذف پیدا نشد.")
+
         
         driver = get_driver()
         if not driver:
