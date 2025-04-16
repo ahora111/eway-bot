@@ -481,19 +481,20 @@ def main():
                         console_message_id = msg_id
         else:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
+            
 
         if not samsung_message_id:
             logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
             return
 
-            # ارسال یا ویرایش پیام‌ها برای هر دسته
-    send_or_edit_message(BOT_TOKEN, CHAT_ID, "samsung", samsung_message, message_ids)
-    send_or_edit_message(BOT_TOKEN, CHAT_ID, "xiaomi", xiaomi_message, message_ids)
-    send_or_edit_message(BOT_TOKEN, CHAT_ID, "iphone", iphone_message, message_ids)
-    send_or_edit_message(BOT_TOKEN, CHAT_ID, "laptop", laptop_message, message_ids)
-    send_or_edit_message(BOT_TOKEN, CHAT_ID, "tablet", tablet_message, message_ids)
-    send_or_edit_message(BOT_TOKEN, CHAT_ID, "console", console_message, message_ids)
-    send_or_edit_message(BOT_TOKEN, CHAT_ID, "console", motefareghe_message, message_ids)
+        # ارسال یا ویرایش پیام‌ها برای هر دسته
+        send_or_edit_message(BOT_TOKEN, CHAT_ID, "samsung", samsung_message, message_ids)
+        send_or_edit_message(BOT_TOKEN, CHAT_ID, "xiaomi", xiaomi_message, message_ids)
+        send_or_edit_message(BOT_TOKEN, CHAT_ID, "iphone", iphone_message, message_ids)
+        send_or_edit_message(BOT_TOKEN, CHAT_ID, "laptop", laptop_message, message_ids)
+        send_or_edit_message(BOT_TOKEN, CHAT_ID, "tablet", tablet_message, message_ids)
+        send_or_edit_message(BOT_TOKEN, CHAT_ID, "console", console_message, message_ids)
+        send_or_edit_message(BOT_TOKEN, CHAT_ID, "motefareghe", motefareghe_message, message_ids)
 
     
         # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
