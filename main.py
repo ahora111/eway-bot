@@ -356,26 +356,35 @@ def get_last_messages(bot_token, chat_id, limit=5):
 
 
 def delete_previous_messages(bot_token, chat_id):
-    # دریافت لیست پیام‌های اخیر
-    messages = get_last_messages(bot_token, chat_id, limit=100)
-    for msg in messages:
-        if "message_id" in msg["message"]:
-            message_id = msg["message"]["message_id"]
-            url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
-            params = {
-                "chat_id": chat_id,
-                "message_id": message_id
-            }
-            response = requests.post(url, params=params)
-            if response.status_code == 200:
-                logging.info(f"✅ پیام {message_id} با موفقیت حذف شد.")
-            else:
-                logging.error(f"❌ خطا در حذف پیام {message_id}: {response.json()}")
+    print("✅ شروع عملیات دریافت پیام‌های قبلی...")
+    url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+    response = requests.get(url)
+    if response.status_code == 200:
+        print("✅ پیام‌های قبلی دریافت شدند!")
+        messages = response.json().get("result", [])
+        for msg in messages:
+            if "message" in msg and msg["message"]["chat"]["id"] == int(chat_id):
+                if "message_id" in msg["message"]:
+                    message_id = msg["message"]["message_id"]
+                    print(f"🗑 در حال حذف پیام با ID: {message_id}")
+                    delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+                    delete_params = {"chat_id": chat_id, "message_id": message_id}
+                    delete_response = requests.post(delete_url, params=delete_params)
+                    if delete_response.status_code == 200:
+                        print(f"✅ پیام {message_id} با موفقیت حذف شد.")
+                    else:
+                        error_info = delete_response.json()
+                        print(f"❌ خطا در حذف پیام {message_id}: {error_info}")
+    else:
+        error_info = response.json()
+        print(f"❌ خطا در دریافت پیام‌ها: {error_info}")
 
 def main():
     try:
+        print("✅ شروع عملیات اصلی برنامه...")
         delete_previous_messages(BOT_TOKEN, CHAT_ID)  # فراخوانی حذف پیام‌های قبلی
-
+        print("✅ حذف پیام‌های قبلی تکمیل شد، ادامه می‌دهیم...")
+        
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
