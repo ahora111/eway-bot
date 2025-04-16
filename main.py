@@ -370,14 +370,13 @@ def delete_previous_messages(bot_token, chat_id):
                     delete_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
                     delete_params = {"chat_id": chat_id, "message_id": message_id}
                     delete_response = requests.post(delete_url, params=delete_params)
+                    print(f"پاسخ API حذف پیام: {delete_response.json()}")
                     if delete_response.status_code == 200:
                         print(f"✅ پیام {message_id} با موفقیت حذف شد.")
                     else:
-                        error_info = delete_response.json()
-                        print(f"❌ خطا در حذف پیام {message_id}: {error_info}")
+                        print(f"❌ خطا در حذف پیام {message_id}")
     else:
-        error_info = response.json()
-        print(f"❌ خطا در دریافت پیام‌ها: {error_info}")
+        print(f"❌ خطا در دریافت پیام‌ها: {response.json()}")
 
 def main():
     try:
