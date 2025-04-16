@@ -375,7 +375,6 @@ def check_and_update_messages(categories, bot_token, chat_id, message_ids_file="
 
 
 
-
 def main():
     try:
         driver = get_driver()
@@ -385,7 +384,6 @@ def main():
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-
         logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
         scroll_page(driver)
 
@@ -393,30 +391,16 @@ def main():
         brands, models = extract_product_data(driver, valid_brands)
         
         # استخراج داده‌ها برای لپ‌تاپ، تبلت و کنسول
-        driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
-        brands.extend(laptop_brands)
-        models.extend(laptop_models)
-
-        driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
-        brands.extend(tablet_brands)
-        models.extend(tablet_models)
-
-        driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        console_brands, console_models = extract_product_data(driver, valid_brands)
-        brands.extend(console_brands)
-        models.extend(console_models)
+        for cat in ['laptop', 'tablet', 'game-console']:
+            driver.get(f'https://hamrahtel.com/quick-checkout?category={cat}')
+            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+            scroll_page(driver)
+            new_brands, new_models = extract_product_data(driver, valid_brands)
+            brands.extend(new_brands)
+            models.extend(new_models)
 
         driver.quit()
 
-        # ذخیره message_id هر دسته‌بندی
         samsung_message_id = None
         xiaomi_message_id = None
         iphone_message_id = None
@@ -431,19 +415,13 @@ def main():
                 processed_data.append(f"{model_str} {brands[i]}")
 
             update_date = JalaliDate.today().strftime("%Y-%m-%d")
-            message_lines = []
-            for row in processed_data:
-                decorated = decorate_line(row)
-                message_lines.append(decorated)
-
+            message_lines = [decorate_line(row) for row in processed_data]
             categories = categorize_messages(message_lines)
 
             for category, lines in categories.items():
                 if lines:
-                    # استفاده از تابع جدید برای آماده‌سازی پیام
                     message = prepare_final_message(category, lines, update_date)
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-
 
                     if category == "🔵":
                         samsung_message_id = msg_id
@@ -464,7 +442,6 @@ def main():
             logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
             return
 
-        # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
