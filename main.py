@@ -36,6 +36,8 @@ def send_telegram_message(text):
         "text": text,
         "parse_mode": "HTML"
     })
+
+    print("Telegram response:", response.text)  # <== اینو اضافه کردیم برای دیباگ
     return response.json().get("result", {}).get("message_id")
 
 def edit_telegram_message(message_id, new_text):
