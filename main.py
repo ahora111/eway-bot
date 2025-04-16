@@ -312,10 +312,6 @@ def load_message_ids():
             "motefareghe": None
         }
 
-def save_message_ids(message_ids):
-    with open('message_ids.json', 'w', encoding='utf-8') as file:
-        json.dump(message_ids, file, ensure_ascii=False, indent=4)
-
 
 def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     message_parts = split_message(message)
