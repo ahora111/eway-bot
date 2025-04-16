@@ -441,13 +441,18 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
-
 def main():
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
+
     try:
+        # اگر فایل json وجود نداشت، یک فایل خالی با محتوای {} بساز
+        if not os.path.exists(MESSAGE_IDS_FILE):
+            with open(MESSAGE_IDS_FILE, "w", encoding="utf-8") as f:
+                f.write("{}")
+
         message_ids = load_message_ids()
 
         driver = get_driver()
