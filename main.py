@@ -371,7 +371,6 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     return last_message_id  # برگشت message_id آخرین پیام
 
 
-
 def send_or_edit_message(bot_token, chat_id, category, message, message_ids):
     bot = Bot(token=bot_token)
 
@@ -398,14 +397,12 @@ def send_or_edit_message(bot_token, chat_id, category, message, message_ids):
             # ذخیره شناسه پیام در message_ids
             message_ids[category] = sent_message.message_id
             logging.info(f"✅ پیام ارسال شد: {category} (ID: {sent_message.message_id})")
-            save_message_ids(message_ids)
+            save_message_ids(message_ids)  # ذخیره شناسه پیام در فایل
 
     except TelegramError as e:
         logging.error(f"❌ خطای تلگرام در ارسال/ویرایش پیام [{category}]: {e}")
     except Exception as e:
         logging.error(f"❌ خطای عمومی در ارسال/ویرایش پیام [{category}]: {e}")
-
-    
 
 
 def save_message_ids(message_ids, filename="message_ids.json"):
@@ -415,7 +412,6 @@ def save_message_ids(message_ids, filename="message_ids.json"):
         logging.info("📁 message_ids ذخیره شد.")
     except Exception as e:
         logging.error(f"❌ خطا در ذخیره‌سازی message_ids: {e}")
-
 
 def get_last_messages(bot_token, chat_id, limit=5):
     url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
