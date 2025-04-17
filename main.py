@@ -18,6 +18,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 BOT_TOKEN = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
 CHAT_ID = "-1002505490886"
+MESSAGE_ID_FILE = "message_ids.json"  # فایل برای ذخیره message_id ها
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
