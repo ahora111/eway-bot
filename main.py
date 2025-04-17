@@ -52,18 +52,16 @@ def edit_telegram_message(message_id, text):
     print("Edit response:", response.text)
 
 # --- خواندن message_id امروز از شیت ---
+
 def get_message_id_from_sheet():
     ws = get_worksheet()
     today = get_today()
-    try:
-        records = ws.get_all_records()
-        for row in records:
-            if row['تاریخ'] == today or row['date'] == today:
-                return int(row['message_id'])
-        return None
-    except Exception as e:
-        print("Error reading message ID from sheet:", e)
-        return None
+    records = ws.get_all_records()
+    for row in records:
+        if row.get('تاریخ') == today or row.get('date') == today:
+            return int(row.get('message_id'))
+    return None
+
 
 # --- ذخیره message_id در شیت ---
 def save_message_id_to_sheet(message_id):
