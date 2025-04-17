@@ -79,7 +79,7 @@ def save_message_id_and_text_to_sheet(message_id, text):
     ws.append_row([today, str(message_id), text])  # تبدیل به string برای اطمینان از ذخیره
     
 # --- متن نمونه ---
-text = "✅ قیمت‌های امروز:\n- آیفون: 50000 میلیون\n- سامسونگ: 3000 میلیون"
+text = "✅ قیمت‌های امروز:\n- آیفون: 50000 میلیون\n- سامسونگ: 300 میلیون"
 
 # --- اجرای منطق اصلی ---
 check_and_add_headers()  # اضافه کردن عنوان‌ها اگر وجود نداشت
