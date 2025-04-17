@@ -325,8 +325,6 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     logging.info("✅ پیام ارسال شد!")
     return last_message_id  # برگشت message_id آخرین پیام
 
-message = escape_markdown(message)
-msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
 def get_last_messages(bot_token, chat_id, limit=5):
     url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
@@ -435,8 +433,6 @@ def edit_telegram_message(message_id, new_text, current_text):
     except Exception as e:
         logging.error(f"❌ خطا در فراخوانی editMessageText: {e}")
 
-new_text = escape_markdown(new_text)
-edit_telegram_message(message_id, new_text, current_text)
 
 def check_and_add_headers():
     try:
