@@ -471,29 +471,32 @@ def get_last_update_date():
         return None
 
 
-def main():
+ef main():
     try:
-        # تنظیم WebDriver
+        # اتصال به WebDriver
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
 
-        # بررسی و ایجاد هدرها در Google Sheets
+        # بررسی و ایجاد هدرها
         check_and_add_headers()
 
-        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
+        # تاریخ امروز
         today = JalaliDate.today().strftime("%Y-%m-%d")
         last_update_date = get_last_update_date()
 
-        if last_update_date != today:
-            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
-            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
-            send_new_posts(driver, today)
+        # استخراج داده‌ها
+        logging.info("✅ شروع به استخراج داده‌ها...")
+        brands, models = extract_all_data(driver)
+
+        # اگر تاریخ تغییر نکرده باشد
+        if last_update_date == today:
+            logging.info("✅ تاریخ تغییری نکرده است، بررسی داده‌های جدید...")
+            compare_and_update(brands, models, today)
         else:
-            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
-            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
-            update_existing_posts(today)
+            logging.info("✅ تاریخ جدید است، ارسال داده‌های جدید...")
+            send_new_posts(brands, models, today)
 
         # خروج از WebDriver
         driver.quit()
