@@ -72,7 +72,7 @@ def save_message_id_to_sheet(message_id):
     ws.append_row([today, str(message_id)])  # تبدیل به string برای اطمینان از ذخیره
     
 # --- متن نمونه ---
-text = "✅ قیمت‌های امروز:\n- آیفون: 50000 میلیون\n- سامسونگ: 30 میلیون"
+text = "✅ قیمت‌های امروز:\n- آیفون: 50000 میلیون\n- سامسونگ: 3000 میلیون"
 
 # --- اجرای منطق اصلی ---
 today = get_today()
