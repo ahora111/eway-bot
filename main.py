@@ -516,9 +516,7 @@ def send_new_posts(driver, today):
         brands.extend(console_brands)
         models.extend(console_models)
 
-        driver.quit()
-
-                        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
+                                # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
         today = JalaliDate.today().strftime("%Y-%m-%d")
         last_update_date = get_last_update_date()
 
@@ -531,6 +529,9 @@ def send_new_posts(driver, today):
             logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
             update_existing_posts(today)
             
+        driver.quit()
+
+
         # ایجاد و ارسال پیام‌ها
         processed_data = []
         for i in range(len(brands)):
