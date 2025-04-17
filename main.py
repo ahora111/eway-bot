@@ -62,6 +62,7 @@ def get_message_id_from_sheet():
             if message_id:
                 print(f"Message ID دریافت‌شده از شیت: {message_id}")
                 return int(message_id)
+    print("هیچ message_id برای امروز پیدا نشد.")
     return None
 
 # --- ذخیره message_id در شیت ---
@@ -74,9 +75,11 @@ def save_message_id_to_sheet(message_id):
         if row.get('تاریخ') == today or row.get('date') == today:
             ws.update_cell(i + 2, records[0].index('message_id') + 1, message_id)
             updated = True
+            print(f"Message ID جدید {message_id} در شیت ذخیره شد.")
             break
     if not updated:
         ws.append_row([today, message_id])
+        print(f"Message ID جدید {message_id} به شیت اضافه شد.")
 
 # --- منطق اصلی ---
 message_id = get_message_id_from_sheet()
