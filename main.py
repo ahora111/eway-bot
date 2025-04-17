@@ -6,7 +6,7 @@ import logging
 import json
 import pytz
 import sys
-import gspread from oauth2client.service_account 
+import gspread
 import datetime
 from datetime import datetime, time as dt_time
 from selenium import webdriver
