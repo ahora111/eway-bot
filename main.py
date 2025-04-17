@@ -507,7 +507,8 @@ def main():
 def send_new_posts(driver, today):
     try:
 
-        
+def extract_all_data(driver):
+    try:
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
@@ -540,7 +541,17 @@ def send_new_posts(driver, today):
         models.extend(console_models)
 
         driver.quit()
+        
+        # ترکیب همه داده‌ها
+        all_brands = mobile_brands + laptop_brands + tablet_brands + console_brands
+        all_models = mobile_models + laptop_models + tablet_models + console_models
 
+        return all_brands, all_models
+
+    except Exception as e:
+        logging.error(f"❌ خطا در استخراج داده‌ها: {e}")
+        return [], []
+        
         # ایجاد و ارسال پیام‌ها
         processed_data = []
         for i in range(len(brands)):
