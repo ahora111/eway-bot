@@ -375,10 +375,12 @@ def save_message_id_and_text_to_sheet(today, category, message_id, text):
         if not ws:
             logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
             return
+        logging.info(f"🔍 درحال ذخیره‌سازی داده‌ها: {today}, {category}, {message_id}, {text}")
         ws.append_row([today, str(message_id), category, text])
-        logging.info(f"✅ داده‌ها با موفقیت ذخیره شدند: {today}, {category}, {message_id}, {text}")
+        logging.info("✅ داده‌ها با موفقیت به Google Sheets اضافه شدند.")
     except Exception as e:
         logging.error(f"❌ خطا در ذخیره داده‌ها به Google Sheets: {e}")
+
 
 
 
