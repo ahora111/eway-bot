@@ -484,7 +484,20 @@ def main():
 def send_new_posts(driver, today):
     try:
 
-        
+       
+                                # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
+        today = JalaliDate.today().strftime("%Y-%m-%d")
+        last_update_date = get_last_update_date()
+
+        if last_update_date != today:
+            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
+            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
+            send_new_posts(driver, today)
+        else:
+            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
+            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
+            update_existing_posts(today)
+             
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
@@ -516,19 +529,6 @@ def send_new_posts(driver, today):
         brands.extend(console_brands)
         models.extend(console_models)
 
-                                # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
-        today = JalaliDate.today().strftime("%Y-%m-%d")
-        last_update_date = get_last_update_date()
-
-        if last_update_date != today:
-            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
-            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
-            send_new_posts(driver, today)
-        else:
-            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
-            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
-            update_existing_posts(today)
-            
         driver.quit()
 
 
