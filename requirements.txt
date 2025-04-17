@@ -11,3 +11,4 @@ jdatetime
 requests
 pytz
 telethon
+oauth2client
