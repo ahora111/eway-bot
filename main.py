@@ -6,8 +6,8 @@ import logging
 import json
 import pytz
 import sys
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import gspread from oauth2client.service_account 
+import datetime
 from datetime import datetime, time as dt_time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -17,79 +17,13 @@ from selenium.webdriver.support import expected_conditions as EC
 from persiantools.jdatetime import JalaliDate
 
 
-
-# --- تنظیمات ---
-BOT_TOKEN = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
-CHAT_ID = "-1002505490886"
+# --- تنظیمات Google Sheets ---
 SPREADSHEET_ID = '1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E'
 SHEET_NAME = 'Sheet1'
+BOT_TOKEN = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
+CHAT_ID = "-1002505490886"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-# --- اتصال به Google Sheets ---
-def get_worksheet():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    credentials_str = os.environ.get("GSHEET_CREDENTIALS_JSON")
-    credentials_dict = json.loads(credentials_str)
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(SPREADSHEET_ID)
-    worksheet = sheet.worksheet(SHEET_NAME)
-    return worksheet
-
-# --- بررسی و افزودن عنوان‌ها به شیت ---
-def check_and_add_headers():
-    ws = get_worksheet()
-    rows = ws.get_all_values()
-    if not rows:
-        ws.append_row(["تاریخ", "دسته‌بندی", "شناسه پیام"])  # افزودن عنوان‌ها اگر شیت خالی باشه
-
-# --- دریافت تاریخ امروز ---
-def get_today():
-    return JalaliDate.today().strftime('%Y-%m-%d')
-
-# --- دریافت Message ID از Google Sheets ---
-def get_message_id(sheet, category, today):
-    rows = sheet.get_all_values()
-    headers = rows[0]
-    for row in rows[1:]:
-        record = dict(zip(headers, row))
-        if record.get("تاریخ") == today and record.get("دسته‌بندی") == category:
-            try:
-                return int(record.get("شناسه پیام", 0))
-            except (ValueError, TypeError):
-                return None
-    return None
-
-# --- ذخیره Message ID ---
-def save_message_id(sheet, category, message_id, today):
-    sheet.append_row([today, category, message_id])
-
-# --- ارسال پیام تلگرام ---
-def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    response = requests.post(url, data={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"})
-    return response.json().get("result", {}).get("message_id")
-
-# --- ویرایش پیام تلگرام ---
-def edit_telegram_message(message_id, text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-    requests.post(url, data={"chat_id": CHAT_ID, "message_id": message_id, "text": text, "parse_mode": "HTML"})
-
-# --- استخراج داده‌ها از سایت ---
-def extract_product_data(driver, valid_brands):
-    product_elements = driver.find_elements(By.CLASS_NAME, 'mantine-Text-root')
-    brands, models = [], []
-    for product in product_elements:
-        name = product.text.strip().replace("تومان", "").replace("نامشخص", "").strip()
-        parts = name.split()
-        brand = parts[0] if len(parts) >= 2 else name
-        model = " ".join(parts[1:]) if len(parts) >= 2 else ""
-        if brand in valid_brands:
-            brands.append(brand)
-            models.append(model)
-    return brands, models
-
 
 
 def get_driver():
@@ -399,13 +333,58 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
+def get_worksheet():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    credentials_str = os.environ.get("GSHEET_CREDENTIALS_JSON")
+    credentials_dict = json.loads(credentials_str)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(SPREADSHEET_ID)
+    worksheet = sheet.worksheet(SHEET_NAME)
+    return worksheet
+
+def check_and_add_headers():
+    ws = get_worksheet()
+    rows = ws.get_all_values()
+    if not rows:
+        ws.append_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"])
+
+def get_message_id_and_text_from_sheet(today, category):
+    ws = get_worksheet()
+    rows = ws.get_all_values()
+    headers = rows[0]
+    for row in rows[1:]:
+        record = dict(zip(headers, row))
+        if record.get("تاریخ") == today and record.get("دسته‌بندی") == category:
+            try:
+                return int(record.get("شناسه پیام", 0)), record.get("متن پیام", "")
+            except (ValueError, TypeError):
+                return None, ""
+    return None, ""
+
+def save_message_id_and_text_to_sheet(today, category, message_id, text):
+    ws = get_worksheet()
+    ws.append_row([today, str(message_id), category, text])
+
+# --- ویرایش منطق ارسال پیام ---
+def send_or_edit_message(category, lines, update_date):
+    today = JalaliDate.today().strftime("%Y-%m-%d")
+    message_id, current_text = get_message_id_and_text_from_sheet(today, category)
+    
+    message = prepare_final_message(category, lines, update_date)
+    
+    if message_id:
+        if message != current_text:
+            edit_telegram_message(message_id, message, current_text)
+            logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+    else:
+        new_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+        save_message_id_and_text_to_sheet(today, category, new_id, message)
+        logging.info(f"✅ پیام جدید دسته {category} ارسال و ذخیره شد.")
+
 
 def main():
     try:
-        sheet = get_worksheet()
-        check_and_add_headers()
-        today = get_today()
-        
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
@@ -442,18 +421,6 @@ def main():
         brands.extend(console_brands)
         models.extend(console_models)
 
-        
-        for emoji, category in categories.items():
-            message_id = get_message_id(sheet, category, today)
-            text = f"{category}: لیست نمونه امروز..."
-            
-            if message_id:
-                edit_telegram_message(message_id, text)
-            else:
-                new_message_id = send_telegram_message(text)
-                save_message_id(sheet, category, new_message_id, today)
-                messages[category] = new_message_id
-                
         driver.quit()
 
         # ذخیره message_id هر دسته‌بندی
