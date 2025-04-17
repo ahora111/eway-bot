@@ -369,17 +369,6 @@ def get_message_id_and_text_from_sheet(today, category):
                 return None, ""
     return None, ""
 
-for category, lines in categories.items():
-    if lines:
-        message = prepare_final_message(category, lines, update_date)
-        msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-
-        # خطایابی: بررسی مقادیر ورودی قبل از ذخیره‌سازی
-        logging.info(f"🔍 اطلاعاتی که قرار است ذخیره شوند: تاریخ={update_date}, دسته‌بندی={category}, پیام ID={msg_id}, متن={message}")
-        
-        # ذخیره‌سازی در Google Sheets
-        if msg_id:
-            save_message_id_and_text_to_sheet(update_date, category, msg_id, message)
 
 
 def save_message_id_and_text_to_sheet(today, category, message_id, text):
@@ -501,11 +490,20 @@ def main():
 
             categories = categorize_messages(message_lines)
 
+
+            
             for category, lines in categories.items():
                 if lines:
-                    # استفاده از تابع جدید برای آماده‌سازی پیام
                     message = prepare_final_message(category, lines, update_date)
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+
+                     # خطایابی: بررسی مقادیر ورودی قبل از ذخیره‌سازی
+                            logging.info(f"🔍 اطلاعاتی که قرار است ذخیره شوند: تاریخ={update_date}, دسته‌بندی={category}, پیام ID={msg_id}, متن={message}")
+        
+                            # ذخیره‌سازی در Google Sheets
+                            if msg_id:
+                                save_message_id_and_text_to_sheet(update_date, category, msg_id, message)
+            
 
 
                     if category == "🔵":
