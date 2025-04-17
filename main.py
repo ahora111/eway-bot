@@ -8,7 +8,6 @@ import pytz
 import sys
 import gspread
 import datetime
-from persiantools.jdatetime import JalaliDate
 from datetime import datetime, time as dt_time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -178,33 +177,25 @@ def remove_extra_blank_lines(lines):
 
     return cleaned_lines
     
-
-
 def prepare_final_message(category_name, category_lines, update_date):
-    # گرفتن عنوان دسته از روی ایموجی
+        # گرفتن عنوان دسته از روی ایموجی
     category_title = get_category_name(category_name)
-    
-    # دریافت تاریخ امروز به شمسی و ساعت فعلی
-    today = JalaliDate.today().strftime("%Y/%m/%d")
-    current_time = datetime.now().strftime("%H:%M")
-    update_date = f"{today} - {current_time}"
-
+    # دریافت تاریخ امروز به شمسی
+    update_date = JalaliDate.today().strftime("%Y/%m/%d")
     # تعریف نگاشت برای روزهای هفته به فارسی
     weekday_mapping = {
-        "Saturday": "شنبه💪",
-        "Sunday": "یکشنبه😃",
-        "Monday": "دوشنبه☺️",
-        "Tuesday": "سه شنبه🥱",
-        "Wednesday": "چهارشنبه😕",
-        "Thursday": "پنج شنبه☺️",
-        "Friday": "جمعه😎"
+            "Saturday": "شنبه💪",
+            "Sunday": "یکشنبه😃",
+            "Monday": "دوشنبه☺️",
+            "Tuesday": "سه شنبه🥱",
+            "Wednesday": "چهارشنبه😕",
+            "Thursday": "پنج شنبه☺️",
+            "Friday": "جمعه😎"
     }
     weekday_english = JalaliDate.today().weekday()  # گرفتن ایندکس روز هفته
     weekday_farsi = list(weekday_mapping.values())[weekday_english]  # تبدیل ایندکس به روز فارسی
-    update_date_formatted = f"{weekday_farsi} {update_date}"
+    update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
 
-    print(update_date)  # بررسی تاریخ و ساعت
-    print(update_date_formatted)  # بررسی فرمت نهایی
     print(f"نام روز هفته به انگلیسی: {weekday_english}")
     print(update_date_formatted)  # برای تست
 
@@ -473,30 +464,27 @@ def get_last_update_date():
 
 def main():
     try:
-        # اتصال به WebDriver
+        # تنظیم WebDriver
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
 
-        # بررسی و ایجاد هدرها
+        # بررسی و ایجاد هدرها در Google Sheets
         check_and_add_headers()
 
-        # تاریخ امروز
+        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
         today = JalaliDate.today().strftime("%Y-%m-%d")
         last_update_date = get_last_update_date()
 
-        # استخراج داده‌ها
-        logging.info("✅ شروع به استخراج داده‌ها...")
-        brands, models = extract_all_data(driver)
-
-        # اگر تاریخ تغییر نکرده باشد
-        if last_update_date == today:
-            logging.info("✅ تاریخ تغییری نکرده است، بررسی داده‌های جدید...")
-            compare_and_update(brands, models, today)
+        if last_update_date != today:
+            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
+            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
+            send_new_posts(driver, today)
         else:
-            logging.info("✅ تاریخ جدید است، ارسال داده‌های جدید...")
-            send_new_posts(brands, models, today)
+            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
+            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
+            update_existing_posts(today)
 
         # خروج از WebDriver
         driver.quit()
@@ -507,51 +495,40 @@ def main():
 def send_new_posts(driver, today):
     try:
 
-def extract_all_data(driver):
-    try:
-        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
         
-        # استخراج داده‌ها برای موبایل
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        mobile_brands, mobile_models = extract_product_data(driver, valid_brands)
 
-        # استخراج داده‌ها برای لپ‌تاپ
+        logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
+        scroll_page(driver)
+
+        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
+        brands, models = extract_product_data(driver, valid_brands)
+        
+        # استخراج داده‌ها برای لپ‌تاپ، تبلت و کنسول
         driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
         laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
+        brands.extend(laptop_brands)
+        models.extend(laptop_models)
 
-        # استخراج داده‌ها برای تبلت
         driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
         tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
+        brands.extend(tablet_brands)
+        models.extend(tablet_models)
 
-        # استخراج داده‌ها برای کنسول بازی
         driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
         console_brands, console_models = extract_product_data(driver, valid_brands)
+        brands.extend(console_brands)
+        models.extend(console_models)
 
-        # ترکیب تمام داده‌ها
-        all_brands = mobile_brands + laptop_brands + tablet_brands + console_brands
-        all_models = mobile_models + laptop_models + tablet_models + console_models
+        driver.quit()
 
-        return all_brands, all_models
-
-    except Exception as e:
-        logging.error(f"❌ خطا در استخراج داده‌ها: {e}")
-        return [], []
-
-        
-        # ترکیب همه داده‌ها
-        all_brands = mobile_brands + laptop_brands + tablet_brands + console_brands
-        all_models = mobile_models + laptop_models + tablet_models + console_models
-
-        return all_brands, all_models
-        
         # ایجاد و ارسال پیام‌ها
         processed_data = []
         for i in range(len(brands)):
