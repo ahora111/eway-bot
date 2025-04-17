@@ -45,17 +45,18 @@ def edit_telegram_message(message_id, text):
     print("Edit response:", response.text)
 
 # --- خواندن message_id از شیت ---
-def get_message_id_from_sheet():
-    ws = get_worksheet()
-    today = get_today()
-    try:
-        records = ws.get_all_records()
-        for row in records:
-            if row['date'] == today:
-                return int(row['message_id'])
-    except Exception as e:
-        print("Error reading from sheet:", e)
-    return None
+def get_worksheet():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    
+    # Load credentials from environment variable
+    credentials_str = os.environ.get("GSHEET_CREDENTIALS_JSON")
+    credentials_dict = json.loads(credentials_str)
+
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key("1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E")
+    worksheet = sheet.sheet1
+    return worksheet
 
 # --- ذخیره message_id در شیت ---
 def save_message_id_to_sheet(message_id):
