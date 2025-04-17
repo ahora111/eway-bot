@@ -518,6 +518,19 @@ def send_new_posts(driver, today):
 
         driver.quit()
 
+                        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
+        today = JalaliDate.today().strftime("%Y-%m-%d")
+        last_update_date = get_last_update_date()
+
+        if last_update_date != today:
+            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
+            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
+            send_new_posts(driver, today)
+        else:
+            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
+            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
+            update_existing_posts(today)
+            
         # ایجاد و ارسال پیام‌ها
         processed_data = []
         for i in range(len(brands)):
@@ -533,19 +546,6 @@ def send_new_posts(driver, today):
         update_date = today
 
         
-                # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
-        today = JalaliDate.today().strftime("%Y-%m-%d")
-        last_update_date = get_last_update_date()
-
-        if last_update_date != today:
-            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
-            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
-            send_new_posts(driver, today)
-        else:
-            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
-            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
-            update_existing_posts(today)
-            
         # ارسال پیام‌ها و ذخیره آنها در Google Sheets
         samsung_message_id = None
         xiaomi_message_id = None
