@@ -470,28 +470,6 @@ def main():
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
 
-        # بررسی و ایجاد هدرها در Google Sheets
-        check_and_add_headers()
-
-        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
-        today = JalaliDate.today().strftime("%Y-%m-%d")
-        last_update_date = get_last_update_date()
-
-        if last_update_date != today:
-            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
-            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
-            send_new_posts(driver, today)
-        else:
-            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
-            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
-            update_existing_posts(today)
-
-        # خروج از WebDriver
-        driver.quit()
-
-    except Exception as e:
-        logging.error(f"❌ خطا در اجرای برنامه: {e}")
-
 def send_new_posts(driver, today):
     try:
 
@@ -528,6 +506,28 @@ def send_new_posts(driver, today):
         models.extend(console_models)
 
         driver.quit()
+
+        # بررسی و ایجاد هدرها در Google Sheets
+        check_and_add_headers()
+
+        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
+        today = JalaliDate.today().strftime("%Y-%m-%d")
+        last_update_date = get_last_update_date()
+
+        if last_update_date != today:
+            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
+            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
+            send_new_posts(driver, today)
+        else:
+            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
+            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
+            update_existing_posts(today)
+
+        # خروج از WebDriver
+        driver.quit()
+
+    except Exception as e:
+        logging.error(f"❌ خطا در اجرای برنامه: {e}")
 
         # ایجاد و ارسال پیام‌ها
         processed_data = []
