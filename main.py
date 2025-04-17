@@ -462,12 +462,8 @@ def get_last_update_date():
         return None
 
 
-from datetime import datetime
-from persiantools.jdatetime import JalaliDate
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import logging
+
+
 
 def connect_to_google_sheets():
     import gspread
@@ -497,6 +493,15 @@ def get_sheet_data():
     except Exception as e:
         logging.error(f"❌ خطا در بازیابی داده‌ها از Google Sheets: {e}")
         return []
+
+def update_last_update_date(new_date):
+    try:
+        # اتصال به Google Sheets و به‌روزرسانی تاریخ ذخیره‌شده
+        sheet = connect_to_google_sheets()
+        sheet.update_cell(1, 1, new_date)  # فرض کنیم سلول تاریخ در A1 قرار دارد
+        logging.info(f"✅ تاریخ به‌روزرسانی شد: {new_date}")
+    except Exception as e:
+        logging.error(f"❌ خطا در به‌روزرسانی تاریخ: {e}")
 
 def compare_with_sheet_data(brands, models):
     try:
@@ -538,8 +543,7 @@ def extract_all_data(driver, valid_brands):
 
 def send_new_posts(brands, models, today):
     try:
-        # ایجاد و ارسال پیام‌های دسته‌بندی‌شده
-        logging.info("✅ شروع به ارسال پیام‌های جدید...")
+        logging.info("✅ ارسال پیام‌های جدید آغاز شد...")
         processed_data = []
         for i in range(len(brands)):
             model_str = process_model(models[i])
@@ -569,6 +573,37 @@ def send_new_posts(brands, models, today):
 
     except Exception as e:
         logging.error(f"❌ خطا در ارسال پیام‌های جدید: {e}")
+
+def update_existing_posts(today, brands, models):
+    try:
+        logging.info("✅ شروع به ویرایش پیام‌های قبلی...")
+        processed_data = []
+        for i in range(len(brands)):
+            model_str = process_model(models[i])
+            processed_data.append(f"{model_str} {brands[i]}")
+
+        message_lines = []
+        for row in processed_data:
+            decorated = decorate_line(row)
+            message_lines.append(decorated)
+
+        categories = categorize_messages(message_lines)
+
+        for category, lines in categories.items():
+            if lines:
+                message = prepare_final_message(category, lines, today)
+                message = escape_markdown(message)
+
+                # بازیابی message_id از Google Sheets
+                message_id, current_text = get_message_id_and_text_from_sheet(today, category)
+                if message_id and current_text != message:
+                    edit_telegram_message(message_id, message, current_text)
+                    logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+                else:
+                    logging.info(f"✅ پیام دسته {category} نیازی به ویرایش ندارد.")
+
+    except Exception as e:
+        logging.error(f"❌ خطا در ویرایش پیام‌ها: {e}")
 
 def create_buttons(message_ids):
     button_markup = {"inline_keyboard": []}
@@ -609,7 +644,7 @@ def send_final_message(button_markup):
 
 def main():
     try:
-        # تنظیم WebDriver
+        # راه‌اندازی WebDriver
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
@@ -617,38 +652,49 @@ def main():
 
         # استخراج داده‌ها از همه دسته‌بندی‌ها
         logging.info("✅ شروع به استخراج داده‌ها...")
-        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
+        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "VOCAL", "TCL", "Huawei"]
         brands, models = extract_all_data(driver, valid_brands)
 
         if not brands or not models:
             logging.error("❌ هیچ داده‌ای استخراج نشد.")
             return
 
+        # نمایش داده‌های استخراج‌شده
         logging.info(f"🔍 داده‌های استخراج‌شده: برندها={brands}, مدل‌ها={models}")
 
-        # بررسی و ایجاد هدرها در Google Sheets
+        # اطمینان از وجود هدرها در Google Sheets
         check_and_add_headers()
 
         # دریافت تاریخ امروز و بازیابی تاریخ ذخیره‌شده
         today = JalaliDate.today().strftime("%Y-%m-%d")
         last_update_date = get_last_update_date()
 
-        # مقایسه داده‌ها و شناسایی تغییرات
+        # بررسی تغییر داده‌ها
         changes_detected = compare_with_sheet_data(brands, models)
 
+        # تصمیم‌گیری بر اساس تغییر داده‌ها و تاریخ
         if changes_detected:
-            logging.info("✅ تغییرات شناسایی شد، ارسال پیام‌ها و ایجاد دکمه‌ها...")
-            send_new_posts(brands, models, today)
-            update_last_update_date(today)  # به‌روزرسانی تاریخ ذخیره‌شده
+            if last_update_date == today:
+                logging.info("✅ تغییرات شناسایی شد، ویرایش پیام‌ها...")
+                update_existing_posts(today, brands, models)
+            else:
+                logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
+                send_new_posts(brands, models, today)
+                update_last_update_date(today)
         else:
-            logging.info("✅ داده‌ها تغییر نکرده‌اند. نیازی به ارسال یا ویرایش نیست.")
+            if last_update_date != today:
+                logging.info("✅ تاریخ جدید است اما داده‌ها تغییری نکرده‌اند، ارسال پیام‌های جدید...")
+                send_new_posts(brands, models, today)
+                update_last_update_date(today)
+            else:
+                logging.info("✅ داده‌ها و تاریخ تغییری نکرده‌اند. نیازی به ارسال یا ویرایش نیست.")
 
-        # خروج از WebDriver
+        # بستن WebDriver
         driver.quit()
 
     except Exception as e:
         logging.error(f"❌ خطا در اجرای برنامه: {e}")
-
+        
 if __name__ == "__main__":
     main()
 
