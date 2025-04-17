@@ -11,6 +11,7 @@ jobs:
 
     env:
       GSHEET_CREDENTIALS_JSON: ${{ secrets.GSHEET_CREDENTIALS_JSON }}
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
 
     steps:
       - name: Checkout repo
