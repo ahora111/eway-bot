@@ -470,9 +470,6 @@ def main():
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
 
-def send_new_posts(driver, today):
-    try:
-
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
@@ -528,7 +525,9 @@ def send_new_posts(driver, today):
 
     except Exception as e:
         logging.error(f"❌ خطا در اجرای برنامه: {e}")
-
+        
+def send_new_posts(driver, today):
+    try:
         # ایجاد و ارسال پیام‌ها
         processed_data = []
         for i in range(len(brands)):
