@@ -52,21 +52,6 @@ def edit_telegram_message(message_id, text):
     print("Edit response:", response.text)
 
 # --- خواندن message_id امروز از شیت ---
-
-def get_message_id_from_sheet():
-    ws = get_worksheet()
-    today = get_today()
-    records = ws.get_all_records()
-    for row in records:
-        if row.get('تاریخ') == today or row.get('date') == today:
-            return int(row.get('message_id'))
-    return None
-    
-print(f"Message ID دریافت‌شده از شیت: {message_id}")
-
-
-
-# --- ذخیره message_id در شیت ---
 def get_message_id_from_sheet():
     ws = get_worksheet()
     today = get_today()
@@ -75,8 +60,12 @@ def get_message_id_from_sheet():
     if message_ids:
         return message_ids[-1]  # آخرین آیدی
     return None
-    
-print(f"Message ID دریافت‌شده از شیت: {message_id}")
+
+# --- ذخیره message_id در شیت ---
+def save_message_id_to_sheet(message_id):
+    ws = get_worksheet()
+    today = get_today()
+    ws.append_row([today, message_id])
 
 # --- متن نمونه ---
 text = "✅ قیمت‌های امروز:\n- آیفون: 50 میلیون\n- سامسونگ: 30 میلیون"
