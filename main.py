@@ -297,6 +297,7 @@ def categorize_messages(lines):
 def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     message_parts = split_message(message)
     last_message_id = None
+    sheet = connect_to_google_sheets()  # اتصال به Google Sheets
     for part in message_parts:
         part = escape_markdown(part)
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -313,12 +314,14 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
         response_data = response.json()
         if response_data.get('ok'):
             last_message_id = response_data["result"]["message_id"]
+            save_message_id_to_sheet(sheet, part, last_message_id)  # ذخیره message_id در Google Sheets
         else:
             logging.error(f"❌ خطا در ارسال پیام: {response_data}")
             return None
 
     logging.info("✅ پیام ارسال شد!")
     return last_message_id  # برگشت message_id آخرین پیام
+
 
 
 def get_last_messages(bot_token, chat_id, limit=5):
