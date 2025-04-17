@@ -76,7 +76,6 @@ def get_message_id_from_sheet():
     
 print(f"Message ID دریافت‌شده از شیت: {message_id}")
 
-
 # --- متن نمونه ---
 text = "✅ قیمت‌های امروز:\n- آیفون: 50 میلیون\n- سامسونگ: 30 میلیون"
 
