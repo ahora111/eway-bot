@@ -60,6 +60,7 @@ def get_message_id_from_sheet():
         if row.get('تاریخ') == today or row.get('date') == today:
             message_id = row.get('message_id')
             if message_id:
+                print(f"Message ID دریافت‌شده از شیت: {message_id}")
                 return int(message_id)
     return None
 
@@ -82,9 +83,11 @@ message_id = get_message_id_from_sheet()
 text = "✅ قیمت‌های امروز:\n- آیفون: 50 میلیون\n- سامسونگ: 30 میلیون"
 
 if message_id:
+    print(f"Message ID برای ویرایش: {message_id}")
     edit_telegram_message(message_id, text)
     print("پیام ویرایش شد.")
 else:
     new_id = send_telegram_message(text)
     save_message_id_to_sheet(new_id)
     print("پیام جدید ارسال و ذخیره شد.")
+
