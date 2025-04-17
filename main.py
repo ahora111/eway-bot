@@ -440,40 +440,36 @@ def get_last_update_date():
 
 def main():
     try:
+        # تنظیم WebDriver
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
 
-        # بررسی تاریخ
-        check_and_add_headers()  # مطمئن شدن از وجود هدرها در شیت
+        # بررسی و ایجاد هدرها در Google Sheets
+        check_and_add_headers()
+
+        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
         today = JalaliDate.today().strftime("%Y-%m-%d")
         last_update_date = get_last_update_date()
 
-        # اگر تاریخ امروز با تاریخ ذخیره‌شده متفاوت باشد، پیام‌های جدید ارسال شوند
         if last_update_date != today:
+            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
             logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
-            send_new_posts(today)
+            send_new_posts(driver, today)
         else:
+            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
             logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
             update_existing_posts(today)
+
+        # خروج از WebDriver
+        driver.quit()
+
     except Exception as e:
-        logging.error(f"❌ خطا در اجرای اصلی: {e}")
+        logging.error(f"❌ خطا در اجرای برنامه: {e}")
 
-def send_new_posts(today):
-    # منطق ارسال پیام‌های جدید مانند قبل
-    pass
-
-def update_existing_posts(today):
-    # بازیابی دسته‌بندی‌ها و متن پیام‌های ذخیره‌شده از Google Sheets
-    categories = ["🔵", "🟡", "🍏", "💻", "🟠", "🎮"]
-    for category in categories:
-        message_id, current_text = get_message_id_and_text_from_sheet(today, category)
-        if message_id:
-            new_text = current_text  # فرض: متن تغییری نکرده است
-            edit_telegram_message(message_id, new_text, current_text)
-            logging.info(f"✅ پیام دسته {category} ویرایش شد.")
-
+def send_new_posts(driver, today):
+    try:
 
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
@@ -509,7 +505,21 @@ def update_existing_posts(today):
 
         driver.quit()
 
-        # ذخیره message_id هر دسته‌بندی
+        # ایجاد و ارسال پیام‌ها
+        processed_data = []
+        for i in range(len(brands)):
+            model_str = process_model(models[i])
+            processed_data.append(f"{model_str} {brands[i]}")
+
+        message_lines = []
+        for row in processed_data:
+            decorated = decorate_line(row)
+            message_lines.append(decorated)
+
+        categories = categorize_messages(message_lines)
+        update_date = today
+
+        # ارسال پیام‌ها و ذخیره آنها در Google Sheets
         samsung_message_id = None
         xiaomi_message_id = None
         iphone_message_id = None
@@ -517,56 +527,29 @@ def update_existing_posts(today):
         tablet_message_id = None
         console_message_id = None
 
-        if brands:
-            processed_data = []
-            for i in range(len(brands)):
-                model_str = process_model(models[i])
-                processed_data.append(f"{model_str} {brands[i]}")
+        for category, lines in categories.items():
+            if lines:
+                message = prepare_final_message(category, lines, update_date)
+                msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+                if msg_id:
+                    save_message_id_and_text_to_sheet(today, category, msg_id, message)
+                    logging.info(f"✅ پیام دسته {category} ارسال شد.")
 
-            update_date = JalaliDate.today().strftime("%Y-%m-%d")
-            message_lines = []
-            for row in processed_data:
-                decorated = decorate_line(row)
-                message_lines.append(decorated)
+                # ذخیره message_id برای دکمه‌ها
+                if category == "🔵":
+                    samsung_message_id = msg_id
+                elif category == "🟡":
+                    xiaomi_message_id = msg_id
+                elif category == "🍏":
+                    iphone_message_id = msg_id
+                elif category == "💻":
+                    laptop_message_id = msg_id
+                elif category == "🟠":
+                    tablet_message_id = msg_id
+                elif category == "🎮":
+                    console_message_id = msg_id
 
-            categories = categorize_messages(message_lines)
-
-
-            
-            for category, lines in categories.items():
-                if lines:
-                    message = prepare_final_message(category, lines, update_date)
-                    msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-
-                     # خطایابی: بررسی مقادیر ورودی قبل از ذخیره‌سازی
-                    logging.info(f"🔍 اطلاعاتی که قرار است ذخیره شوند: تاریخ={update_date}, دسته‌بندی={category}, پیام ID={msg_id}, متن={message}")
-        
-                            # ذخیره‌سازی در Google Sheets
-                    if msg_id:
-                        save_message_id_and_text_to_sheet(update_date, category, msg_id, message)
-            
-
-
-                    if category == "🔵":
-                        samsung_message_id = msg_id
-                    elif category == "🟡":
-                        xiaomi_message_id = msg_id
-                    elif category == "🍏":
-                        iphone_message_id = msg_id
-                    elif category == "💻":
-                        laptop_message_id = msg_id
-                    elif category == "🟠":
-                        tablet_message_id = msg_id
-                    elif category == "🎮":
-                        console_message_id = msg_id
-        else:
-            logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
-
-        if not samsung_message_id:
-            logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
-            return
-
-        # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
+        # ایجاد دکمه‌های لینک به پیام‌ها
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
@@ -599,7 +582,22 @@ def update_existing_posts(today):
         send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
 
     except Exception as e:
-        logging.error(f"❌ خطا: {e}")
+        logging.error(f"❌ خطا در ارسال پیام‌های جدید: {e}")
+
+def update_existing_posts(today):
+    try:
+        # بازیابی message_id و متن پیام‌های قبلی از Google Sheets
+        categories = ["🔵", "🟡", "🍏", "💻", "🟠", "🎮"]
+        for category in categories:
+            message_id, current_text = get_message_id_and_text_from_sheet(today, category)
+            if message_id:
+                # فرض کنیم متن پیام تغییری نداشته باشد
+                edit_telegram_message(message_id, current_text, current_text)
+                logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+            else:
+                logging.warning(f"❌ پیام دسته {category} یافت نشد.")
+    except Exception as e:
+        logging.error(f"❌ خطا در ویرایش پیام‌ها: {e}")
 
 if __name__ == "__main__":
     main()
