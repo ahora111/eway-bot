@@ -498,11 +498,11 @@ def main():
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
 
                      # خطایابی: بررسی مقادیر ورودی قبل از ذخیره‌سازی
-                            logging.info(f"🔍 اطلاعاتی که قرار است ذخیره شوند: تاریخ={update_date}, دسته‌بندی={category}, پیام ID={msg_id}, متن={message}")
+                    logging.info(f"🔍 اطلاعاتی که قرار است ذخیره شوند: تاریخ={update_date}, دسته‌بندی={category}, پیام ID={msg_id}, متن={message}")
         
                             # ذخیره‌سازی در Google Sheets
-                            if msg_id:
-                                save_message_id_and_text_to_sheet(update_date, category, msg_id, message)
+                    if msg_id:
+                        save_message_id_and_text_to_sheet(update_date, category, msg_id, message)
             
 
 
