@@ -335,14 +335,20 @@ def get_last_messages(bot_token, chat_id, limit=5):
     return []
 
 def get_worksheet():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    credentials_str = os.environ.get("GSHEET_CREDENTIALS_JSON")
-    credentials_dict = json.loads(credentials_str)
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(SPREADSHEET_ID)
-    worksheet = sheet.worksheet(SHEET_NAME)
-    return worksheet
+    try:
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        credentials_str = os.environ.get("GSHEET_CREDENTIALS_JSON")
+        credentials_dict = json.loads(credentials_str)
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(SPREADSHEET_ID)
+        worksheet = sheet.worksheet(SHEET_NAME)
+        logging.info("✅ اتصال به Google Sheets برقرار شد.")
+        return worksheet
+    except Exception as e:
+        logging.error(f"❌ خطا در اتصال به Google Sheets: {e}")
+        return None
+
 
 def check_and_add_headers():
     ws = get_worksheet()
@@ -366,10 +372,14 @@ def get_message_id_and_text_from_sheet(today, category):
 def save_message_id_and_text_to_sheet(today, category, message_id, text):
     try:
         ws = get_worksheet()
+        if not ws:
+            logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
+            return
         ws.append_row([today, str(message_id), category, text])
         logging.info(f"✅ داده‌ها با موفقیت ذخیره شدند: {today}, {category}, {message_id}, {text}")
     except Exception as e:
-        logging.error(f"❌ خطا در ذخیره داده‌ها: {e}")
+        logging.error(f"❌ خطا در ذخیره داده‌ها به Google Sheets: {e}")
+
 
 
 # --- ویرایش منطق ارسال پیام ---
