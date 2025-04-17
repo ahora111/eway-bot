@@ -51,15 +51,19 @@ def edit_telegram_message(message_id, text):
     })
     print("Edit response:", response.text)
 
+
 # --- خواندن message_id امروز از شیت ---
 def get_message_id_from_sheet():
     ws = get_worksheet()
     today = get_today()
     records = ws.get_all_records()
-    message_ids = [int(row['message_id']) for row in records if str(row.get('تاریخ')) == today and row.get('message_id')]
-    if message_ids:
-        return message_ids[-1]  # آخرین آیدی
+    print(f"Records: {records}")  # برای دیباگ کردن رکوردها
+    for row in records:
+        if row.get('تاریخ') == today or row.get('date') == today:
+            print(f"Found message_id: {row.get('message_id')} for today {today}")  # چاپ message_id
+            return int(row.get('message_id'))
     return None
+
 
 # --- ذخیره message_id در شیت ---
 def save_message_id_to_sheet(message_id):
