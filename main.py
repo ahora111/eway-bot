@@ -369,17 +369,39 @@ def get_message_id_and_text_from_sheet(today, category):
                 return None, ""
     return None, ""
 
+for category, lines in categories.items():
+    if lines:
+        message = prepare_final_message(category, lines, update_date)
+        msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+
+        # خطایابی: بررسی مقادیر ورودی قبل از ذخیره‌سازی
+        logging.info(f"🔍 اطلاعاتی که قرار است ذخیره شوند: تاریخ={update_date}, دسته‌بندی={category}, پیام ID={msg_id}, متن={message}")
+        
+        # ذخیره‌سازی در Google Sheets
+        if msg_id:
+            save_message_id_and_text_to_sheet(update_date, category, msg_id, message)
+
+
 def save_message_id_and_text_to_sheet(today, category, message_id, text):
     try:
         ws = get_worksheet()
         if not ws:
             logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
             return
-        logging.info(f"🔍 درحال ذخیره‌سازی داده‌ها: {today}, {category}, {message_id}, {text}")
+        
+        # خطایابی: تست ذخیره با داده‌های ساده
+        logging.info("🔍 درحال تست ذخیره‌سازی با داده‌های ساده")
+        ws.append_row(["تست تاریخ", "تست شناسه", "تست دسته‌بندی", "تست متن پیام"])
+
+        # خطایابی: ذخیره داده‌های اصلی
+        logging.info(f"🔍 درحال ذخیره‌سازی داده‌ها: تاریخ={today}, دسته‌بندی={category}, پیام ID={message_id}, متن={text}")
         ws.append_row([today, str(message_id), category, text])
         logging.info("✅ داده‌ها با موفقیت به Google Sheets اضافه شدند.")
     except Exception as e:
         logging.error(f"❌ خطا در ذخیره داده‌ها به Google Sheets: {e}")
+
+
+
 
 
 
