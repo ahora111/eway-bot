@@ -4,6 +4,8 @@ import json
 import requests
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
+
 
 # --- تنظیمات ---
 BOT_TOKEN = os.environ['BOT_TOKEN']
@@ -53,14 +55,26 @@ def edit_telegram_message(message_id, text):
 
 
 def get_message_id_from_sheet(today):
-    ws = get_worksheet()
-    records = ws.get_all_records()
-    for row in records:
-        for key, value in row.items():
-            if key.strip() == today and isinstance(value, int):
-                return value
+    sheet = service.spreadsheets()
+    result = sheet.values().get(spreadsheetId=SHEET_ID, range=SHEET_RANGE).execute()
+    rows = result.get("values", [])
+
+    if not rows:
+        return None
+
+    headers = rows[0]
+    for row in rows[1:]:
+        record = dict(zip(headers, row))
+        if record.get("تاریخ") == today:
+            try:
+                return int(record.get("شناسه پیام"))
+            except (ValueError, TypeError):
+                return None
     return None
 
+
+today = datetime.now().strftime('%Y-%m-%d')
+message_id = get_message_id_from_sheet(today)
 
 # --- ذخیره message_id در شیت ---
 def save_message_id_to_sheet(message_id):
