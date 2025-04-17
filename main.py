@@ -473,18 +473,7 @@ def main():
         # بررسی و ایجاد هدرها در Google Sheets
         check_and_add_headers()
 
-        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
-        today = JalaliDate.today().strftime("%Y-%m-%d")
-        last_update_date = get_last_update_date()
 
-        if last_update_date != today:
-            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
-            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
-            send_new_posts(driver, today)
-        else:
-            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
-            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
-            update_existing_posts(today)
 
         # خروج از WebDriver
         driver.quit()
@@ -559,6 +548,20 @@ def send_new_posts(driver, today):
                     save_message_id_and_text_to_sheet(today, category, msg_id, message)
                     logging.info(f"✅ پیام دسته {category} ارسال شد.")
 
+        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
+        today = JalaliDate.today().strftime("%Y-%m-%d")
+        last_update_date = get_last_update_date()
+
+        if last_update_date != today:
+            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
+            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
+            send_new_posts(driver, today)
+        else:
+            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
+            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
+            update_existing_posts(today)
+            
+            
                 # ذخیره message_id برای دکمه‌ها
                 if category == "🔵":
                     samsung_message_id = msg_id
