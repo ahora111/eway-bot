@@ -56,41 +56,26 @@ def get_message_id_from_sheet():
     ws = get_worksheet()
     today = get_today()
     records = ws.get_all_records()
-    for row in records:
-        if row.get('تاریخ') == today or row.get('date') == today:
-            message_id = row.get('message_id')
-            if message_id:
-                print(f"Message ID دریافت‌شده از شیت: {message_id}")
-                return int(message_id)
-    print("هیچ message_id برای امروز پیدا نشد.")
+    message_ids = [int(row['message_id']) for row in records if str(row.get('تاریخ')) == today and row.get('message_id')]
+    if message_ids:
+        return message_ids[-1]  # آخرین آیدی
     return None
 
 # --- ذخیره message_id در شیت ---
 def save_message_id_to_sheet(message_id):
     ws = get_worksheet()
     today = get_today()
-    records = ws.get_all_records()
-    updated = False
-    for i, row in enumerate(records):
-        if row.get('تاریخ') == today or row.get('date') == today:
-            ws.update_cell(i + 2, records[0].index('message_id') + 1, message_id)
-            updated = True
-            print(f"Message ID جدید {message_id} در شیت ذخیره شد.")
-            break
-    if not updated:
-        ws.append_row([today, message_id])
-        print(f"Message ID جدید {message_id} به شیت اضافه شد.")
+    ws.append_row([today, message_id])  # ذخیره message_id جدید
+
+# --- متن نمونه ---
+text = "✅ قیمت‌های امروز:\n- آیفون: 50 میلیون\n- سامسونگ: 30 میلیون"
 
 # --- منطق اصلی ---
 message_id = get_message_id_from_sheet()
-text = "✅ قیمت‌های امروز:\n- آیفون: 50 میلیون\n- سامسونگ: 30 میلیون"
-
 if message_id:
-    print(f"Message ID برای ویرایش: {message_id}")
     edit_telegram_message(message_id, text)
     print("پیام ویرایش شد.")
 else:
     new_id = send_telegram_message(text)
     save_message_id_to_sheet(new_id)
     print("پیام جدید ارسال و ذخیره شد.")
-
