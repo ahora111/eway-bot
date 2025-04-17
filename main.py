@@ -58,7 +58,9 @@ def get_message_id_from_sheet():
     records = ws.get_all_records()
     for row in records:
         if row.get('تاریخ') == today or row.get('date') == today:
-            return int(row.get('message_id'))
+            message_id = row.get('message_id')
+            if message_id:
+                return int(message_id)
     return None
 
 # --- ذخیره message_id در شیت ---
