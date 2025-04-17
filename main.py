@@ -47,15 +47,16 @@ def send_telegram_message(text):
     return response.json().get("result", {}).get("message_id")
 
 # --- ویرایش پیام تلگرام ---
-def edit_telegram_message(message_id, text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-    response = requests.post(url, data={
-        "chat_id": CHAT_ID,
-        "message_id": message_id,
-        "text": text,
-        "parse_mode": "HTML"
-    })
-    print("Edit response:", response.text)
+def edit_telegram_message(message_id, text, current_text):
+    if text != current_text:  # فقط در صورتی که متن تغییر کرده باشد ویرایش انجام شود
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+        response = requests.post(url, data={
+            "chat_id": CHAT_ID,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": "HTML"
+        })
+        print("Edit response:", response.text)
 
 # --- دریافت message_id از Google Sheet ---
 def get_message_id_from_sheet(today):
@@ -85,8 +86,11 @@ check_and_add_headers()  # اضافه کردن عنوان‌ها اگر وجود
 
 today = get_today()
 message_id = get_message_id_from_sheet(today)
+
 if message_id:
-    edit_telegram_message(message_id, text)
+    # برای ویرایش پیام، ابتدا محتوای فعلی پیام رو دریافت می‌کنیم
+    current_text = "متن پیام قبلی که از شیت یا ذخیره‌سازی گرفته شده"  # این قسمت باید از شیت یا ذخیره‌سازی به‌دست بیاید
+    edit_telegram_message(message_id, text, current_text)
     print("پیام ویرایش شد.")
 else:
     new_id = send_telegram_message(text)
