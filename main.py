@@ -474,30 +474,13 @@ def main():
         check_and_add_headers()
 
 
-
-        # خروج از WebDriver
-        driver.quit()
-
     except Exception as e:
         logging.error(f"❌ خطا در اجرای برنامه: {e}")
 
 def send_new_posts(driver, today):
     try:
 
-       
-                                # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
-        today = JalaliDate.today().strftime("%Y-%m-%d")
-        last_update_date = get_last_update_date()
-
-        if last_update_date != today:
-            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
-            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
-            send_new_posts(driver, today)
-        else:
-            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
-            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
-            update_existing_posts(today)
-             
+        
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
@@ -529,8 +512,22 @@ def send_new_posts(driver, today):
         brands.extend(console_brands)
         models.extend(console_models)
 
-        driver.quit()
 
+                # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
+        today = JalaliDate.today().strftime("%Y-%m-%d")
+        last_update_date = get_last_update_date()
+
+        if last_update_date != today:
+            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
+            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
+            send_new_posts(driver, today)
+        else:
+            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
+            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
+            update_existing_posts(today)
+
+
+        driver.quit()
 
         # ایجاد و ارسال پیام‌ها
         processed_data = []
@@ -546,7 +543,6 @@ def send_new_posts(driver, today):
         categories = categorize_messages(message_lines)
         update_date = today
 
-        
         # ارسال پیام‌ها و ذخیره آنها در Google Sheets
         samsung_message_id = None
         xiaomi_message_id = None
@@ -558,11 +554,13 @@ def send_new_posts(driver, today):
         for category, lines in categories.items():
             if lines:
                 message = prepare_final_message(category, lines, update_date)
+                        # پردازش متن پیام برای escape کردن کاراکترها
+                message = escape_markdown(message)
                 msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
                 if msg_id:
                     save_message_id_and_text_to_sheet(today, category, msg_id, message)
                     logging.info(f"✅ پیام دسته {category} ارسال شد.")
-            
+
                 # ذخیره message_id برای دکمه‌ها
                 if category == "🔵":
                     samsung_message_id = msg_id
@@ -612,8 +610,6 @@ def send_new_posts(driver, today):
     except Exception as e:
         logging.error(f"❌ خطا در ارسال پیام‌های جدید: {e}")
 
-
-
 def update_existing_posts(today):
     try:
         # بازیابی message_id و متن پیام‌های قبلی از Google Sheets
@@ -621,6 +617,8 @@ def update_existing_posts(today):
         for category in categories:
             message_id, current_text = get_message_id_and_text_from_sheet(today, category)
             if message_id:
+                # پردازش متن برای escape کردن کاراکترها
+                new_text = escape_markdown(current_text)
                 # فرض کنیم متن پیام تغییری نداشته باشد
                 edit_telegram_message(message_id, current_text, current_text)
                 logging.info(f"✅ پیام دسته {category} ویرایش شد.")
