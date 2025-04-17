@@ -547,10 +547,6 @@ def extract_all_data(driver):
         all_models = mobile_models + laptop_models + tablet_models + console_models
 
         return all_brands, all_models
-
-    except Exception as e:
-        logging.error(f"❌ خطا در استخراج داده‌ها: {e}")
-        return [], []
         
         # ایجاد و ارسال پیام‌ها
         processed_data = []
