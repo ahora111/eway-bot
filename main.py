@@ -213,10 +213,6 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"⬅️ موجودی {category_title} ➡️\n\n"
     )
 
-    # ادامه منطق فرمت‌دهی خطوط پیام
-    ...
-    return final_message
-
     formatted_lines = []
     current_product = None
     product_variants = []
