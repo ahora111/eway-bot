@@ -364,8 +364,13 @@ def get_message_id_and_text_from_sheet(today, category):
     return None, ""
 
 def save_message_id_and_text_to_sheet(today, category, message_id, text):
-    ws = get_worksheet()
-    ws.append_row([today, str(message_id), category, text])
+    try:
+        ws = get_worksheet()
+        ws.append_row([today, str(message_id), category, text])
+        logging.info(f"✅ داده‌ها با موفقیت ذخیره شدند: {today}, {category}, {message_id}, {text}")
+    except Exception as e:
+        logging.error(f"❌ خطا در ذخیره داده‌ها: {e}")
+
 
 # --- ویرایش منطق ارسال پیام ---
 def send_or_edit_message(category, lines, update_date):
