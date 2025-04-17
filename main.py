@@ -61,17 +61,21 @@ def get_message_id_from_sheet():
         if row.get('تاریخ') == today or row.get('date') == today:
             return int(row.get('message_id'))
     return None
+print(f"Message ID دریافت‌شده از شیت: {message_id}")
 
 
 # --- ذخیره message_id در شیت ---
-def save_message_id_to_sheet(message_id):
+def get_message_id_from_sheet():
     ws = get_worksheet()
     today = get_today()
-    try:
-        ws.append_row([today, message_id])
-        print("Message ID saved to Google Sheet.")
-    except Exception as e:
-        print("Error writing to sheet:", e)
+    records = ws.get_all_records()
+    message_ids = [int(row['message_id']) for row in records if str(row.get('تاریخ')) == today and row.get('message_id')]
+    if message_ids:
+        return message_ids[-1]  # آخرین آیدی
+    return None
+    
+print(f"Message ID دریافت‌شده از شیت: {message_id}")
+
 
 # --- متن نمونه ---
 text = "✅ قیمت‌های امروز:\n- آیفون: 50 میلیون\n- سامسونگ: 30 میلیون"
