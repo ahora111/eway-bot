@@ -49,6 +49,7 @@ def edit_telegram_message(message_id, text):
     print("Edit response:", response.text)
 
 # --- دریافت message_id از Google Sheet ---
+
 def get_message_id_from_sheet(today):
     ws = get_worksheet()
     rows = ws.get_all_values()
@@ -62,12 +63,14 @@ def get_message_id_from_sheet(today):
                 return None
     return None
 
+
+
 # --- ذخیره message_id در شیت ---
 def save_message_id_to_sheet(message_id):
     ws = get_worksheet()
     today = get_today()
-    ws.append_row(str(message_id),[today])  # تبدیل به string برای اطمینان از ذخیره
-
+    ws.append_row([today, message_id])  # ذخیره message_id جدید
+    
 # --- متن نمونه ---
 text = "✅ قیمت‌های امروز:\n- آیفون: 50 میلیون\n- سامسونگ: 30 میلیون"
 
