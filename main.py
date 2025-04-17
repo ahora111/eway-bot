@@ -381,6 +381,21 @@ def send_or_edit_message(category, lines, update_date):
         new_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
         save_message_id_and_text_to_sheet(today, category, new_id, message)
         logging.info(f"✅ پیام جدید دسته {category} ارسال و ذخیره شد.")
+        
+def check_and_add_headers():
+    try:
+        # اتصال به شیت
+        ws = get_worksheet()
+        rows = ws.get_all_values()
+        
+        # بررسی اینکه آیا شیت خالی است یا اینکه هدرها موجود هستند
+        if not rows or rows[0] != ["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"]:
+            ws.insert_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"], 1)  # اضافه کردن هدر به سطر اول
+            logging.info("✅ هدرها به Google Sheets اضافه شدند.")
+        else:
+            logging.info("✅ هدرها موجود هستند و نیاز به تغییر ندارند.")
+    except Exception as e:
+        logging.error(f"❌ خطا در بررسی یا ایجاد هدرها: {e}")
 
 
 def main():
