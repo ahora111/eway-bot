@@ -66,7 +66,7 @@ def get_message_id_from_sheet(today):
 def save_message_id_to_sheet(message_id):
     ws = get_worksheet()
     today = get_today()
-    ws.append_row([today, str(message_id)])  # تبدیل به string برای اطمینان از ذخیره
+    ws.append_row(str(message_id),[today])  # تبدیل به string برای اطمینان از ذخیره
 
 # --- متن نمونه ---
 text = "✅ قیمت‌های امروز:\n- آیفون: 50 میلیون\n- سامسونگ: 30 میلیون"
