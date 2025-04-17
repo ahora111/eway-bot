@@ -462,6 +462,151 @@ def get_last_update_date():
         return None
 
 
+from datetime import datetime
+from persiantools.jdatetime import JalaliDate
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import logging
+
+def connect_to_google_sheets():
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    credentials = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+    client = gspread.authorize(credentials)
+
+    # دسترسی به شیت خاص
+    sheet = client.open('YourSheetName').sheet1
+    return sheet
+
+def get_sheet_data():
+    try:
+        # اتصال به Google Sheets
+        sheet = connect_to_google_sheets()
+        
+        # خواندن داده‌ها از شیت
+        data = sheet.get_all_records()
+        
+        # تبدیل داده‌ها به قالب مناسب برای مقایسه
+        formatted_data = [(row['Brand'], row['Model']) for row in data if row.get('Brand') and row.get('Model')]
+        
+        logging.info(f"✅ داده‌های بازیابی‌شده از Google Sheets: {formatted_data}")
+        return formatted_data
+    except Exception as e:
+        logging.error(f"❌ خطا در بازیابی داده‌ها از Google Sheets: {e}")
+        return []
+
+def compare_with_sheet_data(brands, models):
+    try:
+        # بازیابی داده‌های موجود از Google Sheets
+        sheet_data = get_sheet_data()
+
+        # مقایسه داده‌ها و شناسایی تغییرات
+        new_data = set(zip(brands, models))
+        existing_data = set(sheet_data)
+
+        if new_data != existing_data:
+            logging.info("✅ داده‌های جدید با داده‌های موجود تفاوت دارند.")
+            return True
+        else:
+            logging.info("✅ داده‌های جدید مشابه داده‌های موجود هستند.")
+            return False
+    except Exception as e:
+        logging.error(f"❌ خطا در مقایسه داده‌ها: {e}")
+        return False
+
+def extract_all_data(driver, valid_brands):
+    try:
+        categories = ["mobile", "laptop", "tablet", "game-console"]
+        all_brands, all_models = [], []
+
+        for category in categories:
+            logging.info(f"✅ استخراج داده‌ها برای دسته {category}...")
+            driver.get(f'https://hamrahtel.com/quick-checkout?category={category}')
+            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+            scroll_page(driver)
+            brands, models = extract_product_data(driver, valid_brands)
+            all_brands.extend(brands)
+            all_models.extend(models)
+
+        return all_brands, all_models
+    except Exception as e:
+        logging.error(f"❌ خطا در استخراج داده‌ها: {e}")
+        return [], []
+
+def send_new_posts(brands, models, today):
+    try:
+        # ایجاد و ارسال پیام‌های دسته‌بندی‌شده
+        logging.info("✅ شروع به ارسال پیام‌های جدید...")
+        processed_data = []
+        for i in range(len(brands)):
+            model_str = process_model(models[i])
+            processed_data.append(f"{model_str} {brands[i]}")
+
+        message_lines = []
+        for row in processed_data:
+            decorated = decorate_line(row)
+            message_lines.append(decorated)
+
+        categories = categorize_messages(message_lines)
+        message_ids = {}
+
+        for category, lines in categories.items():
+            if lines:
+                message = prepare_final_message(category, lines, today)
+                message = escape_markdown(message)
+                msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+                if msg_id:
+                    save_message_id_and_text_to_sheet(today, category, msg_id, message)
+                    message_ids[category] = msg_id
+                    logging.info(f"✅ پیام دسته {category} ارسال شد.")
+
+        # ایجاد دکمه‌ها و ارسال پیام پایانی
+        button_markup = create_buttons(message_ids)
+        send_final_message(button_markup)
+
+    except Exception as e:
+        logging.error(f"❌ خطا در ارسال پیام‌های جدید: {e}")
+
+def create_buttons(message_ids):
+    button_markup = {"inline_keyboard": []}
+
+    for category, msg_id in message_ids.items():
+        if category == "🔵":
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست سامسونگ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
+        elif category == "🟡":
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست شیائومی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
+        elif category == "🍏":
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست آیفون", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
+        elif category == "💻":
+            button_markup["inline_keyboard"].append([{"text": "💻 لیست لپ‌تاپ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
+        elif category == "🟠":
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست تبلت", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
+        elif category == "🎮":
+            button_markup["inline_keyboard"].append([{"text": "🎮 کنسول بازی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
+
+    return button_markup
+
+def send_final_message(button_markup):
+    final_message = (
+        "✅ لیست گوشی و سایر کالاهای بالا بروز شده است. ثبت خرید تا ساعت 10:30 شب انجام می‌شود و تحویل کالا ساعت 11:30 صبح روز بعد خواهد بود.\n\n"
+        "✅ اطلاعات واریز:\n"
+        "🔷 شماره شبا: IR970560611828006154229701\n"
+        "🔷 شماره کارت: 6219861812467917\n"
+        "🔷 بلو بانک: حسین گرئی\n\n"
+        "⭕️ لطفاً رسید واریز را به آیدی تلگرام زیر ارسال کنید:\n"
+        "🆔 @lhossein1\n\n"
+        "✅ شماره‌های تماس ثبت سفارش:\n"
+        "📞 09371111558\n"
+        "📞 09386373926\n"
+        "📞 09308529712\n"
+        "📞 028-3399-1417"
+    )
+
+    send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
+
 def main():
     try:
         # تنظیم WebDriver
@@ -503,121 +648,6 @@ def main():
 
     except Exception as e:
         logging.error(f"❌ خطا در اجرای برنامه: {e}")
-
-
-def extract_all_data(driver, valid_brands):
-    try:
-        categories = ["mobile", "laptop", "tablet", "game-console"]
-        all_brands, all_models = [], []
-
-        for category in categories:
-            logging.info(f"✅ استخراج داده‌ها برای دسته {category}...")
-            driver.get(f'https://hamrahtel.com/quick-checkout?category={category}')
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-            scroll_page(driver)
-            brands, models = extract_product_data(driver, valid_brands)
-            all_brands.extend(brands)
-            all_models.extend(models)
-
-        return all_brands, all_models
-    except Exception as e:
-        logging.error(f"❌ خطا در استخراج داده‌ها: {e}")
-        return [], []
-
-
-def compare_with_sheet_data(brands, models):
-    try:
-        # بازیابی داده‌های موجود از Google Sheets
-        sheet_data = get_sheet_data()
-
-        # مقایسه داده‌ها و شناسایی تغییرات
-        new_data = set(zip(brands, models))
-        existing_data = set(sheet_data)
-
-        if new_data != existing_data:
-            logging.info("✅ داده‌های جدید با داده‌های موجود تفاوت دارند.")
-            return True
-        else:
-            logging.info("✅ داده‌های جدید مشابه داده‌های موجود هستند.")
-            return False
-    except Exception as e:
-        logging.error(f"❌ خطا در مقایسه داده‌ها: {e}")
-        return False
-
-
-def send_new_posts(brands, models, today):
-    try:
-        # ایجاد و ارسال پیام‌های دسته‌بندی‌شده
-        logging.info("✅ شروع به ارسال پیام‌های جدید...")
-        processed_data = []
-        for i in range(len(brands)):
-            model_str = process_model(models[i])
-            processed_data.append(f"{model_str} {brands[i]}")
-
-        message_lines = []
-        for row in processed_data:
-            decorated = decorate_line(row)
-            message_lines.append(decorated)
-
-        categories = categorize_messages(message_lines)
-        message_ids = {}
-
-        for category, lines in categories.items():
-            if lines:
-                message = prepare_final_message(category, lines, today)
-                message = escape_markdown(message)
-                msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-                if msg_id:
-                    save_message_id_and_text_to_sheet(today, category, msg_id, message)
-                    message_ids[category] = msg_id
-                    logging.info(f"✅ پیام دسته {category} ارسال شد.")
-
-        # ایجاد دکمه‌ها و ارسال پیام پایانی
-        button_markup = create_buttons(message_ids)
-        send_final_message(button_markup)
-
-    except Exception as e:
-        logging.error(f"❌ خطا در ارسال پیام‌های جدید: {e}")
-
-
-def create_buttons(message_ids):
-    button_markup = {"inline_keyboard": []}
-
-    for category, msg_id in message_ids.items():
-        if category == "🔵":
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست سامسونگ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
-        elif category == "🟡":
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست شیائومی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
-        elif category == "🍏":
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست آیفون", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
-        elif category == "💻":
-            button_markup["inline_keyboard"].append([{"text": "💻 لیست لپ‌تاپ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
-        elif category == "🟠":
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست تبلت", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
-        elif category == "🎮":
-            button_markup["inline_keyboard"].append([{"text": "🎮 کنسول بازی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}])
-
-    return button_markup
-
-
-def send_final_message(button_markup):
-    final_message = (
-        "✅ لیست گوشی و سایر کالاهای بالا بروز شده است. ثبت خرید تا ساعت 10:30 شب انجام می‌شود و تحویل کالا ساعت 11:30 صبح روز بعد خواهد بود.\n\n"
-        "✅ اطلاعات واریز:\n"
-        "🔷 شماره شبا: IR970560611828006154229701\n"
-        "🔷 شماره کارت: 6219861812467917\n"
-        "🔷 بلو بانک: حسین گرئی\n\n"
-        "⭕️ لطفاً رسید واریز را به آیدی تلگرام زیر ارسال کنید:\n"
-        "🆔 @lhossein1\n\n"
-        "✅ شماره‌های تماس ثبت سفارش:\n"
-        "📞 09371111558\n"
-        "📞 09386373926\n"
-        "📞 09308529712\n"
-        "📞 028-3399-1417"
-    )
-
-    send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
-
 
 if __name__ == "__main__":
     main()
