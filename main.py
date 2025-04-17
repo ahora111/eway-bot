@@ -361,7 +361,6 @@ def get_last_messages(bot_token, chat_id, limit=5):
         messages = response.json().get("result", [])
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
-
 def main():
     try:
         driver = get_driver()
@@ -369,16 +368,16 @@ def main():
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
         
+        # صفحه موبایل
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-
         logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
         scroll_page(driver)
 
         valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
         brands, models = extract_product_data(driver, valid_brands)
         
-        # استخراج داده‌ها برای لپ‌تاپ، تبلت و کنسول
+        # استخراج داده‌ها برای لپ‌تاپ
         driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
@@ -386,6 +385,7 @@ def main():
         brands.extend(laptop_brands)
         models.extend(laptop_models)
 
+        # استخراج داده‌ها برای تبلت
         driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
@@ -393,6 +393,7 @@ def main():
         brands.extend(tablet_brands)
         models.extend(tablet_models)
 
+        # استخراج داده‌ها برای کنسول بازی
         driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
@@ -408,7 +409,6 @@ def main():
         save_message_id_to_sheet(sheet, category, msg_id)
         logging.info(f"✅ شناسه پیام برای دسته {category} ذخیره شد.")
         
-        
         driver.quit()
 
         # ذخیره message_id هر دسته‌بندی
@@ -419,7 +419,6 @@ def main():
         tablet_message_id = None
         console_message_id = None
 
-        
         if brands:
             processed_data = []
             for i in range(len(brands)):
@@ -439,13 +438,11 @@ def main():
                     sheet = connect_to_google_sheets()
                     save_message_id_to_sheet(sheet, category, msg_id)
 
-            
+            # ارسال پیام‌های دسته‌بندی‌شده
             for category, lines in categories.items():
                 if lines:
-                    # استفاده از تابع جدید برای آماده‌سازی پیام
                     message = prepare_final_message(category, lines, update_date)
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-
 
                     if category == "🔵":
                         samsung_message_id = msg_id
@@ -466,7 +463,7 @@ def main():
             logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
             return
 
-        # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
+        # ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
