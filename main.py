@@ -426,6 +426,17 @@ def check_and_add_headers():
     except Exception as e:
         logging.error(f"❌ خطا در بررسی یا ایجاد هدرها: {e}")
 
+def get_last_update_date():
+    try:
+        ws = get_worksheet()
+        rows = ws.get_all_values()
+        if len(rows) > 1:  # اگر اطلاعات ذخیره شده باشد
+            last_row = rows[-1]
+            return last_row[0]  # ستون اول (تاریخ) را برگرداند
+        return None
+    except Exception as e:
+        logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
+        return None
 
 def main():
     try:
@@ -433,8 +444,38 @@ def main():
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
-        check_and_add_headers()  # مطمئن شدن از وجود هدرها در شیت
 
+        # بررسی تاریخ
+        check_and_add_headers()  # مطمئن شدن از وجود هدرها در شیت
+        today = JalaliDate.today().strftime("%Y-%m-%d")
+        last_update_date = get_last_update_date()
+
+        # اگر تاریخ امروز با تاریخ ذخیره‌شده متفاوت باشد، پیام‌های جدید ارسال شوند
+        if last_update_date != today:
+            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
+            send_new_posts(today)
+        else:
+            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
+            update_existing_posts(today)
+    except Exception as e:
+        logging.error(f"❌ خطا در اجرای اصلی: {e}")
+
+def send_new_posts(today):
+    # منطق ارسال پیام‌های جدید مانند قبل
+    pass
+
+def update_existing_posts(today):
+    # بازیابی دسته‌بندی‌ها و متن پیام‌های ذخیره‌شده از Google Sheets
+    categories = ["🔵", "🟡", "🍏", "💻", "🟠", "🎮"]
+    for category in categories:
+        message_id, current_text = get_message_id_and_text_from_sheet(today, category)
+        if message_id:
+            new_text = current_text  # فرض: متن تغییری نکرده است
+            edit_telegram_message(message_id, new_text, current_text)
+            logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+
+
+        
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
