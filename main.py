@@ -22,6 +22,15 @@ def get_worksheet():
     worksheet = sheet.worksheet(SHEET_NAME)
     return worksheet
 
+# --- بررسی و افزودن عنوان‌ها به شیت ---
+def check_and_add_headers():
+    ws = get_worksheet()
+    rows = ws.get_all_values()
+    if not rows:
+        ws.append_row(["تاریخ", "شناسه پیام"])  # افزودن عنوان‌ها اگر شیت خالی باشه
+    elif len(rows) > 0 and len(rows[0]) != 2:  # چک کردن تعداد ستون‌ها
+        ws.insert_row(["تاریخ", "شناسه پیام"], 1)  # افزودن عنوان‌ها در سطر اول
+
 # --- گرفتن تاریخ امروز ---
 def get_today():
     return datetime.now().strftime('%Y-%m-%d')
@@ -49,32 +58,6 @@ def edit_telegram_message(message_id, text):
     print("Edit response:", response.text)
 
 # --- دریافت message_id از Google Sheet ---
-
-
-# --- بررسی و افزودن عنوان‌ها به شیت --- 
-def check_and_add_headers():
-    ws = get_worksheet()
-    rows = ws.get_all_values()
-    if not rows:
-        ws.append_row(["تاریخ", "شناسه پیام"])  # افزودن عنوان‌ها اگر شیت خالی باشه
-    elif len(rows) > 0 and len(rows[0]) != 2:  # چک کردن تعداد ستون‌ها
-        ws.insert_row(["تاریخ", "شناسه پیام"], 1)  # افزودن عنوان‌ها در سطر اول
-
-# --- اجرای منطق اصلی ---
-check_and_add_headers()  # اضافه کردن عنوان‌ها اگر وجود نداشت
-
-today = get_today()
-message_id = get_message_id_from_sheet(today)
-
-if message_id:
-    edit_telegram_message(message_id, text)
-    print("پیام ویرایش شد.")
-else:
-    new_id = send_telegram_message(text)
-    save_message_id_to_sheet(new_id)
-    print("پیام جدید ارسال و ذخیره شد.")
-
-
 def get_message_id_from_sheet(today):
     ws = get_worksheet()
     rows = ws.get_all_values()
@@ -88,8 +71,6 @@ def get_message_id_from_sheet(today):
                 return None
     return None
 
-
-
 # --- ذخیره message_id در شیت ---
 def save_message_id_to_sheet(message_id):
     ws = get_worksheet()
@@ -100,6 +81,8 @@ def save_message_id_to_sheet(message_id):
 text = "✅ قیمت‌های امروز:\n- آیفون: 50000 میلیون\n- سامسونگ: 3000 میلیون"
 
 # --- اجرای منطق اصلی ---
+check_and_add_headers()  # اضافه کردن عنوان‌ها اگر وجود نداشت
+
 today = get_today()
 message_id = get_message_id_from_sheet(today)
 if message_id:
