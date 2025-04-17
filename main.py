@@ -178,23 +178,27 @@ def remove_extra_blank_lines(lines):
     return cleaned_lines
     
 def prepare_final_message(category_name, category_lines, update_date):
-        # گرفتن عنوان دسته از روی ایموجی
+    # گرفتن عنوان دسته از روی ایموجی
     category_title = get_category_name(category_name)
-    # دریافت تاریخ امروز به شمسی
-    update_date = JalaliDate.today().strftime("%Y/%m/%d")
+    
+    # دریافت تاریخ امروز به شمسی و ساعت فعلی
+    today = JalaliDate.today().strftime("%Y/%m/%d")
+    current_time = datetime.now().strftime("%H:%M")
+    update_date = f"{today} - {current_time}"
+
     # تعریف نگاشت برای روزهای هفته به فارسی
     weekday_mapping = {
-            "Saturday": "شنبه💪",
-            "Sunday": "یکشنبه😃",
-            "Monday": "دوشنبه☺️",
-            "Tuesday": "سه شنبه🥱",
-            "Wednesday": "چهارشنبه😕",
-            "Thursday": "پنج شنبه☺️",
-            "Friday": "جمعه😎"
+        "Saturday": "شنبه💪",
+        "Sunday": "یکشنبه😃",
+        "Monday": "دوشنبه☺️",
+        "Tuesday": "سه شنبه🥱",
+        "Wednesday": "چهارشنبه😕",
+        "Thursday": "پنج شنبه☺️",
+        "Friday": "جمعه😎"
     }
     weekday_english = JalaliDate.today().weekday()  # گرفتن ایندکس روز هفته
     weekday_farsi = list(weekday_mapping.values())[weekday_english]  # تبدیل ایندکس به روز فارسی
-    update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
+    update_date_formatted = f"{weekday_farsi} {update_date}"
 
     print(f"نام روز هفته به انگلیسی: {weekday_english}")
     print(update_date_formatted)  # برای تست
