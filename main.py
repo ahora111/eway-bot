@@ -27,9 +27,9 @@ def check_and_add_headers():
     ws = get_worksheet()
     rows = ws.get_all_values()
     if not rows:
-        ws.append_row(["تاریخ", "شناسه پیام"])  # افزودن عنوان‌ها اگر شیت خالی باشه
-    elif len(rows) > 0 and len(rows[0]) != 2:  # چک کردن تعداد ستون‌ها
-        ws.insert_row(["تاریخ", "شناسه پیام"], 1)  # افزودن عنوان‌ها در سطر اول
+        ws.append_row(["تاریخ", "شناسه پیام", "متن پیام"])  # افزودن عنوان‌ها اگر شیت خالی باشه
+    elif len(rows) > 0 and len(rows[0]) != 3:  # چک کردن تعداد ستون‌ها
+        ws.insert_row(["تاریخ", "شناسه پیام", "متن پیام"], 1)  # افزودن عنوان‌ها در سطر اول
 
 # --- گرفتن تاریخ امروز ---
 def get_today():
@@ -58,8 +58,8 @@ def edit_telegram_message(message_id, text, current_text):
         })
         print("Edit response:", response.text)
 
-# --- دریافت message_id از Google Sheet ---
-def get_message_id_from_sheet(today):
+# --- دریافت message_id و متن پیام از Google Sheet ---
+def get_message_id_and_text_from_sheet(today):
     ws = get_worksheet()
     rows = ws.get_all_values()
     headers = rows[0]
@@ -67,16 +67,16 @@ def get_message_id_from_sheet(today):
         record = dict(zip(headers, row))
         if record.get("تاریخ") == today:
             try:
-                return int(record.get("شناسه پیام", 0))
+                return int(record.get("شناسه پیام", 0)), record.get("متن پیام", "")
             except (ValueError, TypeError):
-                return None
-    return None
+                return None, ""
+    return None, ""
 
-# --- ذخیره message_id در شیت ---
-def save_message_id_to_sheet(message_id):
+# --- ذخیره message_id و متن پیام در شیت ---
+def save_message_id_and_text_to_sheet(message_id, text):
     ws = get_worksheet()
     today = get_today()
-    ws.append_row([today, str(message_id)])  # تبدیل به string برای اطمینان از ذخیره
+    ws.append_row([today, str(message_id), text])  # تبدیل به string برای اطمینان از ذخیره
     
 # --- متن نمونه ---
 text = "✅ قیمت‌های امروز:\n- آیفون: 50000 میلیون\n- سامسونگ: 3000 میلیون"
@@ -85,14 +85,12 @@ text = "✅ قیمت‌های امروز:\n- آیفون: 50000 میلیون\n- �
 check_and_add_headers()  # اضافه کردن عنوان‌ها اگر وجود نداشت
 
 today = get_today()
-message_id = get_message_id_from_sheet(today)
+message_id, current_text = get_message_id_and_text_from_sheet(today)
 
 if message_id:
-    # برای ویرایش پیام، ابتدا محتوای فعلی پیام رو دریافت می‌کنیم
-    current_text = "متن پیام قبلی که از شیت یا ذخیره‌سازی گرفته شده"  # این قسمت باید از شیت یا ذخیره‌سازی به‌دست بیاید
     edit_telegram_message(message_id, text, current_text)
     print("پیام ویرایش شد.")
 else:
     new_id = send_telegram_message(text)
-    save_message_id_to_sheet(new_id)
+    save_message_id_and_text_to_sheet(new_id, text)
     print("پیام جدید ارسال و ذخیره شد.")
