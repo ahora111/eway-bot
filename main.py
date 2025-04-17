@@ -471,7 +471,7 @@ def get_last_update_date():
         return None
 
 
-ef main():
+def main():
     try:
         # اتصال به WebDriver
         driver = get_driver()
