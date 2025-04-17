@@ -14,9 +14,16 @@ SHEET_NAME = 'Sheet1'  # نام شیت مورد نظر
 # --- اتصال به Google Sheets ---
 def get_worksheet():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+    
+    # Load credentials from environment variable
+    credentials_str = os.environ.get("GSHEET_CREDENTIALS_JSON")
+    credentials_dict = json.loads(credentials_str)
+
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
     client = gspread.authorize(creds)
-    return client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+    sheet = client.open_by_key(SPREADSHEET_ID)
+    worksheet = sheet.worksheet(SHEET_NAME)
+    return worksheet
 
 # --- گرفتن تاریخ امروز ---
 def get_today():
@@ -44,19 +51,19 @@ def edit_telegram_message(message_id, text):
     })
     print("Edit response:", response.text)
 
-# --- خواندن message_id از شیت ---
-def get_worksheet():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    
-    # Load credentials from environment variable
-    credentials_str = os.environ.get("GSHEET_CREDENTIALS_JSON")
-    credentials_dict = json.loads(credentials_str)
-
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key("1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E")
-    worksheet = sheet.sheet1
-    return worksheet
+# --- خواندن message_id امروز از شیت ---
+def get_message_id_from_sheet():
+    ws = get_worksheet()
+    today = get_today()
+    try:
+        records = ws.get_all_records()
+        for row in records:
+            if row['تاریخ'] == today or row['date'] == today:
+                return int(row['message_id'])
+        return None
+    except Exception as e:
+        print("Error reading message ID from sheet:", e)
+        return None
 
 # --- ذخیره message_id در شیت ---
 def save_message_id_to_sheet(message_id):
