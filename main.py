@@ -16,12 +16,12 @@ from selenium.webdriver.support import expected_conditions as EC
 from persiantools.jdatetime import JalaliDate
 from oauth2client.service_account import ServiceAccountCredentials
 
+
 BOT_TOKEN = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
 CHAT_ID = "-1002505490886"
 MESSAGE_ID_FILE = "message_ids.json"  # فایل برای ذخیره message_id ها
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
 
 def get_driver():
     try:
@@ -295,6 +295,35 @@ def categorize_messages(lines):
 
     return categories
 
+
+
+# اتصال به Google Sheets
+def connect_to_google_sheets():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+    client = gspread.authorize(creds)
+    
+    # باز کردن شیت با آدرس URL
+    sheet = client.open_by_url('https://docs.google.com/spreadsheets/d/1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E')
+    return sheet
+
+# خواندن شناسه‌های پیام‌ها از Google Sheets
+def get_message_ids_from_sheet(sheet):
+    worksheet = sheet.get_worksheet(0)
+    data = worksheet.get_all_records()  # خواندن تمامی رکوردها
+    message_ids = {}
+    for row in data:
+        category = row['category']  # ستون مربوط به دسته‌بندی
+        msg_id = row['message_id']  # ستون مربوط به شناسه پیام
+        message_ids[category] = msg_id
+    return message_ids
+
+# ذخیره شناسه پیام‌ها در Google Sheets
+def save_message_id_to_sheet(sheet, category, msg_id):
+    worksheet = sheet.get_worksheet(0)
+    worksheet.append_row([category, msg_id])  # اضافه کردن یک ردیف جدید
+
+
 def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     message_parts = split_message(message)
     last_message_id = None
@@ -333,22 +362,6 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
-
-
-# اتصال به Google Sheets
-def connect_to_google_sheets():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/spreadsheets",
-             "https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E")
-    return sheet.get_worksheet(0)  # انتخاب شیت اول
-
-# ذخیره message_id در Google Sheet
-def save_message_id_to_sheet(sheet, category, message_id):
-    row = [category, message_id]
-    sheet.append_row(row)
-    
 def main():
     try:
         driver = get_driver()
@@ -387,6 +400,15 @@ def main():
         brands.extend(console_brands)
         models.extend(console_models)
 
+        # دریافت شناسه‌ها از Google Sheets
+        sheet = connect_to_google_sheets()
+        message_ids = get_message_ids_from_sheet(sheet)
+        
+        # ذخیره شناسه پیام در Google Sheets
+        save_message_id_to_sheet(sheet, category, msg_id)
+        logging.info(f"✅ شناسه پیام برای دسته {category} ذخیره شد.")
+        
+        
         driver.quit()
 
         # ذخیره message_id هر دسته‌بندی
