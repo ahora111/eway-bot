@@ -509,38 +509,42 @@ def send_new_posts(driver, today):
 
 def extract_all_data(driver):
     try:
+        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
+        
+        # استخراج داده‌ها برای موبایل
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-
-        logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
         scroll_page(driver)
+        mobile_brands, mobile_models = extract_product_data(driver, valid_brands)
 
-        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
-        brands, models = extract_product_data(driver, valid_brands)
-        
-        # استخراج داده‌ها برای لپ‌تاپ، تبلت و کنسول
+        # استخراج داده‌ها برای لپ‌تاپ
         driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
         laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
-        brands.extend(laptop_brands)
-        models.extend(laptop_models)
 
+        # استخراج داده‌ها برای تبلت
         driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
         tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
-        brands.extend(tablet_brands)
-        models.extend(tablet_models)
 
+        # استخراج داده‌ها برای کنسول بازی
         driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
         console_brands, console_models = extract_product_data(driver, valid_brands)
-        brands.extend(console_brands)
-        models.extend(console_models)
 
-        driver.quit()
+        # ترکیب تمام داده‌ها
+        all_brands = mobile_brands + laptop_brands + tablet_brands + console_brands
+        all_models = mobile_models + laptop_models + tablet_models + console_models
+
+        return all_brands, all_models
+
+    except Exception as e:
+        logging.error(f"❌ خطا در استخراج داده‌ها: {e}")
+        return [], []
+
         
         # ترکیب همه داده‌ها
         all_brands = mobile_brands + laptop_brands + tablet_brands + console_brands
