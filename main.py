@@ -1,74 +1,36 @@
-import json
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 import datetime
-import requests
-import os
 
-# دریافت توکن و شناسه چت از متغیرهای محیطی
-BOT_TOKEN = os.environ['BOT_TOKEN']
-CHAT_ID = os.environ['CHAT_ID']
-MESSAGE_IDS_FILE = 'message_ids.json'  # یا مسیر کامل فایل
+# اتصال به گوگل شیت
+def connect_sheet():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+    client = gspread.authorize(creds)
+    sheet = client.open("Telegram Messages").sheet1  # اسم شیت
+    return sheet
 
-def load_message_ids():
-    if os.path.exists(MESSAGE_IDS_FILE):
-        with open(MESSAGE_IDS_FILE, 'r') as f:
-            data = json.load(f)
-            return data.get(get_today(), {})
-    return {}
-
-def save_message_ids(message_ids):
-    if os.path.exists(MESSAGE_IDS_FILE):
-        with open(MESSAGE_IDS_FILE, 'r') as f:
-            data = json.load(f)
-    else:
-        data = {}
-
-    data[get_today()] = message_ids
-
-    try:
-        with open(MESSAGE_IDS_FILE, 'w') as f:
-            json.dump(data, f)
-            print(f"File '{MESSAGE_IDS_FILE}' saved successfully.")
-    except Exception as e:
-        print(f"Error saving file: {e}")
-
+# دریافت تاریخ امروز
 def get_today():
     return datetime.datetime.now().strftime('%Y-%m-%d')
 
-def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    response = requests.post(url, data={
-        "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML"
-    })
-    print("Telegram response:", response.text)  # برای دیباگ
-    return response.json().get("result", {}).get("message_id")
+# ذخیره message_id در شیت
+def save_message_id_to_sheet(message_id):
+    sheet = connect_sheet()
+    today = get_today()
+    cell = sheet.find(today) if sheet.findall(today) else None
+    if cell:
+        sheet.update_cell(cell.row, cell.col + 1, message_id)
+    else:
+        sheet.append_row([today, message_id])
+    print("Message ID saved to Google Sheet.")
 
-def edit_telegram_message(message_id, new_text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-    response = requests.post(url, data={
-        "chat_id": CHAT_ID,
-        "message_id": message_id,
-        "text": new_text,
-        "parse_mode": "HTML"
-    })
-    print("Telegram response:", response.text)  # برای دیباگ
-
-# پیام نمونه
-text = "✅ قیمت‌های امروز:\n- آیفون: 50 میلیون\n- سامسونگ: 30 میلیون"
-
-# بررسی آیا امروز پیام ارسال شده یا نه
-message_ids = load_message_ids()
-
-if not message_ids:
-    # امروز هنوز پیام ارسال نشده
-    msg_id = send_telegram_message(text)
-    save_message_ids({"main": msg_id})
-    print("پیام جدید ارسال شد.")
-else:
-    # پیام قبلاً ارسال شده، فقط ویرایش کن
-    edit_telegram_message(message_ids["main"], text)
-    print("پیام ویرایش شد.")
-
-# چاپ مسیر فعلی برای بررسی
-print("Current directory:", os.getcwd())
+# خواندن message_id از شیت
+def get_message_id_from_sheet():
+    sheet = connect_sheet()
+    today = get_today()
+    records = sheet.get_all_records()
+    for row in records:
+        if row['date'] == today:
+            return row['message_id']
+    return None
