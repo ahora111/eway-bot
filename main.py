@@ -5,6 +5,7 @@ import requests
 import logging
 import json
 import pytz
+import gspread
 import sys
 from datetime import datetime, time as dt_time
 from selenium import webdriver
