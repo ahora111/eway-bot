@@ -5,7 +5,6 @@ import requests
 import logging
 import json
 import pytz
-import gspread
 import sys
 from datetime import datetime, time as dt_time
 from selenium import webdriver
@@ -14,14 +13,82 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from persiantools.jdatetime import JalaliDate
-from oauth2client.service_account import ServiceAccountCredentials
 
 
+
+# --- تنظیمات ---
 BOT_TOKEN = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
 CHAT_ID = "-1002505490886"
-MESSAGE_ID_FILE = "message_ids.json"  # فایل برای ذخیره message_id ها
+SPREADSHEET_ID = '1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E'
+SHEET_NAME = 'Sheet1'
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# --- اتصال به Google Sheets ---
+def get_worksheet():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    credentials_str = os.environ.get("GSHEET_CREDENTIALS_JSON")
+    credentials_dict = json.loads(credentials_str)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(SPREADSHEET_ID)
+    worksheet = sheet.worksheet(SHEET_NAME)
+    return worksheet
+
+# --- بررسی و افزودن عنوان‌ها به شیت ---
+def check_and_add_headers():
+    ws = get_worksheet()
+    rows = ws.get_all_values()
+    if not rows:
+        ws.append_row(["تاریخ", "دسته‌بندی", "شناسه پیام"])  # افزودن عنوان‌ها اگر شیت خالی باشه
+
+# --- دریافت تاریخ امروز ---
+def get_today():
+    return JalaliDate.today().strftime('%Y-%m-%d')
+
+# --- دریافت Message ID از Google Sheets ---
+def get_message_id(sheet, category, today):
+    rows = sheet.get_all_values()
+    headers = rows[0]
+    for row in rows[1:]:
+        record = dict(zip(headers, row))
+        if record.get("تاریخ") == today and record.get("دسته‌بندی") == category:
+            try:
+                return int(record.get("شناسه پیام", 0))
+            except (ValueError, TypeError):
+                return None
+    return None
+
+# --- ذخیره Message ID ---
+def save_message_id(sheet, category, message_id, today):
+    sheet.append_row([today, category, message_id])
+
+# --- ارسال پیام تلگرام ---
+def send_telegram_message(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    response = requests.post(url, data={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"})
+    return response.json().get("result", {}).get("message_id")
+
+# --- ویرایش پیام تلگرام ---
+def edit_telegram_message(message_id, text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+    requests.post(url, data={"chat_id": CHAT_ID, "message_id": message_id, "text": text, "parse_mode": "HTML"})
+
+# --- استخراج داده‌ها از سایت ---
+def extract_product_data(driver, valid_brands):
+    product_elements = driver.find_elements(By.CLASS_NAME, 'mantine-Text-root')
+    brands, models = [], []
+    for product in product_elements:
+        name = product.text.strip().replace("تومان", "").replace("نامشخص", "").strip()
+        parts = name.split()
+        brand = parts[0] if len(parts) >= 2 else name
+        model = " ".join(parts[1:]) if len(parts) >= 2 else ""
+        if brand in valid_brands:
+            brands.append(brand)
+            models.append(model)
+    return brands, models
+
+
 
 def get_driver():
     try:
@@ -295,39 +362,9 @@ def categorize_messages(lines):
 
     return categories
 
-
-
-# اتصال به Google Sheets
-def connect_to_google_sheets():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-    client = gspread.authorize(creds)
-    
-    # باز کردن شیت با آدرس URL
-    sheet = client.open_by_url('https://docs.google.com/spreadsheets/d/1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E')
-    return sheet
-
-# خواندن شناسه‌های پیام‌ها از Google Sheets
-def get_message_ids_from_sheet(sheet):
-    worksheet = sheet.get_worksheet(0)
-    data = worksheet.get_all_records()  # خواندن تمامی رکوردها
-    message_ids = {}
-    for row in data:
-        category = row['category']  # ستون مربوط به دسته‌بندی
-        msg_id = row['message_id']  # ستون مربوط به شناسه پیام
-        message_ids[category] = msg_id
-    return message_ids
-
-# ذخیره شناسه پیام‌ها در Google Sheets
-def save_message_id_to_sheet(sheet, category, msg_id):
-    worksheet = sheet.get_worksheet(0)
-    worksheet.append_row([category, msg_id])  # اضافه کردن یک ردیف جدید
-
-
 def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     message_parts = split_message(message)
     last_message_id = None
-    sheet = connect_to_google_sheets()  # اتصال به Google Sheets
     for part in message_parts:
         part = escape_markdown(part)
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -344,14 +381,12 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
         response_data = response.json()
         if response_data.get('ok'):
             last_message_id = response_data["result"]["message_id"]
-            save_message_id_to_sheet(sheet, part, last_message_id)  # ذخیره message_id در Google Sheets
         else:
             logging.error(f"❌ خطا در ارسال پیام: {response_data}")
             return None
 
     logging.info("✅ پیام ارسال شد!")
     return last_message_id  # برگشت message_id آخرین پیام
-
 
 
 def get_last_messages(bot_token, chat_id, limit=5):
@@ -361,23 +396,29 @@ def get_last_messages(bot_token, chat_id, limit=5):
         messages = response.json().get("result", [])
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
+
+
 def main():
     try:
+        sheet = get_worksheet()
+        check_and_add_headers()
+        today = get_today()
+        
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
         
-        # صفحه موبایل
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+
         logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
         scroll_page(driver)
 
         valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
         brands, models = extract_product_data(driver, valid_brands)
         
-        # استخراج داده‌ها برای لپ‌تاپ
+        # استخراج داده‌ها برای لپ‌تاپ، تبلت و کنسول
         driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
@@ -385,7 +426,6 @@ def main():
         brands.extend(laptop_brands)
         models.extend(laptop_models)
 
-        # استخراج داده‌ها برای تبلت
         driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
@@ -393,7 +433,6 @@ def main():
         brands.extend(tablet_brands)
         models.extend(tablet_models)
 
-        # استخراج داده‌ها برای کنسول بازی
         driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
         scroll_page(driver)
@@ -401,14 +440,18 @@ def main():
         brands.extend(console_brands)
         models.extend(console_models)
 
-        # دریافت شناسه‌ها از Google Sheets
-        sheet = connect_to_google_sheets()
-        message_ids = get_message_ids_from_sheet(sheet)
         
-        # ذخیره شناسه پیام در Google Sheets
-        save_message_id_to_sheet(sheet, category, msg_id)
-        logging.info(f"✅ شناسه پیام برای دسته {category} ذخیره شد.")
-        
+        for emoji, category in categories.items():
+            message_id = get_message_id(sheet, category, today)
+            text = f"{category}: لیست نمونه امروز..."
+            
+            if message_id:
+                edit_telegram_message(message_id, text)
+            else:
+                new_message_id = send_telegram_message(text)
+                save_message_id(sheet, category, new_message_id, today)
+                messages[category] = new_message_id
+                
         driver.quit()
 
         # ذخیره message_id هر دسته‌بندی
@@ -433,16 +476,12 @@ def main():
 
             categories = categorize_messages(message_lines)
 
-            for category, msg_id in zip(categories.keys(), [samsung_message_id, xiaomi_message_id, iphone_message_id, laptop_message_id, tablet_message_id, console_message_id]):
-                if msg_id:
-                    sheet = connect_to_google_sheets()
-                    save_message_id_to_sheet(sheet, category, msg_id)
-
-            # ارسال پیام‌های دسته‌بندی‌شده
             for category, lines in categories.items():
                 if lines:
+                    # استفاده از تابع جدید برای آماده‌سازی پیام
                     message = prepare_final_message(category, lines, update_date)
                     msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+
 
                     if category == "🔵":
                         samsung_message_id = msg_id
@@ -463,7 +502,7 @@ def main():
             logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
             return
 
-        # ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
+        # ✅ ارسال پیام نهایی + دکمه‌های لینک به پیام‌های مربوطه
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
