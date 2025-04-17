@@ -410,7 +410,29 @@ def send_or_edit_message(category, lines, update_date):
         new_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
         save_message_id_and_text_to_sheet(today, category, new_id, message)
         logging.info(f"✅ پیام جدید دسته {category} ارسال و ذخیره شد.")
-        
+
+
+def edit_telegram_message(message_id, new_text, current_text):
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+        params = {
+            "chat_id": CHAT_ID,
+            "message_id": message_id,
+            "text": new_text,
+            "parse_mode": "MarkdownV2"
+        }
+
+        # درخواست ویرایش پیام
+        response = requests.post(url, json=params)
+        response_data = response.json()
+
+        if response_data.get('ok'):
+            logging.info(f"✅ پیام با شناسه {message_id} با موفقیت ویرایش شد.")
+        else:
+            logging.error(f"❌ خطا در ویرایش پیام: {response_data}")
+    except Exception as e:
+        logging.error(f"❌ خطا در فراخوانی editMessageText: {e}")
+
 def check_and_add_headers():
     try:
         # اتصال به شیت
