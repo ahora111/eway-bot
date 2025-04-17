@@ -404,7 +404,8 @@ def main():
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
-        
+        check_and_add_headers()  # مطمئن شدن از وجود هدرها در شیت
+
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
