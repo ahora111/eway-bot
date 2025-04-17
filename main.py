@@ -61,7 +61,9 @@ def get_message_id_from_sheet():
         if row.get('تاریخ') == today or row.get('date') == today:
             return int(row.get('message_id'))
     return None
+    
 print(f"Message ID دریافت‌شده از شیت: {message_id}")
+
 
 
 # --- ذخیره message_id در شیت ---
