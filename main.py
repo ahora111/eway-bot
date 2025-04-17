@@ -554,6 +554,8 @@ def send_new_posts(driver, today):
         for category, lines in categories.items():
             if lines:
                 message = prepare_final_message(category, lines, update_date)
+                        # پردازش متن پیام برای escape کردن کاراکترها
+                message = escape_markdown(message)
                 msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
                 if msg_id:
                     save_message_id_and_text_to_sheet(today, category, msg_id, message)
@@ -615,6 +617,8 @@ def update_existing_posts(today):
         for category in categories:
             message_id, current_text = get_message_id_and_text_from_sheet(today, category)
             if message_id:
+                # پردازش متن برای escape کردن کاراکترها
+                new_text = escape_markdown(current_text)
                 # فرض کنیم متن پیام تغییری نداشته باشد
                 edit_telegram_message(message_id, current_text, current_text)
                 logging.info(f"✅ پیام دسته {category} ویرایش شد.")
