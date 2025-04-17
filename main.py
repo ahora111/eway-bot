@@ -8,6 +8,7 @@ import pytz
 import sys
 import gspread
 import datetime
+from persiantools.jdatetime import JalaliDate
 from datetime import datetime, time as dt_time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -177,6 +178,8 @@ def remove_extra_blank_lines(lines):
 
     return cleaned_lines
     
+
+
 def prepare_final_message(category_name, category_lines, update_date):
     # گرفتن عنوان دسته از روی ایموجی
     category_title = get_category_name(category_name)
@@ -209,6 +212,10 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"✅ لیست پخش موبایل اهورا\n\n"
         f"⬅️ موجودی {category_title} ➡️\n\n"
     )
+
+    # ادامه منطق فرمت‌دهی خطوط پیام
+    ...
+    return final_message
 
     formatted_lines = []
     current_product = None
