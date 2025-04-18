@@ -376,33 +376,26 @@ def save_message_id_and_text_to_sheet(today, category, message_id, text):
         ws = get_worksheet()
         if not ws:
             logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
-            return False
+            return
+        
+        # خطایابی: تست ذخیره با داده‌های ساده
+        logging.info("🔍 درحال تست ذخیره‌سازی با داده‌های ساده")
+        ws.append_row(["تست تاریخ", "تست شناسه", "تست دسته‌بندی", "تست متن پیام"])
 
-        # دریافت تمام رکوردها
-        records = ws.get_all_records()
-        updated = False
-
-        # جستجو برای رکورد موجود با تاریخ و دسته‌بندی یکسان
-        for i, record in enumerate(records, start=2):  # start=2 چون سطر اول هدر است
-            if record.get("تاریخ") == today and record.get("دسته‌بندی") == category:
-                # به‌روزرسانی رکورد موجود
-                ws.update_cell(i, 2, str(message_id))  # ستون شناسه پیام
-                ws.update_cell(i, 4, text)  # ستون متن پیام
-                logging.info(f"✅ رکورد با تاریخ {today} و دسته‌بندی {category} در سطر {i} به‌روزرسانی شد.")
-                updated = True
-                break
-
-        if not updated:
-            # اگر رکوردی پیدا نشد، رکورد جدید اضافه می‌کنیم
-            ws.append_row([today, str(message_id), category, text])
-            logging.info(f"✅ رکورد جدید برای تاریخ {today} و دسته‌بندی {category} اضافه شد.")
-
-        return True
+        # خطایابی: ذخیره داده‌های اصلی
+        logging.info(f"🔍 درحال ذخیره‌سازی داده‌ها: تاریخ={today}, دسته‌بندی={category}, پیام ID={message_id}, متن={text}")
+        ws.append_row([today, str(message_id), category, text])
+        logging.info("✅ داده‌ها با موفقیت به Google Sheets اضافه شدند.")
     except Exception as e:
-        logging.error(f"❌ خطا در ذخیره/به‌روزرسانی داده‌ها در Google Sheets: {e}")
-        return False
+        logging.error(f"❌ خطا در ذخیره داده‌ها به Google Sheets: {e}")
 
 
+
+
+
+
+
+# --- ویرایش منطق ارسال پیام ---
 def send_or_edit_message(category, lines, update_date):
     today = JalaliDate.today().strftime("%Y-%m-%d")
     message_id, current_text = get_message_id_and_text_from_sheet(today, category)
@@ -410,33 +403,17 @@ def send_or_edit_message(category, lines, update_date):
     message = prepare_final_message(category, lines, update_date)
     
     if message_id:
-        if message.strip() == current_text.strip():
-            logging.info(f"ℹ️ پیام دسته {category} تغییری نکرده است. نیازی به ویرایش نیست.")
-            # به‌روزرسانی شیت در هر حال (حتی اگر پیام تغییر نکرده باشد)
-            save_message_id_and_text_to_sheet(today, category, message_id, message)
-            return False
-        else:
-            if edit_telegram_message(message_id, message, current_text):
-                save_message_id_and_text_to_sheet(today, category, message_id, message)
-                logging.info(f"✅ پیام دسته {category} ویرایش شد و شیت به‌روزرسانی گردید.")
-                return True
+        if message != current_text:
+            edit_telegram_message(message_id, message, current_text)
+            logging.info(f"✅ پیام دسته {category} ویرایش شد.")
     else:
         new_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-        if new_id:
-            save_message_id_and_text_to_sheet(today, category, new_id, message)
-            logging.info(f"✅ پیام جدید دسته {category} ارسال و در شیت ذخیره شد.")
-            return True
-    
-    return False
+        save_message_id_and_text_to_sheet(today, category, new_id, message)
+        logging.info(f"✅ پیام جدید دسته {category} ارسال و ذخیره شد.")
 
 
 def edit_telegram_message(message_id, new_text, current_text):
     try:
-        # بررسی یکسان بودن پیام‌ها
-        if new_text.strip() == current_text.strip():
-            logging.info("ℹ️ متن جدید با متن فعلی یکسان است. نیازی به ویرایش نیست.")
-            return False
-
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
         params = {
             "chat_id": CHAT_ID,
@@ -445,18 +422,16 @@ def edit_telegram_message(message_id, new_text, current_text):
             "parse_mode": "MarkdownV2"
         }
 
+        # درخواست ویرایش پیام
         response = requests.post(url, json=params)
         response_data = response.json()
 
         if response_data.get('ok'):
             logging.info(f"✅ پیام با شناسه {message_id} با موفقیت ویرایش شد.")
-            return True
         else:
             logging.error(f"❌ خطا در ویرایش پیام: {response_data}")
-            return False
     except Exception as e:
         logging.error(f"❌ خطا در فراخوانی editMessageText: {e}")
-        return False
 
 
 def check_and_add_headers():
@@ -497,8 +472,30 @@ def main():
 
         # بررسی و ایجاد هدرها در Google Sheets
         check_and_add_headers()
-        logging.info("✅ هدرهای شیت بررسی/اضافه شدند.")
 
+        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
+        today = JalaliDate.today().strftime("%Y-%m-%d")
+        last_update_date = get_last_update_date()
+
+        if last_update_date != today:
+            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
+            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
+            send_new_posts(driver, today)
+        else:
+            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
+            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
+            update_existing_posts(today)
+
+        # خروج از WebDriver
+        driver.quit()
+
+    except Exception as e:
+        logging.error(f"❌ خطا در اجرای برنامه: {e}")
+
+def send_new_posts(driver, today):
+    try:
+
+        
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
@@ -530,27 +527,21 @@ def main():
         brands.extend(console_brands)
         models.extend(console_models)
 
-        driver.quit()  # اینجا تورفتگی اصلاح شد
-        logging.info("✅ استخراج داده‌ها با موفقیت انجام شد.")
+        driver.quit()
 
-        # پردازش داده‌ها و آماده‌سازی پیام‌ها
+        # ایجاد و ارسال پیام‌ها
         processed_data = []
         for i in range(len(brands)):
             model_str = process_model(models[i])
             processed_data.append(f"{model_str} {brands[i]}")
 
-        message_lines = [decorate_line(row) for row in processed_data]
+        message_lines = []
+        for row in processed_data:
+            decorated = decorate_line(row)
+            message_lines.append(decorated)
+
         categories = categorize_messages(message_lines)
-        today = JalaliDate.today().strftime("%Y-%m-%d")  # تعریف متغیر today
         update_date = today
-
-        # ارسال/ویرایش پیام‌ها و به‌روزرسانی شیت
-        logging.info("🔍 شروع فرآیند ارسال/ویرایش پیام‌ها و به‌روزرسانی شیت...")
-        for category, lines in categories.items():
-            if lines:
-                send_or_edit_message(category, lines, update_date)
-
-        logging.info("✅ فرآیند به‌روزرسانی پیام‌ها و شیت با موفقیت تکمیل شد.")
 
         # ارسال پیام‌ها و ذخیره آنها در Google Sheets
         samsung_message_id = None
@@ -563,7 +554,7 @@ def main():
         for category, lines in categories.items():
             if lines:
                 message = prepare_final_message(category, lines, update_date)
-                # پردازش متن پیام برای escape کردن کاراکترها
+                        # پردازش متن پیام برای escape کردن کاراکترها
                 message = escape_markdown(message)
                 msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
                 if msg_id:
@@ -618,3 +609,23 @@ def main():
 
     except Exception as e:
         logging.error(f"❌ خطا در ارسال پیام‌های جدید: {e}")
+
+def update_existing_posts(today):
+    try:
+        # بازیابی message_id و متن پیام‌های قبلی از Google Sheets
+        categories = ["🔵", "🟡", "🍏", "💻", "🟠", "🎮"]
+        for category in categories:
+            message_id, current_text = get_message_id_and_text_from_sheet(today, category)
+            if message_id:
+                # پردازش متن برای escape کردن کاراکترها
+                new_text = escape_markdown(current_text)
+                # فرض کنیم متن پیام تغییری نداشته باشد
+                edit_telegram_message(message_id, current_text, current_text)
+                logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+            else:
+                logging.warning(f"❌ پیام دسته {category} یافت نشد.")
+    except Exception as e:
+        logging.error(f"❌ خطا در ویرایش پیام‌ها: {e}")
+
+if __name__ == "__main__":
+    main()
