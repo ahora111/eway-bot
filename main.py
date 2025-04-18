@@ -499,7 +499,6 @@ def main():
         check_and_add_headers()
         logging.info("✅ هدرهای شیت بررسی/اضافه شدند.")
 
-        
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
@@ -531,8 +530,7 @@ def main():
         brands.extend(console_brands)
         models.extend(console_models)
 
-    
-       driver.quit()
+        driver.quit()  # اینجا تورفتگی اصلاح شد
         logging.info("✅ استخراج داده‌ها با موفقیت انجام شد.")
 
         # پردازش داده‌ها و آماده‌سازی پیام‌ها
@@ -543,7 +541,8 @@ def main():
 
         message_lines = [decorate_line(row) for row in processed_data]
         categories = categorize_messages(message_lines)
-        update_date = JalaliDate.today().strftime("%Y-%m-%d")
+        today = JalaliDate.today().strftime("%Y-%m-%d")  # تعریف متغیر today
+        update_date = today
 
         # ارسال/ویرایش پیام‌ها و به‌روزرسانی شیت
         logging.info("🔍 شروع فرآیند ارسال/ویرایش پیام‌ها و به‌روزرسانی شیت...")
@@ -552,7 +551,6 @@ def main():
                 send_or_edit_message(category, lines, update_date)
 
         logging.info("✅ فرآیند به‌روزرسانی پیام‌ها و شیت با موفقیت تکمیل شد.")
-
 
         # ارسال پیام‌ها و ذخیره آنها در Google Sheets
         samsung_message_id = None
@@ -565,7 +563,7 @@ def main():
         for category, lines in categories.items():
             if lines:
                 message = prepare_final_message(category, lines, update_date)
-                        # پردازش متن پیام برای escape کردن کاراکترها
+                # پردازش متن پیام برای escape کردن کاراکترها
                 message = escape_markdown(message)
                 msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
                 if msg_id:
@@ -620,23 +618,3 @@ def main():
 
     except Exception as e:
         logging.error(f"❌ خطا در ارسال پیام‌های جدید: {e}")
-
-def update_existing_posts(today):
-    try:
-        # بازیابی message_id و متن پیام‌های قبلی از Google Sheets
-        categories = ["🔵", "🟡", "🍏", "💻", "🟠", "🎮"]
-        for category in categories:
-            message_id, current_text = get_message_id_and_text_from_sheet(today, category)
-            if message_id:
-                # پردازش متن برای escape کردن کاراکترها
-                new_text = escape_markdown(current_text)
-                # فرض کنیم متن پیام تغییری نداشته باشد
-                edit_telegram_message(message_id, current_text, current_text)
-                logging.info(f"✅ پیام دسته {category} ویرایش شد.")
-            else:
-                logging.warning(f"❌ پیام دسته {category} یافت نشد.")
-    except Exception as e:
-        logging.error(f"❌ خطا در ویرایش پیام‌ها: {e}")
-
-if __name__ == "__main__":
-    main()
