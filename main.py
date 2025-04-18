@@ -377,7 +377,10 @@ def get_message_id_and_text_from_sheet(today, category):
         logging.error(f"❌ خطا در دریافت داده از شیت: {e}")
         return None, ""
 
-# ذخیره شناسه پیام و متن در Google Sheets با پاک کردن داده‌های قبلی
+
+
+
+
 def save_message_id_and_text_to_sheet(today, category, message_id, text):
     try:
         ws = get_worksheet()
@@ -387,7 +390,9 @@ def save_message_id_and_text_to_sheet(today, category, message_id, text):
 
         # پاک کردن تمامی داده‌ها قبل از ذخیره داده‌های جدید
         try:
-            ws.clear()  # پاک‌سازی داده‌ها
+            # پاک‌سازی داده‌ها فقط از ردیف‌های داده
+            range_to_clear = "A2:D"  # فرض کنید داده‌ها در ستون‌های A تا D هستند
+            ws.batch_clear([range_to_clear])  # استفاده از batch_clear برای پاک‌سازی دقیق‌تر
             logging.info("✅ داده‌ها پاک شدند.")
         except Exception as e:
             logging.error(f"❌ خطا در پاک‌سازی داده‌ها: {e}")
@@ -399,6 +404,13 @@ def save_message_id_and_text_to_sheet(today, category, message_id, text):
         logging.info("✅ داده‌های قبلی پاک شدند و داده‌های جدید به گوگل شیت اضافه شدند.")
     except Exception as e:
         logging.error(f"❌ خطا در ذخیره داده در گوگل شیت: {e}")
+
+
+
+
+
+
+
 
 # ذخیره شناسه پیام و متن در Google Sheets
 def save_message_id_and_text_to_sheet(today, category, message_id, text):
