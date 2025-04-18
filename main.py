@@ -400,10 +400,10 @@ class PriceBot:
         
         # URL‌های مورد نظر برای استخراج
         self.target_urls = {
-            "mobile": "https://hamrahtel.com/mobiles",
-            "laptop": "https://hamrahtel.com/laptops",
-            "tablet": "https://hamrahtel.com/tablets",
-            "gaming": "https://hamrahtel.com/gaming"
+            "mobile": "https://hamrahtel.com/quick-checkout?category=mobile",
+            "laptop": "https://hamrahtel.com/quick-checkout?category=laptop",
+            "tablet": "https://hamrahtel.com/quick-checkout?category=tablet'",
+            "gaming": "https://hamrahtel.com/quick-checkout?category=game-console"
         }
     
     def run(self):
