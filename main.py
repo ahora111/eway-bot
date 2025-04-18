@@ -356,15 +356,30 @@ def check_and_add_headers():
     if not rows:
         ws.append_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"])
 
-def clear_old_rows():
-    try:
-        ws = get_worksheet()
-        rows = ws.get_all_values()
-        if len(rows) > 1:
-            ws.batch_clear([f"A2:D{len(rows)}"])
-            logging.info("🧹 داده‌های قدیمی از شیت پاک شدند.")
-    except Exception as e:
-        logging.error(f"❌ خطا در پاک‌سازی داده‌های شیت: {e}")
+# ... (کدهای دیگر بالای فایل مثل importها و setup API)
+
+def clear_sheet_data_except_headers(sheet):
+    sheet_data = sheet.get_all_values()
+    if len(sheet_data) > 1:
+        # حذف همه ردیف‌ها از A2 به بعد
+        sheet.batch_clear([f"A2:{chr(64 + len(sheet_data[0]))}{len(sheet_data)}"])
+
+# ساخت اتصال به گوگل شیت
+scope = ['https://spreadsheets.google.com/feeds',
+         'https://www.googleapis.com/auth/spreadsheets',
+         'https://www.googleapis.com/auth/drive.file',
+         'https://www.googleapis.com/auth/drive']
+
+creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+client = gspread.authorize(creds)
+
+sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E").sheet1
+
+# پاک کردن داده‌های قبلی (به جز هدر)
+clear_sheet_data_except_headers(sheet)
+
+# سپس ادامه کدهای ارسال پیام و ذخیره message_idها در شیت...
+
 
 
 def get_message_id_and_text_from_sheet(today, category):
