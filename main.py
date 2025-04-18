@@ -288,28 +288,28 @@ class TelegramManager:
         """آماده‌سازی پیام نهایی برای هر دسته‌بندی"""
         if not products:
             return ""
-            
+
         header = (
             f"🗓 بروزرسانی {PersianTextFormatter.format_date()}\n"
             f"✅ لیست قیمت محصولات\n\n"
             f"⬅️ موجودی {self._get_category_name(category)} ➡️\n\n"
         )
-        
+
         products_str = []
         for product in products:
             products_str.append(
                 f"{self.category_emojis.get(product.category, '🟣')} {product.brand} {product.model}\n"
                 f"💰 قیمت: {product.formatted_price()} تومان"
             )
-        
+
         footer = (
             "\n\n☎️ تماس:\n"
             "📞 09371111558\n"
             "📞 02833991417"
         )
-        
+
         return header + "\n\n".join(products_str) + footer
-    
+
     def _get_category_name(self, category: str) -> str:
         """دریافت نام فارسی دسته‌بندی"""
         names = {
@@ -322,15 +322,14 @@ class TelegramManager:
         }
         return names.get(category, "محصولات")
 
-# ---------------------------- 📊 مدیریت Google Sheets ----------------------------
 class SheetsManager:
     """مدیریت ارتباط با Google Sheets"""
-    
+
     def __init__(self, spreadsheet_id: str, sheet_name: str):
         self.spreadsheet_id = spreadsheet_id
         self.sheet_name = sheet_name
         self.client = self._authenticate()
-    
+
     def _authenticate(self):
         """احراز هویت با Google Sheets API"""
         scope = [
@@ -340,7 +339,7 @@ class SheetsManager:
         creds = ServiceAccountCredentials.from_json_keyfile_dict(
             json.loads(os.getenv("GOOGLE_CREDS_JSON")), scope)
         return gspread.authorize(creds)
-    
+
     def get_sheet(self):
         """دریافت شیء صفحه مورد نظر"""
         try:
@@ -349,14 +348,14 @@ class SheetsManager:
         except Exception as e:
             logging.error(f"خطا در دریافت صفحه: {str(e)}")
             return None
-    
+
     def save_message_data(self, message_data: TelegramMessage) -> bool:
         """ذخیره اطلاعات پیام در Sheets"""
         try:
             sheet = self.get_sheet()
             if not sheet:
                 return False
-                
+
             sheet.append_row([
                 message_data.date,
                 str(message_data.message_id),
@@ -367,14 +366,14 @@ class SheetsManager:
         except Exception as e:
             logging.error(f"خطا در ذخیره داده: {str(e)}")
             return False
-    
+
     def get_last_message_data(self, category: str) -> Optional[TelegramMessage]:
         """دریافت آخرین پیام ذخیره شده برای یک دسته‌بندی"""
         try:
             sheet = self.get_sheet()
             if not sheet:
                 return None
-                
+
             records = sheet.get_all_records()
             for record in reversed(records):
                 if record["category"] == category:
@@ -389,57 +388,47 @@ class SheetsManager:
             logging.error(f"خطا در خواندن داده: {str(e)}")
             return None
 
-# ---------------------------- 🤖 کلاس اصلی ربات ----------------------------
 class PriceBot:
     """کلاس اصلی ربات مدیریت قیمت‌ها"""
-    
+
     def __init__(self):
         self.extractor = DataExtractor()
         self.telegram = TelegramManager(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
         self.sheets = SheetsManager(SPREADSHEET_ID, SHEET_NAME)
-        
-        # URL‌های مورد نظر برای استخراج
+
         self.target_urls = {
             "mobile": "https://hamrahtel.com/quick-checkout?category=mobile",
             "laptop": "https://hamrahtel.com/quick-checkout?category=laptop",
             "tablet": "https://hamrahtel.com/quick-checkout?category=tablet'",
             "gaming": "https://hamrahtel.com/quick-checkout?category=game-console"
         }
-    
+
     def run(self):
         """روال اصلی اجرای ربات"""
         try:
-            # 1. استخراج محصولات از تمام دسته‌بندی‌ها
             all_products = []
             for category, url in self.target_urls.items():
                 logging.info(f"در حال استخراج محصولات از {category}...")
                 products = self.extractor.extract_products(url)
                 all_products.extend(products)
-                time.sleep(3)  # فاصله بین درخواست‌ها
-            
-            # 2. دسته‌بندی محصولات
+                time.sleep(3)
+
             categorized = self._categorize_products(all_products)
-            
-            # 3. بررسی تغییرات و تصمیم‌گیری برای ارسال/ویرایش
+
             today = JalaliDate.today().strftime("%Y-%m-%d")
             message_ids = {}
-            
+
             for category, products in categorized.items():
                 if not products:
                     continue
-                    
-                # آماده‌سازی پیام
+
                 message = self.telegram.prepare_product_message(products, category)
-                
-                # بررسی پیام قبلی
                 last_message = self.sheets.get_last_message_data(category)
-                
-                if last_message:
-                    # ویرایش پیام موجود
+
+                if last_message and last_message.date == today:
                     if self.telegram.edit_message(last_message.message_id, message):
                         logging.info(f"پیام {category} با موفقیت ویرایش شد")
                 else:
-                    # ارسال پیام جدید
                     message_id = self.telegram.send_message(message)
                     if message_id:
                         message_ids[category] = message_id
@@ -450,20 +439,18 @@ class PriceBot:
                             date=today
                         ))
                         logging.info(f"پیام جدید برای {category} ارسال شد")
-            
-            # 4. ارسال پیام نهایی با دکمه‌های دسته‌بندی
+
             if message_ids:
-                self._send_final_message(message_ids)
-            
+                self._send_final_message(message_ids, today)
+
             logging.info("✅ پردازش با موفقیت انجام شد")
-        
+
         except Exception as e:
             logging.error(f"❌ خطا در اجرای ربات: {str(e)}", exc_info=True)
         finally:
             self.extractor.driver.quit()
-    
+
     def _categorize_products(self, products: List[Product]) -> Dict[str, List[Product]]:
-        """دسته‌بندی محصولات بر اساس نوع"""
         categorized = {
             "samsung": [],
             "iphone": [],
@@ -472,29 +459,40 @@ class PriceBot:
             "gaming": [],
             "other": []
         }
-        
+
         for product in products:
             categorized[product.category].append(product)
-        
-        # مرتب‌سازی بر اساس قیمت
+
         for category in categorized:
             categorized[category].sort(key=lambda x: x.price)
-        
+
         return categorized
-    
-    def _send_final_message(self, message_ids: Dict[str, int]):
-        """ارسال پیام نهایی با دکمه‌های دسترسی سریع"""
+
+    def _send_final_message(self, message_ids: Dict[str, int], today: str):
         final_text = (
             "✅ لیست قیمت‌های به‌روزرسانی شده:\n\n"
             "برای مشاهده جزئیات هر دسته روی دکمه مربوطه کلیک کنید.\n\n"
             "⏰ زمان ثبت سفارش: تا ساعت 22 شب\n"
             "🚚 تحویل: روز بعد از 9 صبح"
         )
-        
-        buttons = self.telegram.create_inline_buttons(message_ids)
-        self.telegram.send_message(final_text, buttons)
 
-# ---------------------------- 🚀 اجرای ربات ----------------------------
+        buttons = self.telegram.create_inline_buttons(message_ids)
+        category = "final"
+        last_message = self.sheets.get_last_message_data(category)
+
+        if last_message and last_message.date == today:
+            self.telegram.edit_message(last_message.message_id, final_text, buttons)
+        else:
+            message_id = self.telegram.send_message(final_text, buttons)
+            if message_id:
+                self.sheets.save_message_data(TelegramMessage(
+                    category=category,
+                    message_id=message_id,
+                    content=final_text,
+                    date=today
+                ))
+
 if __name__ == "__main__":
     bot = PriceBot()
     bot.run()
+
