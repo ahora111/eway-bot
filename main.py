@@ -483,6 +483,71 @@ def replace_sheet_data(today, categories, data):
         logging.error(f"❌ خطا در جایگزینی داده‌ها در Google Sheets: {e}")
 
 
+
+
+def extract_and_categorize_data(driver):
+    categories_data = {
+        "mobile": [],
+        "laptop": [],
+        "tablet": [],
+        "game-console": []
+    }
+    
+    valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
+
+    # استخراج داده‌های موبایل
+    driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
+    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+    scroll_page(driver)
+    mobile_brands, mobile_models = extract_product_data(driver, valid_brands)
+    categories_data["mobile"] = list(zip(mobile_brands, mobile_models))
+
+    # استخراج داده‌های لپ‌تاپ
+    driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
+    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+    scroll_page(driver)
+    laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
+    categories_data["laptop"] = list(zip(laptop_brands, laptop_models))
+
+    # استخراج داده‌های تبلت
+    driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
+    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+    scroll_page(driver)
+    tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
+    categories_data["tablet"] = list(zip(tablet_brands, tablet_models))
+
+    # استخراج داده‌های کنسول بازی
+    driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
+    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+    scroll_page(driver)
+    console_brands, console_models = extract_product_data(driver, valid_brands)
+    categories_data["game-console"] = list(zip(console_brands, console_models))
+
+        # پردازش داده‌ها و ارسال پیام‌ها
+        processed_data = []
+        for i in range(len(brands)):
+            model_str = process_model(models[i])
+            processed_data.append(f"{model_str} {brands[i]}")
+
+        message_lines = []
+        for row in processed_data:
+            decorated = decorate_line(row)
+            message_lines.append(decorated)
+
+        categories = categorize_messages(message_lines)
+        update_date = today
+
+        # ذخیره پیام‌ها در Google Sheets
+        for category, lines in categories.items():
+            if lines:
+                message = prepare_final_message(category, lines, update_date)
+                message = escape_markdown(message)
+                msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+                if msg_id:
+                    save_message_id_and_text_to_sheet(today, category, msg_id, message)
+                    logging.info(f"✅ پیام دسته {category} ارسال شد و داده‌ها ذخیره شدند.")
+
+
 def main():
     try:
         # تنظیم WebDriver
@@ -520,63 +585,9 @@ def main():
 def send_new_posts(driver, today):
     try:
         
-        
-        driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-
-        logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
-        scroll_page(driver)
-
-        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
-        brands, models = extract_product_data(driver, valid_brands)
-        
-        # استخراج داده‌ها برای لپ‌تاپ، تبلت و کنسول
-        driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
-        brands.extend(laptop_brands)
-        models.extend(laptop_models)
-
-        driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
-        brands.extend(tablet_brands)
-        models.extend(tablet_models)
-
-        driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        console_brands, console_models = extract_product_data(driver, valid_brands)
-        brands.extend(console_brands)
-        models.extend(console_models)
 
         driver.quit()
 
-        # پردازش داده‌ها و ارسال پیام‌ها
-        processed_data = []
-        for i in range(len(brands)):
-            model_str = process_model(models[i])
-            processed_data.append(f"{model_str} {brands[i]}")
-
-        message_lines = []
-        for row in processed_data:
-            decorated = decorate_line(row)
-            message_lines.append(decorated)
-
-        categories = categorize_messages(message_lines)
-        update_date = today
-
-        # ذخیره پیام‌ها در Google Sheets
-        for category, lines in categories.items():
-            if lines:
-                message = prepare_final_message(category, lines, update_date)
-                message = escape_markdown(message)
-                msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-                if msg_id:
-                    save_message_id_and_text_to_sheet(today, category, msg_id, message)
-                    logging.info(f"✅ پیام دسته {category} ارسال شد و داده‌ها ذخیره شدند.")
 
         
 
