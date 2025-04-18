@@ -358,27 +358,20 @@ def check_and_add_headers():
 
 # ... (کدهای دیگر بالای فایل مثل importها و setup API)
 
-def clear_sheet_data_except_headers(sheet):
-    sheet_data = sheet.get_all_values()
-    if len(sheet_data) > 1:
-        # حذف همه ردیف‌ها از A2 به بعد
-        sheet.batch_clear([f"A2:{chr(64 + len(sheet_data[0]))}{len(sheet_data)}"])
+def clear_sheet_except_header(sheet):
+    # دریافت تعداد ردیف‌ها
+    all_values = sheet.get_all_values()
+    num_rows = len(all_values)
 
-# ساخت اتصال به گوگل شیت
-scope = ['https://spreadsheets.google.com/feeds',
-         'https://www.googleapis.com/auth/spreadsheets',
-         'https://www.googleapis.com/auth/drive.file',
-         'https://www.googleapis.com/auth/drive']
+    if num_rows > 1:
+        # حذف ردیف‌های از ۲ به بعد (زیر هدر)
+        sheet.delete_rows(2, num_rows)
 
-creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-client = gspread.authorize(creds)
+def update_google_sheet(sheet, new_data):
+    clear_sheet_except_header(sheet)
 
-sheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E").sheet1
-
-# پاک کردن داده‌های قبلی (به جز هدر)
-clear_sheet_data_except_headers(sheet)
-
-# سپس ادامه کدهای ارسال پیام و ذخیره message_idها در شیت...
+    if new_data:
+        sheet.append_rows(new_data, value_input_option='USER_ENTERED')
 
 
 
