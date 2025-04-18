@@ -154,7 +154,7 @@ class DataExtractor:
         self.driver.get(url)
         WebDriverWait(self.driver, 30).until(
             EC.presence_of_element_located((By.CLASS_NAME, 'product-item'))
-        
+    )  # <-- اینجا باید بسته شود
         self._scroll_page()
         items = self.driver.find_elements(By.CLASS_NAME, 'product-item')
         return [self._parse_product(item) for item in items]
