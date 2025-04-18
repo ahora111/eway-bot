@@ -358,22 +358,6 @@ def check_and_add_headers():
 
 # ... (کدهای دیگر بالای فایل مثل importها و setup API)
 
-def clear_sheet_except_header(sheet):
-    # دریافت تعداد ردیف‌ها
-    all_values = sheet.get_all_values()
-    num_rows = len(all_values)
-
-    if num_rows > 1:
-        # حذف ردیف‌های از ۲ به بعد (زیر هدر)
-        sheet.delete_rows(2, num_rows)
-
-def update_google_sheet(sheet, new_data):
-    clear_sheet_except_header(sheet)
-
-    if new_data:
-        sheet.append_rows(new_data, value_input_option='USER_ENTERED')
-
-
 
 def get_message_id_and_text_from_sheet(today, category):
     ws = get_worksheet()
@@ -529,6 +513,22 @@ def extract_all_data(driver):
     except Exception as e:
         logging.error(f"❌ خطا در extract_all_data: {e}")
         return [], []
+
+
+def clear_sheet_except_header(sheet):
+    # دریافت تعداد ردیف‌ها
+    all_values = sheet.get_all_values()
+    num_rows = len(all_values)
+
+    if num_rows > 1:
+        # حذف ردیف‌های از ۲ به بعد (زیر هدر)
+        sheet.delete_rows(2, num_rows)
+
+def update_google_sheet(sheet, new_data):
+    clear_sheet_except_header(sheet)
+
+    if new_data:
+        sheet.append_rows(new_data, value_input_option='USER_ENTERED')
 
 
 
