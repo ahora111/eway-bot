@@ -515,21 +515,27 @@ def extract_all_data(driver):
         return [], []
 
 
+# تابع برای پاک کردن داده‌ها جز هدرها
 def clear_sheet_except_header(sheet):
-    # دریافت تعداد ردیف‌ها
-    all_values = sheet.get_all_values()
-    num_rows = len(all_values)
+    try:
+        all_values = sheet.get_all_values()
+        num_rows = len(all_values)
 
-    if num_rows > 1:
-        # حذف ردیف‌های از ۲ به بعد (زیر هدر)
-        sheet.delete_rows(2, num_rows)
+        if num_rows > 1:  # اگر داده‌ها بیشتر از هدر هستند
+            sheet.delete_rows(2, num_rows)  # حذف تمام ردیف‌ها از ردیف ۲ به بعد
+            logging.info("✅ داده‌های قبلی از شیت پاک شدند.")
+    except Exception as e:
+        logging.error(f"❌ خطا در پاک کردن داده‌ها از شیت: {e}")
 
+# تابع برای به‌روزرسانی داده‌ها
 def update_google_sheet(sheet, new_data):
-    clear_sheet_except_header(sheet)
-
-    if new_data:
-        sheet.append_rows(new_data, value_input_option='USER_ENTERED')
-
+    try:
+        clear_sheet_except_header(sheet)  # پاک کردن داده‌ها جز هدر
+        if new_data:
+            sheet.append_rows(new_data, value_input_option='USER_ENTERED')  # اضافه کردن داده‌های جدید
+            logging.info("✅ داده‌های جدید به شیت اضافه شدند.")
+    except Exception as e:
+        logging.error(f"❌ خطا در به‌روزرسانی داده‌ها: {e}")
 
 
 def main():
