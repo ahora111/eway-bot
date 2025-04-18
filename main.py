@@ -488,6 +488,39 @@ def get_last_update_date():
         logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
         return None
 
+def extract_all_data(driver):
+    try:
+        all_brands = []
+        all_models = []
+
+        # دسته‌بندی‌ها و URLهای مرتبط
+        categories = {
+            "موبایل": "https://hamrahtel.com/quick-checkout?category=mobile",
+            "لپ‌تاپ": "https://hamrahtel.com/quick-checkout?category=laptop",
+            "تبلت": "https://hamrahtel.com/quick-checkout?category=tablet",
+            "کنسول بازی": "https://hamrahtel.com/quick-checkout?category=game-console"
+        }
+
+        valid_brands = [
+            "Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL",
+            "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"
+        ]
+
+        for name, url in categories.items():
+            logging.info(f"🟢 در حال استخراج داده از دسته «{name}»...")
+            driver.get(url)
+            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+            scroll_page(driver)
+            brands, models = extract_product_data(driver, valid_brands)
+            all_brands.extend(brands)
+            all_models.extend(models)
+
+        logging.info("✅ تمام دسته‌بندی‌ها با موفقیت استخراج شدند.")
+        return all_brands, all_models
+
+    except Exception as e:
+        logging.error(f"❌ خطا در extract_all_data: {e}")
+        return [], []
 
 
 
