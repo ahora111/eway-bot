@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      GSHEET_CREDENTIALS_JSON: ${{ secrets.GSHEET_CREDENTIALS_JSON }}
+      GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_CREDS_JSON }}
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       CHAT_ID: ${{ secrets.CHAT_ID }}  # اضافه کردن CHAT_ID به متغیرهای محیطی
 
