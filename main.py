@@ -616,16 +616,27 @@ def update_existing_posts(today):
         categories = ["🔵", "🟡", "🍏", "💻", "🟠", "🎮"]
         for category in categories:
             message_id, current_text = get_message_id_and_text_from_sheet(today, category)
+            
+            # بررسی وجود شناسه پیام
             if message_id:
                 # پردازش متن برای escape کردن کاراکترها
                 new_text = escape_markdown(current_text)
+
                 # فرض کنیم متن پیام تغییری نداشته باشد
-                edit_telegram_message(message_id, current_text, current_text)
-                logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+                if new_text == current_text:
+                    # ارسال پیام به تلگرام که تغییری ایجاد نشده است
+                    no_change_message = f"✅ پیام دسته {category} تغییری نداشته است."
+                    send_telegram_message(no_change_message, BOT_TOKEN, CHAT_ID)
+                    logging.info(f"✅ پیام دسته {category} تغییری نداشت و اطلاع‌رسانی ارسال شد.")
+                else:
+                    # ویرایش پیام با متن جدید
+                    edit_telegram_message(message_id, new_text, current_text)
+                    logging.info(f"✅ پیام دسته {category} ویرایش شد.")
             else:
                 logging.warning(f"❌ پیام دسته {category} یافت نشد.")
     except Exception as e:
         logging.error(f"❌ خطا در ویرایش پیام‌ها: {e}")
+
 
 if __name__ == "__main__":
     main()
