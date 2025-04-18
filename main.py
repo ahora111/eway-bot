@@ -489,17 +489,65 @@ def main():
             update_google_sheet_with_new_data(data)  # بروزرسانی داده‌ها
             send_new_posts(driver, today)  # ارسال پیام‌ها
 
+      else:
+    # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
+    logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌ها...")
+
+    # استخراج و پردازش داده‌ها از سایت همراه‌تل
+    driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
+    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+    scroll_page(driver)
+    valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
+    brands, models = extract_product_data(driver, valid_brands)
+
+    # ترکیب داده‌های لپ‌تاپ، تبلت، و کنسول بازی
+    driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
+    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+    scroll_page(driver)
+    laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
+    brands.extend(laptop_brands)
+    models.extend(laptop_models)
+
+    driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
+    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+    scroll_page(driver)
+    tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
+    brands.extend(tablet_brands)
+    models.extend(tablet_models)
+
+    driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
+    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+    scroll_page(driver)
+    console_brands, console_models = extract_product_data(driver, valid_brands)
+    brands.extend(console_brands)
+    models.extend(console_models)
+
+    # پردازش داده‌ها
+    processed_data = []
+    for i in range(len(brands)):
+        model_str = process_model(models[i])
+        processed_data.append(f"{model_str} {brands[i]}")
+
+    message_lines = []
+    for row in processed_data:
+        decorated = decorate_line(row)
+        message_lines.append(decorated)
+
+    # دسته‌بندی پیام‌ها
+    categories = categorize_messages(message_lines)
+    
+    # ویرایش یا جایگزینی پیام‌ها
+    for category, lines in categories.items():
+        message_id, current_text = get_message_id_and_text_from_sheet(today, category)
+        new_message = prepare_final_message(category, lines, today)
+        if message_id:
+            if new_message != current_text:  # بررسی تغییر متن پیام
+                edit_telegram_message(message_id, new_message, current_text)
+                save_message_id_and_text_to_sheet(today, category, message_id, new_message)
+                logging.info(f"✅ پیام دسته {category} ویرایش شد.")
         else:
-            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
-            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌ها...")
-            categories = categorize_messages(get_data_lines())  # فرض کنیم داده‌های خطوط از جایی دریافت شده‌اند
-            for category, lines in categories.items():
-                message_id, current_text = get_message_id_and_text_from_sheet(today, category)
-                new_message = prepare_final_message(category, lines, today)
-                if message_id:
-                    edit_telegram_message(message_id, new_message, current_text)
-                    save_message_id_and_text_to_sheet(today, category, message_id, new_message)
-                    logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+            logging.warning(f"❌ پیام مرتبط با دسته {category} یافت نشد.")
+
         
         # خروج از WebDriver
         driver.quit()
