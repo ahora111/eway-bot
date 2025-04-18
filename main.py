@@ -457,6 +457,7 @@ def get_last_update_date():
     except Exception as e:
         logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
         return None
+
         
 def replace_sheet_data(today, categories, data):
     try:
@@ -490,14 +491,8 @@ def main():
         # بررسی و ایجاد هدرها در Google Sheets
         check_and_add_headers()
 
-        # تنظیم تاریخ امروز
+        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
         today = JalaliDate.today().strftime("%Y-%m-%d")
-
-        # داده‌های جدید را استخراج و جایگزین کنید
-        categories, data = extract_and_categorize_data(driver)
-        replace_sheet_data(today, categories, data)
-
-        # بررسی تاریخ ذخیره‌شده
         last_update_date = get_last_update_date()
 
         if last_update_date != today:
@@ -514,6 +509,7 @@ def main():
 
     except Exception as e:
         logging.error(f"❌ خطا در اجرای برنامه: {e}")
+
 
 
 def send_new_posts(driver, today):
@@ -673,6 +669,7 @@ def update_existing_posts(today):
                 logging.warning(f"❌ پیام دسته {category} یافت نشد.")
     except Exception as e:
         logging.error(f"❌ خطا در ویرایش پیام‌ها: {e}")
+
 
 
 if __name__ == "__main__":
