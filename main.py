@@ -457,6 +457,26 @@ def get_last_update_date():
     except Exception as e:
         logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
         return None
+        
+def replace_sheet_data(today, categories, data):
+    try:
+        ws = get_worksheet()
+        if not ws:
+            logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
+            return
+
+        # پاک کردن داده‌های موجود (به جز هدرها)
+        ws.clear()
+        ws.append_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"])  # اضافه کردن هدرها
+
+        # ذخیره داده‌های جدید
+        for category, lines in data.items():
+            for line in lines:
+                ws.append_row([today, "", category, line])
+        
+        logging.info("✅ داده‌های جدید با موفقیت جایگزین شدند.")
+    except Exception as e:
+        logging.error(f"❌ خطا در جایگزینی داده‌ها در Google Sheets: {e}")
 
 
 def main():
@@ -470,8 +490,14 @@ def main():
         # بررسی و ایجاد هدرها در Google Sheets
         check_and_add_headers()
 
-        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
+        # تنظیم تاریخ امروز
         today = JalaliDate.today().strftime("%Y-%m-%d")
+
+        # داده‌های جدید را استخراج و جایگزین کنید
+        categories, data = extract_and_categorize_data(driver)
+        replace_sheet_data(today, categories, data)
+
+        # بررسی تاریخ ذخیره‌شده
         last_update_date = get_last_update_date()
 
         if last_update_date != today:
@@ -489,10 +515,12 @@ def main():
     except Exception as e:
         logging.error(f"❌ خطا در اجرای برنامه: {e}")
 
+
 def send_new_posts(driver, today):
     try:
-
         
+        
+  
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
