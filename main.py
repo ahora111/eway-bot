@@ -378,13 +378,16 @@ def save_message_id_and_text_to_sheet(today, category, message_id, text):
             logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
             return
         
-        # ذخیره داده‌های جدید در انتهای شیت
+        # خطایابی: تست ذخیره با داده‌های ساده
+        logging.info("🔍 درحال تست ذخیره‌سازی با داده‌های ساده")
+        ws.append_row(["تست تاریخ", "تست شناسه", "تست دسته‌بندی", "تست متن پیام"])
+
+        # خطایابی: ذخیره داده‌های اصلی
         logging.info(f"🔍 درحال ذخیره‌سازی داده‌ها: تاریخ={today}, دسته‌بندی={category}, پیام ID={message_id}, متن={text}")
         ws.append_row([today, str(message_id), category, text])
-        logging.info("✅ داده‌های جدید با موفقیت به Google Sheets اضافه شدند.")
+        logging.info("✅ داده‌ها با موفقیت به Google Sheets اضافه شدند.")
     except Exception as e:
         logging.error(f"❌ خطا در ذخیره داده‌ها به Google Sheets: {e}")
-
 
 
 
@@ -458,72 +461,75 @@ def get_last_update_date():
         logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
         return None
 
-def replace_sheet_data(today, categories, data):
+
+def main():
     try:
-        ws = get_worksheet()
-        if not ws:
-            logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
+        # تنظیم WebDriver
+        driver = get_driver()
+        if not driver:
+            logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
 
-        # پاک کردن تمامی داده‌ها
-        ws.clear()
-        logging.info("✅ داده‌های قدیمی از Google Sheets پاک شدند.")
+        # بررسی و ایجاد هدرها در Google Sheets
+        check_and_add_headers()
 
-        # اضافه کردن هدرها
-        ws.append_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"])
-        logging.info("✅ هدرها به Google Sheets اضافه شدند.")
+        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
+        today = JalaliDate.today().strftime("%Y-%m-%d")
+        last_update_date = get_last_update_date()
 
-        # ذخیره داده‌های جدید
-        for category, lines in data.items():
-            for line in lines:
-                ws.append_row([today, "", category, line])
-        
-        logging.info("✅ داده‌های جدید با موفقیت به Google Sheets اضافه شدند.")
+        if last_update_date != today:
+            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
+            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
+            send_new_posts(driver, today)
+        else:
+            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
+            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
+            update_existing_posts(today)
+
+        # خروج از WebDriver
+        driver.quit()
+
     except Exception as e:
-        logging.error(f"❌ خطا در جایگزینی داده‌ها در Google Sheets: {e}")
+        logging.error(f"❌ خطا در اجرای برنامه: {e}")
 
+def send_new_posts(driver, today):
+    try:
 
+        
+        driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
+        logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
+        scroll_page(driver)
 
-def extract_and_categorize_data(driver):
-    categories_data = {
-        "mobile": [],
-        "laptop": [],
-        "tablet": [],
-        "game-console": []
-    }
-    
-    valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
+        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
+        brands, models = extract_product_data(driver, valid_brands)
+        
+        # استخراج داده‌ها برای لپ‌تاپ، تبلت و کنسول
+        driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+        scroll_page(driver)
+        laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
+        brands.extend(laptop_brands)
+        models.extend(laptop_models)
 
-    # استخراج داده‌های موبایل
-    driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
-    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-    scroll_page(driver)
-    mobile_brands, mobile_models = extract_product_data(driver, valid_brands)
-    categories_data["mobile"] = list(zip(mobile_brands, mobile_models))
+        driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+        scroll_page(driver)
+        tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
+        brands.extend(tablet_brands)
+        models.extend(tablet_models)
 
-    # استخراج داده‌های لپ‌تاپ
-    driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
-    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-    scroll_page(driver)
-    laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
-    categories_data["laptop"] = list(zip(laptop_brands, laptop_models))
+        driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+        scroll_page(driver)
+        console_brands, console_models = extract_product_data(driver, valid_brands)
+        brands.extend(console_brands)
+        models.extend(console_models)
 
-    # استخراج داده‌های تبلت
-    driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
-    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-    scroll_page(driver)
-    tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
-    categories_data["tablet"] = list(zip(tablet_brands, tablet_models))
+        driver.quit()
 
-    # استخراج داده‌های کنسول بازی
-    driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
-    WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-    scroll_page(driver)
-    console_brands, console_models = extract_product_data(driver, valid_brands)
-    categories_data["game-console"] = list(zip(console_brands, console_models))
-
-        # پردازش داده‌ها و ارسال پیام‌ها
+        # ایجاد و ارسال پیام‌ها
         processed_data = []
         for i in range(len(brands)):
             model_str = process_model(models[i])
@@ -536,60 +542,6 @@ def extract_and_categorize_data(driver):
 
         categories = categorize_messages(message_lines)
         update_date = today
-
-        # ذخیره پیام‌ها در Google Sheets
-        for category, lines in categories.items():
-            if lines:
-                message = prepare_final_message(category, lines, update_date)
-                message = escape_markdown(message)
-                msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-                if msg_id:
-                    save_message_id_and_text_to_sheet(today, category, msg_id, message)
-                    logging.info(f"✅ پیام دسته {category} ارسال شد و داده‌ها ذخیره شدند.")
-
-
-def main():
-    try:
-        # تنظیم WebDriver
-        driver = get_driver()
-        if not driver:
-            logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
-            return
-
-        # تنظیم تاریخ امروز
-        today = JalaliDate.today().strftime("%Y-%m-%d")
-
-        # استخراج داده‌ها
-        categories, data = extract_and_categorize_data(driver)
-
-        # جایگزینی داده‌ها در Google Sheets
-        replace_sheet_data(today, categories, data)
-
-        # بررسی تاریخ ذخیره‌شده و تصمیم‌گیری
-        last_update_date = get_last_update_date()
-
-        if last_update_date != today:
-            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
-            send_new_posts(driver, today)
-        else:
-            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
-            update_existing_posts(today)
-
-        # خروج از WebDriver
-        driver.quit()
-
-    except Exception as e:
-        logging.error(f"❌ خطا در اجرای برنامه: {e}")
-
-
-def send_new_posts(driver, today):
-    try:
-        
-
-        driver.quit()
-
-
-        
 
         # ارسال پیام‌ها و ذخیره آنها در Google Sheets
         samsung_message_id = None
@@ -664,28 +616,16 @@ def update_existing_posts(today):
         categories = ["🔵", "🟡", "🍏", "💻", "🟠", "🎮"]
         for category in categories:
             message_id, current_text = get_message_id_and_text_from_sheet(today, category)
-            
-            # بررسی وجود شناسه پیام
             if message_id:
                 # پردازش متن برای escape کردن کاراکترها
                 new_text = escape_markdown(current_text)
-
                 # فرض کنیم متن پیام تغییری نداشته باشد
-                if new_text == current_text:
-                    # ارسال پیام به تلگرام که تغییری ایجاد نشده است
-                    no_change_message = f"✅ پیام دسته {category} تغییری نداشته است."
-                    send_telegram_message(no_change_message, BOT_TOKEN, CHAT_ID)
-                    logging.info(f"✅ پیام دسته {category} تغییری نداشت و اطلاع‌رسانی ارسال شد.")
-                else:
-                    # ویرایش پیام با متن جدید
-                    edit_telegram_message(message_id, new_text, current_text)
-                    logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+                edit_telegram_message(message_id, current_text, current_text)
+                logging.info(f"✅ پیام دسته {category} ویرایش شد.")
             else:
                 logging.warning(f"❌ پیام دسته {category} یافت نشد.")
     except Exception as e:
         logging.error(f"❌ خطا در ویرایش پیام‌ها: {e}")
-
-
 
 if __name__ == "__main__":
     main()
