@@ -1,19 +1,13 @@
-name: Run Telegram Bot
+name: Run Price Bot
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"  # Every day at 06:00 UTC
+    - cron: '30 6 * * *'  # اجرای هر روز ساعت 6:30 صبح UTC (۱۰ صبح ایران)
+  workflow_dispatch:  # اجرای دستی
 
 jobs:
-  run-script:
+  run-bot:
     runs-on: ubuntu-latest
-
-    env:
-      GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_CREDS_JSON }}
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-      CHAT_ID: ${{ secrets.CHAT_ID }}  # اضافه کردن CHAT_ID به متغیرهای محیطی
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -21,17 +15,17 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
-      - name: Set up Chrome
-        uses: browser-actions/setup-chrome@v1
-        with:
-          chrome-version: latest
-    
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run script
+      - name: Run the bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_CREDS_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          SHEET_NAME: ${{ secrets.SHEET_NAME }}
         run: python main.py
