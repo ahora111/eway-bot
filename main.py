@@ -377,14 +377,22 @@ def get_message_id_and_text_from_sheet(today, category):
         logging.error(f"❌ خطا در دریافت داده از شیت: {e}")
         return None, ""
 
-
 # ذخیره شناسه پیام و متن در Google Sheets با پاک کردن داده‌های قبلی
 def save_message_id_and_text_to_sheet(today, category, message_id, text):
     try:
         ws = get_worksheet()
+        if not ws:
+            logging.error("❌ شیت Google Sheets به درستی بارگذاری نشد.")
+            return
+
         # پاک کردن تمامی داده‌ها قبل از ذخیره داده‌های جدید
-        ws.clear()  # تمام داده‌های شیت را پاک می‌کند
-        # اضافه کردن داده‌های جدید به شیت
+        try:
+            ws.clear()  # پاک‌سازی داده‌ها
+            logging.info("✅ داده‌ها پاک شدند.")
+        except Exception as e:
+            logging.error(f"❌ خطا در پاک‌سازی داده‌ها: {e}")
+
+        # اضافه کردن داده جدید به شیت
         ws.append_row([today, message_id, category, text])
         
         # نمایش پیامی در لاگ
