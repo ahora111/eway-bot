@@ -24,12 +24,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Set environment variables
+    - name: Run Python script
+      run: python main.py
       env:
         GSHEET_CREDENTIALS_JSON: ${{ secrets.GSHEET_CREDENTIALS_JSON }}
         BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         CHAT_ID: ${{ secrets.CHAT_ID }}
-      run: echo "Environment variables are set."
-
-    - name: Run Python script
-      run: python main.py
