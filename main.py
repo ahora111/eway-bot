@@ -526,119 +526,76 @@ def extract_all_data(driver):
 
 def main():
     try:
-        # تنظیم WebDriver
         driver = get_driver()
         if not driver:
-            logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
+            logging.error("❌ WebDriver ساخته نشد.")
             return
 
-        # بررسی و ایجاد هدرها در Google Sheets
         check_and_add_headers()
 
-        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
         today = JalaliDate.today().strftime("%Y-%m-%d")
         last_update_date = get_last_update_date()
 
-        if last_update_date != today:
-            logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
-            clear_old_rows()  # پاک کردن داده‌های قبلی
-            send_new_posts(driver, today)
-        else:
-            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
-            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
-            update_existing_posts(today)
-
-        # خروج از WebDriver
+        # 🟡 همیشه داده‌ها رو استخراج کن
+        brands, models = extract_all_data(driver)
         driver.quit()
 
-    except Exception as e:
-        logging.error(f"❌ خطا در اجرای برنامه: {e}")
-
-
-def send_new_posts(driver, today):
-    try:
-
-        
-        driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-
-        logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
-        scroll_page(driver)
-
-        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
-        brands, models = extract_product_data(driver, valid_brands)
-        
-        # استخراج داده‌ها برای لپ‌تاپ، تبلت و کنسول
-        driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
-        brands.extend(laptop_brands)
-        models.extend(laptop_models)
-
-        driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
-        brands.extend(tablet_brands)
-        models.extend(tablet_models)
-
-        driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-        scroll_page(driver)
-        console_brands, console_models = extract_product_data(driver, valid_brands)
-        brands.extend(console_brands)
-        models.extend(console_models)
-
-        driver.quit()
-
-        # ایجاد و ارسال پیام‌ها
-        processed_data = []
-        for i in range(len(brands)):
-            model_str = process_model(models[i])
-            processed_data.append(f"{model_str} {brands[i]}")
-
-        message_lines = []
-        for row in processed_data:
-            decorated = decorate_line(row)
-            message_lines.append(decorated)
-
-        categories = categorize_messages(message_lines)
+        processed_data = [f"{process_model(models[i])} {brands[i]}" for i in range(len(brands))]
+        decorated_lines = [decorate_line(row) for row in processed_data]
+        categories = categorize_messages(decorated_lines)
         update_date = today
 
-        # ارسال پیام‌ها و ذخیره آنها در Google Sheets
-        samsung_message_id = None
-        xiaomi_message_id = None
-        iphone_message_id = None
-        laptop_message_id = None
-        tablet_message_id = None
-        console_message_id = None
+        # نگهداری شناسه پیام‌ها برای دکمه‌ها
+        message_ids = {}
 
-        for category, lines in categories.items():
-            if lines:
-                message = prepare_final_message(category, lines, update_date)
-                        # پردازش متن پیام برای escape کردن کاراکترها
-                message = escape_markdown(message)
-                msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-                if msg_id:
-                    save_message_id_and_text_to_sheet(today, category, msg_id, message)
-                    logging.info(f"✅ پیام دسته {category} ارسال شد.")
+        if last_update_date != today:
+            logging.info("🆕 تاریخ جدید است، ارسال پیام‌های جدید...")
+            clear_old_rows()
 
-                # ذخیره message_id برای دکمه‌ها
-                if category == "🔵":
-                    samsung_message_id = msg_id
-                elif category == "🟡":
-                    xiaomi_message_id = msg_id
-                elif category == "🍏":
-                    iphone_message_id = msg_id
-                elif category == "💻":
-                    laptop_message_id = msg_id
-                elif category == "🟠":
-                    tablet_message_id = msg_id
-                elif category == "🎮":
-                    console_message_id = msg_id
+            for category, lines in categories.items():
+                if lines:
+                    message = prepare_final_message(category, lines, update_date)
+                    message = escape_markdown(message)
+                    msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+                    if msg_id:
+                        save_message_id_and_text_to_sheet(today, category, msg_id, message)
+                        message_ids[category] = msg_id
+        else:
+            logging.info("♻️ تاریخ تغییری نکرده، ویرایش پیام‌های قبلی...")
+            for category, lines in categories.items():
+                if lines:
+                    today = JalaliDate.today().strftime("%Y-%m-%d")
+                    message_id, current_text = get_message_id_and_text_from_sheet(today, category)
+                    message = prepare_final_message(category, lines, update_date)
+                    message = escape_markdown(message)
+                    
+                    if message_id:
+                        if message != current_text:
+                            edit_telegram_message(message_id, message, current_text)
+                            save_message_id_and_text_to_sheet(today, category, message_id, message)
+                            logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+                        else:
+                            logging.info(f"ℹ️ پیام دسته {category} یکسان است و قابل ویرایش نیست.")
+                        message_ids[category] = message_id
 
-        # ایجاد دکمه‌های لینک به پیام‌ها
+        # ساخت دکمه‌های لینک‌شده
+        button_markup = {"inline_keyboard": []}
+        button_texts = {
+            "🔵": "📱 لیست سامسونگ",
+            "🟡": "📱 لیست شیائومی",
+            "🍏": "📱 لیست آیفون",
+            "💻": "💻 لیست لپ‌تاپ",
+            "🟠": "📱 لیست تبلت",
+            "🎮": "🎮 کنسول بازی"
+        }
+
+        for emoji, msg_id in message_ids.items():
+            if msg_id:
+                button_markup["inline_keyboard"].append([
+                    {"text": button_texts.get(emoji, "🔗 لینک دسته"), "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
+                ])
+
+        # پیام نهایی
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
@@ -654,24 +611,10 @@ def send_new_posts(driver, today):
             "📞 028-3399-1417"
         )
 
-        button_markup = {"inline_keyboard": []}
-        if samsung_message_id:
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست سامسونگ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{samsung_message_id}"}])
-        if xiaomi_message_id:
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست شیایومی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{xiaomi_message_id}"}])
-        if iphone_message_id:
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست آیفون", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{iphone_message_id}"}])
-        if laptop_message_id:
-            button_markup["inline_keyboard"].append([{"text": "💻 لیست لپ‌تاپ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{laptop_message_id}"}])
-        if tablet_message_id:
-            button_markup["inline_keyboard"].append([{"text": "📱 لیست تبلت", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{tablet_message_id}"}])
-        if console_message_id:
-            button_markup["inline_keyboard"].append([{"text": "🎮 کنسول بازی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{console_message_id}"}])
-
         send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
 
     except Exception as e:
-        logging.error(f"❌ خطا در ارسال پیام‌های جدید: {e}")
+        logging.error(f"❌ خطا در اجرای برنامه: {e}")
 
 def update_existing_posts(today):
     try:
@@ -687,6 +630,7 @@ def update_existing_posts(today):
                 logging.info(f"✅ پیام دسته {category} ویرایش شد.")
             else:
                 logging.warning(f"❌ پیام دسته {category} یافت نشد.")
+                
     except Exception as e:
         logging.error(f"❌ خطا در ویرایش پیام‌ها: {e}")
 
