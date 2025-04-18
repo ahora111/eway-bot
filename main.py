@@ -334,7 +334,6 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
-# تنظیمات API گوگل شیت‌ها
 def get_worksheet():
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -350,34 +349,25 @@ def get_worksheet():
         logging.error(f"❌ خطا در اتصال به Google Sheets: {e}")
         return None
 
+
 def check_and_add_headers():
-    try:
-        ws = get_worksheet()
-        rows = ws.get_all_values()
-        if not rows or rows[0] != ["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"]:
-            ws.insert_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"], 1)  # اضافه کردن هدر به سطر اول
-            logging.info("✅ هدرها به Google Sheets اضافه شدند.")
-        else:
-            logging.info("✅ هدرها موجود هستند.")
-    except Exception as e:
-        logging.error(f"❌ خطا در بررسی یا ایجاد هدرها: {e}")
+    ws = get_worksheet()
+    rows = ws.get_all_values()
+    if not rows:
+        ws.append_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"])
 
-# دریافت شناسه پیام و متن از Google Sheets
 def get_message_id_and_text_from_sheet(today, category):
-    try:
-        ws = get_worksheet()
-        rows = ws.get_all_values()
-        headers = rows[0]
-        for row in rows[1:]:
-            record = dict(zip(headers, row))
-            if record.get("تاریخ") == today and record.get("دسته‌بندی") == category:
+    ws = get_worksheet()
+    rows = ws.get_all_values()
+    headers = rows[0]
+    for row in rows[1:]:
+        record = dict(zip(headers, row))
+        if record.get("تاریخ") == today and record.get("دسته‌بندی") == category:
+            try:
                 return int(record.get("شناسه پیام", 0)), record.get("متن پیام", "")
-        return None, ""
-    except Exception as e:
-        logging.error(f"❌ خطا در دریافت داده از شیت: {e}")
-        return None, ""
-
-
+            except (ValueError, TypeError):
+                return None, ""
+    return None, ""
 
 
 
@@ -385,75 +375,67 @@ def save_message_id_and_text_to_sheet(today, category, message_id, text):
     try:
         ws = get_worksheet()
         if not ws:
-            logging.error("❌ شیت Google Sheets به درستی بارگذاری نشد.")
-            return
+            logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
+            return False
 
-        # پاک کردن تمامی داده‌ها قبل از ذخیره داده‌های جدید
-        try:
-            # پاک‌سازی داده‌ها فقط از ردیف‌های داده
-            range_to_clear = "A2:D"  # فرض کنید داده‌ها در ستون‌های A تا D هستند
-            ws.batch_clear([range_to_clear])  # استفاده از batch_clear برای پاک‌سازی دقیق‌تر
-            logging.info("✅ داده‌ها پاک شدند.")
-        except Exception as e:
-            logging.error(f"❌ خطا در پاک‌سازی داده‌ها: {e}")
+        # دریافت تمام رکوردها
+        records = ws.get_all_records()
+        updated = False
 
-        # اضافه کردن داده جدید به شیت
-        ws.append_row([today, message_id, category, text])
-        
-        # نمایش پیامی در لاگ
-        logging.info("✅ داده‌های قبلی پاک شدند و داده‌های جدید به گوگل شیت اضافه شدند.")
+        # جستجو برای رکورد موجود با تاریخ و دسته‌بندی یکسان
+        for i, record in enumerate(records, start=2):  # start=2 چون سطر اول هدر است
+            if record.get("تاریخ") == today and record.get("دسته‌بندی") == category:
+                # به‌روزرسانی رکورد موجود
+                ws.update_cell(i, 2, str(message_id))  # ستون شناسه پیام
+                ws.update_cell(i, 4, text)  # ستون متن پیام
+                logging.info(f"✅ رکورد با تاریخ {today} و دسته‌بندی {category} در سطر {i} به‌روزرسانی شد.")
+                updated = True
+                break
+
+        if not updated:
+            # اگر رکوردی پیدا نشد، رکورد جدید اضافه می‌کنیم
+            ws.append_row([today, str(message_id), category, text])
+            logging.info(f"✅ رکورد جدید برای تاریخ {today} و دسته‌بندی {category} اضافه شد.")
+
+        return True
     except Exception as e:
-        logging.error(f"❌ خطا در ذخیره داده در گوگل شیت: {e}")
+        logging.error(f"❌ خطا در ذخیره/به‌روزرسانی داده‌ها در Google Sheets: {e}")
+        return False
 
 
-
-
-
-
-
-
-# ذخیره شناسه پیام و متن در Google Sheets
-def save_message_id_and_text_to_sheet(today, category, message_id, text):
-    try:
-        ws = get_worksheet()
-        if not ws:
-            logging.error("❌ اتصال به Google Sheets برقرار نیست.")
-            return
-        ws.append_row([today, str(message_id), category, text])
-        logging.info(f"✅ پیام دسته {category} ذخیره شد.")
-    except Exception as e:
-        logging.error(f"❌ خطا در ذخیره داده‌ها به Google Sheets: {e}")
-
-# ارسال یا ویرایش پیام تلگرام
 def send_or_edit_message(category, lines, update_date):
     today = JalaliDate.today().strftime("%Y-%m-%d")
     message_id, current_text = get_message_id_and_text_from_sheet(today, category)
     
     message = prepare_final_message(category, lines, update_date)
-
-    if not message.strip():
-        logging.warning(f"⚠️ پیام دسته {category} خالی است، ارسال یا ویرایش انجام نمی‌شود.")
-        return
-
+    
     if message_id:
-        if message != current_text:
-            logging.info(f"✏️ ویرایش پیام دسته {category}...")
-            edit_telegram_message(message_id, message, current_text)
+        if message.strip() == current_text.strip():
+            logging.info(f"ℹ️ پیام دسته {category} تغییری نکرده است. نیازی به ویرایش نیست.")
+            # به‌روزرسانی شیت در هر حال (حتی اگر پیام تغییر نکرده باشد)
             save_message_id_and_text_to_sheet(today, category, message_id, message)
+            return False
         else:
-            logging.info(f"ℹ️ پیام دسته {category} یکسان است و قابل ویرایش نیست.")
+            if edit_telegram_message(message_id, message, current_text):
+                save_message_id_and_text_to_sheet(today, category, message_id, message)
+                logging.info(f"✅ پیام دسته {category} ویرایش شد و شیت به‌روزرسانی گردید.")
+                return True
     else:
         new_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
         if new_id:
             save_message_id_and_text_to_sheet(today, category, new_id, message)
-            logging.info(f"✅ پیام جدید دسته {category} ارسال و ذخیره شد.")
+            logging.info(f"✅ پیام جدید دسته {category} ارسال و در شیت ذخیره شد.")
+            return True
+    
+    return False
 
-# ویرایش پیام تلگرام
+
 def edit_telegram_message(message_id, new_text, current_text):
     try:
-        if not new_text.strip():
-            logging.warning(f"⚠️ پیام جدید برای ویرایش دسته با شناسه {message_id} خالی است.")
-            return
+        # بررسی یکسان بودن پیام‌ها
+        if new_text.strip() == current_text.strip():
+            logging.info("ℹ️ متن جدید با متن فعلی یکسان است. نیازی به ویرایش نیست.")
+            return False
 
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
         params = {
@@ -468,12 +450,29 @@ def edit_telegram_message(message_id, new_text, current_text):
 
         if response_data.get('ok'):
             logging.info(f"✅ پیام با شناسه {message_id} با موفقیت ویرایش شد.")
-        elif response_data.get("description", "").startswith("Bad Request: message is not modified"):
-            logging.info(f"ℹ️ پیام دسته با شناسه {message_id} یکسان بود و قابل ویرایش نیست.")
+            return True
         else:
             logging.error(f"❌ خطا در ویرایش پیام: {response_data}")
+            return False
     except Exception as e:
         logging.error(f"❌ خطا در فراخوانی editMessageText: {e}")
+        return False
+
+
+def check_and_add_headers():
+    try:
+        # اتصال به شیت
+        ws = get_worksheet()
+        rows = ws.get_all_values()
+        
+        # بررسی اینکه آیا شیت خالی است یا اینکه هدرها موجود هستند
+        if not rows or rows[0] != ["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"]:
+            ws.insert_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"], 1)  # اضافه کردن هدر به سطر اول
+            logging.info("✅ هدرها به Google Sheets اضافه شدند.")
+        else:
+            logging.info("✅ هدرها موجود هستند و نیاز به تغییر ندارند.")
+    except Exception as e:
+        logging.error(f"❌ خطا در بررسی یا ایجاد هدرها: {e}")
 
 def get_last_update_date():
     try:
@@ -488,135 +487,106 @@ def get_last_update_date():
         return None
 
 
-# استخراج داده‌ها از سایت
-def extract_all_data(driver):
-    try:
-        all_brands = []
-        all_models = []
-
-        categories = {
-            "موبایل": "https://hamrahtel.com/quick-checkout?category=mobile",
-            "لپ‌تاپ": "https://hamrahtel.com/quick-checkout?category=laptop",
-            "تبلت": "https://hamrahtel.com/quick-checkout?category=tablet",
-            "کنسول بازی": "https://hamrahtel.com/quick-checkout?category=game-console"
-        }
-
-        valid_brands = [
-            "Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL",
-            "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"
-        ]
-
-        for name, url in categories.items():
-            logging.info(f"🟢 در حال استخراج داده از دسته «{name}»...")
-            driver.get(url)
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-            scroll_page(driver)
-            brands, models = extract_product_data(driver, valid_brands)
-            all_brands.extend(brands)
-            all_models.extend(models)
-
-        logging.info("✅ تمام دسته‌بندی‌ها با موفقیت استخراج شدند.")
-        return all_brands, all_models
-    except Exception as e:
-        logging.error(f"❌ خطا در استخراج داده‌ها: {e}")
-        return [], []
-
-# به‌روزرسانی Google Sheets
-def update_google_sheet(sheet, new_data):
-    try:
-        clear_sheet_except_header(sheet)  
-        if new_data:
-            sheet.append_rows(new_data, value_input_option='USER_ENTERED')
-            logging.info("✅ داده‌های جدید به شیت اضافه شدند.")
-    except Exception as e:
-        logging.error(f"❌ خطا در به‌روزرسانی داده‌ها: {e}")
-
-# پردازش و به‌روزرسانی داده‌ها
-def process_and_update_data():
-    try:
-        all_brands, all_models = extract_all_data(driver)
-        new_data = [[model['category'], model['title'], model['price'], model['color'], model['link']] for model in all_models]
-
-        ws = get_worksheet()
-        update_google_sheet(ws, new_data)
-
-        for category in ["موبایل", "لپ‌تاپ", "تبلت", "کنسول بازی"]:
-            send_or_edit_message(category, all_models, update_date)
-    except Exception as e:
-        logging.error(f"❌ خطا در فرآیند به‌روزرسانی داده‌ها: {e}")
-
 def main():
     try:
+        # تنظیم WebDriver
         driver = get_driver()
         if not driver:
-            logging.error("❌ WebDriver ساخته نشد.")
+            logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
 
+        # بررسی و ایجاد هدرها در Google Sheets
         check_and_add_headers()
+        logging.info("✅ هدرهای شیت بررسی/اضافه شدند.")
 
-        today = JalaliDate.today().strftime("%Y-%m-%d")
-        last_update_date = get_last_update_date()
+        
+        driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
-        # 🟡 همیشه داده‌ها رو استخراج کن
-        brands, models = extract_all_data(driver)
-        driver.quit()
+        logging.info("✅ داده‌ها آماده‌ی استخراج هستند!")
+        scroll_page(driver)
 
-        processed_data = [f"{process_model(models[i])} {brands[i]}" for i in range(len(brands))]
-        decorated_lines = [decorate_line(row) for row in processed_data]
-        categories = categorize_messages(decorated_lines)
-        update_date = today
+        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
+        brands, models = extract_product_data(driver, valid_brands)
+        
+        # استخراج داده‌ها برای لپ‌تاپ، تبلت و کنسول
+        driver.get('https://hamrahtel.com/quick-checkout?category=laptop')
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+        scroll_page(driver)
+        laptop_brands, laptop_models = extract_product_data(driver, valid_brands)
+        brands.extend(laptop_brands)
+        models.extend(laptop_models)
 
-        # نگهداری شناسه پیام‌ها برای دکمه‌ها
-        message_ids = {}
+        driver.get('https://hamrahtel.com/quick-checkout?category=tablet')
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+        scroll_page(driver)
+        tablet_brands, tablet_models = extract_product_data(driver, valid_brands)
+        brands.extend(tablet_brands)
+        models.extend(tablet_models)
 
-        if last_update_date != today:
-            logging.info("🆕 تاریخ جدید است، ارسال پیام‌های جدید...")
-            clear_old_rows()
+        driver.get('https://hamrahtel.com/quick-checkout?category=game-console')
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+        scroll_page(driver)
+        console_brands, console_models = extract_product_data(driver, valid_brands)
+        brands.extend(console_brands)
+        models.extend(console_models)
 
-            for category, lines in categories.items():
-                if lines:
-                    message = prepare_final_message(category, lines, update_date)
-                    message = escape_markdown(message)
-                    msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-                    if msg_id:
-                        save_message_id_and_text_to_sheet(today, category, msg_id, message)
-                        message_ids[category] = msg_id
-        else:
-            logging.info("♻️ تاریخ تغییری نکرده، ویرایش پیام‌های قبلی...")
-            for category, lines in categories.items():
-                if lines:
-                    today = JalaliDate.today().strftime("%Y-%m-%d")
-                    message_id, current_text = get_message_id_and_text_from_sheet(today, category)
-                    message = prepare_final_message(category, lines, update_date)
-                    message = escape_markdown(message)
-                    
-                    if message_id:
-                        if message != current_text:
-                            edit_telegram_message(message_id, message, current_text)
-                            save_message_id_and_text_to_sheet(today, category, message_id, message)
-                            logging.info(f"✅ پیام دسته {category} ویرایش شد.")
-                        else:
-                            logging.info(f"ℹ️ پیام دسته {category} یکسان است و قابل ویرایش نیست.")
-                        message_ids[category] = message_id
+    
+       driver.quit()
+        logging.info("✅ استخراج داده‌ها با موفقیت انجام شد.")
 
-        # ساخت دکمه‌های لینک‌شده
-        button_markup = {"inline_keyboard": []}
-        button_texts = {
-            "🔵": "📱 لیست سامسونگ",
-            "🟡": "📱 لیست شیائومی",
-            "🍏": "📱 لیست آیفون",
-            "💻": "💻 لیست لپ‌تاپ",
-            "🟠": "📱 لیست تبلت",
-            "🎮": "🎮 کنسول بازی"
-        }
+        # پردازش داده‌ها و آماده‌سازی پیام‌ها
+        processed_data = []
+        for i in range(len(brands)):
+            model_str = process_model(models[i])
+            processed_data.append(f"{model_str} {brands[i]}")
 
-        for emoji, msg_id in message_ids.items():
-            if msg_id:
-                button_markup["inline_keyboard"].append([
-                    {"text": button_texts.get(emoji, "🔗 لینک دسته"), "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
-                ])
+        message_lines = [decorate_line(row) for row in processed_data]
+        categories = categorize_messages(message_lines)
+        update_date = JalaliDate.today().strftime("%Y-%m-%d")
 
-        # پیام نهایی
+        # ارسال/ویرایش پیام‌ها و به‌روزرسانی شیت
+        logging.info("🔍 شروع فرآیند ارسال/ویرایش پیام‌ها و به‌روزرسانی شیت...")
+        for category, lines in categories.items():
+            if lines:
+                send_or_edit_message(category, lines, update_date)
+
+        logging.info("✅ فرآیند به‌روزرسانی پیام‌ها و شیت با موفقیت تکمیل شد.")
+
+
+        # ارسال پیام‌ها و ذخیره آنها در Google Sheets
+        samsung_message_id = None
+        xiaomi_message_id = None
+        iphone_message_id = None
+        laptop_message_id = None
+        tablet_message_id = None
+        console_message_id = None
+
+        for category, lines in categories.items():
+            if lines:
+                message = prepare_final_message(category, lines, update_date)
+                        # پردازش متن پیام برای escape کردن کاراکترها
+                message = escape_markdown(message)
+                msg_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
+                if msg_id:
+                    save_message_id_and_text_to_sheet(today, category, msg_id, message)
+                    logging.info(f"✅ پیام دسته {category} ارسال شد.")
+
+                # ذخیره message_id برای دکمه‌ها
+                if category == "🔵":
+                    samsung_message_id = msg_id
+                elif category == "🟡":
+                    xiaomi_message_id = msg_id
+                elif category == "🍏":
+                    iphone_message_id = msg_id
+                elif category == "💻":
+                    laptop_message_id = msg_id
+                elif category == "🟠":
+                    tablet_message_id = msg_id
+                elif category == "🎮":
+                    console_message_id = msg_id
+
+        # ایجاد دکمه‌های لینک به پیام‌ها
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
@@ -632,10 +602,24 @@ def main():
             "📞 028-3399-1417"
         )
 
+        button_markup = {"inline_keyboard": []}
+        if samsung_message_id:
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست سامسونگ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{samsung_message_id}"}])
+        if xiaomi_message_id:
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست شیایومی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{xiaomi_message_id}"}])
+        if iphone_message_id:
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست آیفون", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{iphone_message_id}"}])
+        if laptop_message_id:
+            button_markup["inline_keyboard"].append([{"text": "💻 لیست لپ‌تاپ", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{laptop_message_id}"}])
+        if tablet_message_id:
+            button_markup["inline_keyboard"].append([{"text": "📱 لیست تبلت", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{tablet_message_id}"}])
+        if console_message_id:
+            button_markup["inline_keyboard"].append([{"text": "🎮 کنسول بازی", "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{console_message_id}"}])
+
         send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
 
     except Exception as e:
-        logging.error(f"❌ خطا در اجرای برنامه: {e}")
+        logging.error(f"❌ خطا در ارسال پیام‌های جدید: {e}")
 
 def update_existing_posts(today):
     try:
@@ -651,7 +635,6 @@ def update_existing_posts(today):
                 logging.info(f"✅ پیام دسته {category} ویرایش شد.")
             else:
                 logging.warning(f"❌ پیام دسته {category} یافت نشد.")
-                
     except Exception as e:
         logging.error(f"❌ خطا در ویرایش پیام‌ها: {e}")
 
