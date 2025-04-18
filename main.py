@@ -412,14 +412,18 @@ def send_or_edit_message(category, lines, update_date):
     message_id, current_text = get_message_id_and_text_from_sheet(today, category)
     
     message = prepare_final_message(category, lines, update_date)
-    
+
+    if not message.strip():
+        logging.warning(f"⚠️ پیام دسته {category} خالی است، ارسال یا ویرایش انجام نمی‌شود.")
+        return
+
     if message_id:
         if message != current_text:
+            logging.info(f"✏️ ویرایش پیام دسته {category}...")
             edit_telegram_message(message_id, message, current_text)
-            logging.info(f"✏️ پیام دسته {category} ویرایش شد.")
             save_message_id_and_text_to_sheet(today, category, message_id, message)
         else:
-            logging.info(f"ℹ️ پیام دسته {category} بدون تغییر است و قابل ویرایش توسط تلگرام نیست.")
+            logging.info(f"ℹ️ پیام دسته {category} یکسان است و قابل ویرایش توسط تلگرام نیست.")
     else:
         new_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
         if new_id:
@@ -428,8 +432,13 @@ def send_or_edit_message(category, lines, update_date):
 
 
 
+
 def edit_telegram_message(message_id, new_text, current_text):
     try:
+        if not new_text.strip():
+            logging.warning(f"⚠️ پیام جدید برای ویرایش دسته با شناسه {message_id} خالی است.")
+            return
+
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
         params = {
             "chat_id": CHAT_ID,
@@ -438,16 +447,18 @@ def edit_telegram_message(message_id, new_text, current_text):
             "parse_mode": "MarkdownV2"
         }
 
-        # درخواست ویرایش پیام
         response = requests.post(url, json=params)
         response_data = response.json()
 
         if response_data.get('ok'):
             logging.info(f"✅ پیام با شناسه {message_id} با موفقیت ویرایش شد.")
+        elif response_data.get("description", "").startswith("Bad Request: message is not modified"):
+            logging.info(f"ℹ️ پیام دسته با شناسه {message_id} یکسان بود و قابل ویرایش نیست.")
         else:
             logging.error(f"❌ خطا در ویرایش پیام: {response_data}")
     except Exception as e:
         logging.error(f"❌ خطا در فراخوانی editMessageText: {e}")
+
 
 
 def check_and_add_headers():
