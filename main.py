@@ -458,7 +458,6 @@ def get_last_update_date():
         logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
         return None
 
-        
 def replace_sheet_data(today, categories, data):
     try:
         ws = get_worksheet()
@@ -466,16 +465,20 @@ def replace_sheet_data(today, categories, data):
             logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
             return
 
-        # پاک کردن داده‌های موجود (به جز هدرها)
+        # پاک کردن تمامی داده‌ها
         ws.clear()
-        ws.append_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"])  # اضافه کردن هدرها
+        logging.info("✅ داده‌های قدیمی از Google Sheets پاک شدند.")
+
+        # اضافه کردن هدرها
+        ws.append_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"])
+        logging.info("✅ هدرها به Google Sheets اضافه شدند.")
 
         # ذخیره داده‌های جدید
         for category, lines in data.items():
             for line in lines:
                 ws.append_row([today, "", category, line])
         
-        logging.info("✅ داده‌های جدید با موفقیت جایگزین شدند.")
+        logging.info("✅ داده‌های جدید با موفقیت به Google Sheets اضافه شدند.")
     except Exception as e:
         logging.error(f"❌ خطا در جایگزینی داده‌ها در Google Sheets: {e}")
 
@@ -488,19 +491,22 @@ def main():
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
 
-        # بررسی و ایجاد هدرها در Google Sheets
-        check_and_add_headers()
-
-        # تنظیم تاریخ امروز و بررسی تاریخ ذخیره‌شده
+        # تنظیم تاریخ امروز
         today = JalaliDate.today().strftime("%Y-%m-%d")
+
+        # استخراج داده‌ها
+        categories, data = extract_and_categorize_data(driver)
+
+        # جایگزینی داده‌ها در Google Sheets
+        replace_sheet_data(today, categories, data)
+
+        # بررسی تاریخ ذخیره‌شده و تصمیم‌گیری
         last_update_date = get_last_update_date()
 
         if last_update_date != today:
-            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
             logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
             send_new_posts(driver, today)
         else:
-            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
             logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
             update_existing_posts(today)
 
@@ -511,12 +517,10 @@ def main():
         logging.error(f"❌ خطا در اجرای برنامه: {e}")
 
 
-
 def send_new_posts(driver, today):
     try:
         
         
-  
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
 
