@@ -334,6 +334,7 @@ def get_last_messages(bot_token, chat_id, limit=5):
         return [msg for msg in messages if "message" in msg][-limit:]
     return []
 
+# تنظیمات API گوگل شیت‌ها
 def get_worksheet():
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -349,56 +350,46 @@ def get_worksheet():
         logging.error(f"❌ خطا در اتصال به Google Sheets: {e}")
         return None
 
-
 def check_and_add_headers():
-    ws = get_worksheet()
-    rows = ws.get_all_values()
-    if not rows:
-        ws.append_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"])
+    try:
+        ws = get_worksheet()
+        rows = ws.get_all_values()
+        if not rows or rows[0] != ["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"]:
+            ws.insert_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"], 1)  # اضافه کردن هدر به سطر اول
+            logging.info("✅ هدرها به Google Sheets اضافه شدند.")
+        else:
+            logging.info("✅ هدرها موجود هستند.")
+    except Exception as e:
+        logging.error(f"❌ خطا در بررسی یا ایجاد هدرها: {e}")
 
-# ... (کدهای دیگر بالای فایل مثل importها و setup API)
-
-
+# دریافت شناسه پیام و متن از Google Sheets
 def get_message_id_and_text_from_sheet(today, category):
-    ws = get_worksheet()
-    rows = ws.get_all_values()
-    headers = rows[0]
-    for row in rows[1:]:
-        record = dict(zip(headers, row))
-        if record.get("تاریخ") == today and record.get("دسته‌بندی") == category:
-            try:
+    try:
+        ws = get_worksheet()
+        rows = ws.get_all_values()
+        headers = rows[0]
+        for row in rows[1:]:
+            record = dict(zip(headers, row))
+            if record.get("تاریخ") == today and record.get("دسته‌بندی") == category:
                 return int(record.get("شناسه پیام", 0)), record.get("متن پیام", "")
-            except (ValueError, TypeError):
-                return None, ""
-    return None, ""
+        return None, ""
+    except Exception as e:
+        logging.error(f"❌ خطا در دریافت داده از شیت: {e}")
+        return None, ""
 
-
-
+# ذخیره شناسه پیام و متن در Google Sheets
 def save_message_id_and_text_to_sheet(today, category, message_id, text):
     try:
         ws = get_worksheet()
         if not ws:
-            logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
+            logging.error("❌ اتصال به Google Sheets برقرار نیست.")
             return
-        
-        # خطایابی: تست ذخیره با داده‌های ساده
-        logging.info("🔍 درحال تست ذخیره‌سازی با داده‌های ساده")
-        ws.append_row(["تست تاریخ", "تست شناسه", "تست دسته‌بندی", "تست متن پیام"])
-
-        # خطایابی: ذخیره داده‌های اصلی
-        logging.info(f"🔍 درحال ذخیره‌سازی داده‌ها: تاریخ={today}, دسته‌بندی={category}, پیام ID={message_id}, متن={text}")
         ws.append_row([today, str(message_id), category, text])
-        logging.info("✅ داده‌ها با موفقیت به Google Sheets اضافه شدند.")
+        logging.info(f"✅ پیام دسته {category} ذخیره شد.")
     except Exception as e:
         logging.error(f"❌ خطا در ذخیره داده‌ها به Google Sheets: {e}")
 
-
-
-
-
-
-
-# --- ویرایش منطق ارسال پیام ---
+# ارسال یا ویرایش پیام تلگرام
 def send_or_edit_message(category, lines, update_date):
     today = JalaliDate.today().strftime("%Y-%m-%d")
     message_id, current_text = get_message_id_and_text_from_sheet(today, category)
@@ -415,16 +406,14 @@ def send_or_edit_message(category, lines, update_date):
             edit_telegram_message(message_id, message, current_text)
             save_message_id_and_text_to_sheet(today, category, message_id, message)
         else:
-            logging.info(f"ℹ️ پیام دسته {category} یکسان است و قابل ویرایش توسط تلگرام نیست.")
+            logging.info(f"ℹ️ پیام دسته {category} یکسان است و قابل ویرایش نیست.")
     else:
         new_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
         if new_id:
             save_message_id_and_text_to_sheet(today, category, new_id, message)
             logging.info(f"✅ پیام جدید دسته {category} ارسال و ذخیره شد.")
 
-
-
-
+# ویرایش پیام تلگرام
 def edit_telegram_message(message_id, new_text, current_text):
     try:
         if not new_text.strip():
@@ -451,41 +440,12 @@ def edit_telegram_message(message_id, new_text, current_text):
     except Exception as e:
         logging.error(f"❌ خطا در فراخوانی editMessageText: {e}")
 
-
-
-def check_and_add_headers():
-    try:
-        # اتصال به شیت
-        ws = get_worksheet()
-        rows = ws.get_all_values()
-        
-        # بررسی اینکه آیا شیت خالی است یا اینکه هدرها موجود هستند
-        if not rows or rows[0] != ["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"]:
-            ws.insert_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"], 1)  # اضافه کردن هدر به سطر اول
-            logging.info("✅ هدرها به Google Sheets اضافه شدند.")
-        else:
-            logging.info("✅ هدرها موجود هستند و نیاز به تغییر ندارند.")
-    except Exception as e:
-        logging.error(f"❌ خطا در بررسی یا ایجاد هدرها: {e}")
-
-def get_last_update_date():
-    try:
-        ws = get_worksheet()
-        rows = ws.get_all_values()
-        if len(rows) > 1:  # اگر اطلاعات ذخیره شده باشد
-            last_row = rows[-1]
-            return last_row[0]  # ستون اول (تاریخ) را برگرداند
-        return None
-    except Exception as e:
-        logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
-        return None
-
+# استخراج داده‌ها از سایت
 def extract_all_data(driver):
     try:
         all_brands = []
         all_models = []
 
-        # دسته‌بندی‌ها و URLهای مرتبط
         categories = {
             "موبایل": "https://hamrahtel.com/quick-checkout?category=mobile",
             "لپ‌تاپ": "https://hamrahtel.com/quick-checkout?category=laptop",
@@ -509,53 +469,33 @@ def extract_all_data(driver):
 
         logging.info("✅ تمام دسته‌بندی‌ها با موفقیت استخراج شدند.")
         return all_brands, all_models
-
     except Exception as e:
-        logging.error(f"❌ خطا در extract_all_data: {e}")
+        logging.error(f"❌ خطا در استخراج داده‌ها: {e}")
         return [], []
 
-
-def clear_sheet_except_header(sheet):
-    try:
-        all_values = sheet.get_all_values()
-        num_rows = len(all_values)
-
-        if num_rows > 1:  # اگر داده‌ها بیشتر از هدر هستند
-            sheet.delete_rows(2, num_rows)  # حذف تمام ردیف‌ها از ردیف ۲ به بعد
-            logging.info("✅ داده‌های قبلی از شیت پاک شدند.")
-    except Exception as e:
-        logging.error(f"❌ خطا در پاک کردن داده‌ها از شیت: {e}")
-
+# به‌روزرسانی Google Sheets
 def update_google_sheet(sheet, new_data):
     try:
-        clear_sheet_except_header(sheet)  # پاک کردن داده‌ها جز هدر
+        clear_sheet_except_header(sheet)  
         if new_data:
-            sheet.append_rows(new_data, value_input_option='USER_ENTERED')  # اضافه کردن داده‌های جدید
+            sheet.append_rows(new_data, value_input_option='USER_ENTERED')
             logging.info("✅ داده‌های جدید به شیت اضافه شدند.")
     except Exception as e:
         logging.error(f"❌ خطا در به‌روزرسانی داده‌ها: {e}")
 
-
+# پردازش و به‌روزرسانی داده‌ها
 def process_and_update_data():
     try:
-        # استخراج داده‌ها از سایت
         all_brands, all_models = extract_all_data(driver)
+        new_data = [[model['category'], model['title'], model['price'], model['color'], model['link']] for model in all_models]
 
-        # فرض می‌کنیم این داده‌ها از سایت استخراج شده‌اند و باید به شیت اضافه شوند
-        # این داده‌ها باید مطابق با فرمت و نیاز شما باشند. به عنوان مثال:
-        new_data = [[model['category'], model['title'], model['price'], model['color'], model['link']] for model in all_models] 
-
-        # اتصال به شیت و به‌روزرسانی داده‌ها
         ws = get_worksheet()
         update_google_sheet(ws, new_data)
 
-        # ارسال یا ویرایش پیام‌ها در تلگرام
         for category in ["موبایل", "لپ‌تاپ", "تبلت", "کنسول بازی"]:
             send_or_edit_message(category, all_models, update_date)
-
     except Exception as e:
         logging.error(f"❌ خطا در فرآیند به‌روزرسانی داده‌ها: {e}")
-
 
 def main():
     try:
