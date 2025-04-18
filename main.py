@@ -370,6 +370,7 @@ def get_message_id_and_text_from_sheet(today, category):
     return None, ""
 
 
+
 def save_message_id_and_text_to_sheet(today, category, message_id, text):
     try:
         ws = get_worksheet()
@@ -389,15 +390,7 @@ def save_message_id_and_text_to_sheet(today, category, message_id, text):
         logging.error(f"❌ خطا در ذخیره داده‌ها به Google Sheets: {e}")
 
 
-def update_google_sheet_with_new_data(data):
-    ws = get_worksheet()
-    if ws:
-        ws.clear()  # پاک کردن تمامی داده‌های قبلی
-        headers = ["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"]
-        ws.append_row(headers)  # اضافه کردن هدرها
-        for row in data:
-            ws.append_row(row)  # اضافه کردن داده‌های جدید
-        logging.info("✅ داده‌های Google Sheets بروز شدند.")
+
 
 
 
@@ -412,11 +405,16 @@ def send_or_edit_message(category, lines, update_date):
     if message_id:
         if message != current_text:
             edit_telegram_message(message_id, message, current_text)
-            logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+            logging.info(f"✏️ پیام دسته {category} ویرایش شد.")
+            save_message_id_and_text_to_sheet(today, category, message_id, message)
+        else:
+            logging.info(f"ℹ️ پیام دسته {category} بدون تغییر است و قابل ویرایش توسط تلگرام نیست.")
     else:
         new_id = send_telegram_message(message, BOT_TOKEN, CHAT_ID)
-        save_message_id_and_text_to_sheet(today, category, new_id, message)
-        logging.info(f"✅ پیام جدید دسته {category} ارسال و ذخیره شد.")
+        if new_id:
+            save_message_id_and_text_to_sheet(today, category, new_id, message)
+            logging.info(f"✅ پیام جدید دسته {category} ارسال و ذخیره شد.")
+
 
 
 def edit_telegram_message(message_id, new_text, current_text):
@@ -468,6 +466,17 @@ def get_last_update_date():
         logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
         return None
 
+def clear_old_rows():
+    try:
+        ws = get_worksheet()
+        rows = ws.get_all_values()
+        if len(rows) > 1:
+            ws.batch_clear([f"A2:D{len(rows)}"])
+            logging.info("🧹 داده‌های قدیمی از شیت پاک شدند.")
+    except Exception as e:
+        logging.error(f"❌ خطا در پاک‌سازی داده‌های شیت: {e}")
+
+
 
 def main():
     try:
@@ -486,17 +495,23 @@ def main():
 
         if last_update_date != today:
             logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
-            update_google_sheet_with_new_data(data)  # بروزرسانی داده‌ها
-            send_new_posts(driver, today)  # ارسال پیام‌ها
+            clear_old_rows()  # پاک کردن داده‌های قبلی
+            send_new_posts(driver, today)
+        else:
+            # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
+            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
+            update_existing_posts(today)
 
+        # خروج از WebDriver
+        driver.quit()
+
+    except Exception as e:
+        logging.error(f"❌ خطا در اجرای برنامه: {e}")
 
 
 def send_new_posts(driver, today):
     try:
-        
-      else:
-    # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
-    logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌ها...")
+
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
@@ -542,29 +557,8 @@ def send_new_posts(driver, today):
             decorated = decorate_line(row)
             message_lines.append(decorated)
 
-
-    # ویرایش یا جایگزینی پیام‌ها
-    for category, lines in categories.items():
-        message_id, current_text = get_message_id_and_text_from_sheet(today, category)
-        new_message = prepare_final_message(category, lines, today)
-        if message_id:
-            if new_message != current_text:  # بررسی تغییر متن پیام
-                edit_telegram_message(message_id, new_message, current_text)
-                save_message_id_and_text_to_sheet(today, category, message_id, new_message)
-                logging.info(f"✅ پیام دسته {category} ویرایش شد.")
-        else:
-            logging.warning(f"❌ پیام مرتبط با دسته {category} یافت نشد.")
-
-
-                categories = categorize_messages(message_lines)
+        categories = categorize_messages(message_lines)
         update_date = today
-        
-        # خروج از WebDriver
-        driver.quit()
-
-    except Exception as e:
-        logging.error(f"❌ خطا در اجرای برنامه: {e}")
-
 
         # ارسال پیام‌ها و ذخیره آنها در Google Sheets
         samsung_message_id = None
@@ -635,32 +629,18 @@ def send_new_posts(driver, today):
 
 def update_existing_posts(today):
     try:
-        # بازیابی داده‌ها از Google Sheets
-        ws = get_worksheet()
-        rows = ws.get_all_values()
-        headers = rows[0] if rows else []
-        categories = {"🔵": [], "🟡": [], "🍏": [], "💻": [], "🟠": [], "🎮": []}
-        
-        # دسته‌بندی داده‌های شیت بر اساس دسته‌بندی‌ها
-        for row in rows[1:]:  # از ردیف دوم شروع کنید
-            record = dict(zip(headers, row))
-            category = record.get("دسته‌بندی")
-            if category in categories:
-                categories[category].append(record)
-        
-        # ویرایش پیام‌ها
-        for category, records in categories.items():
-            if records:
-                message_id, current_text = get_message_id_and_text_from_sheet(today, category)
-                new_message = prepare_final_message(category, [record["متن پیام"] for record in records], today)
-                
-                if message_id:
-                    if new_message != current_text:
-                        edit_telegram_message(message_id, new_message, current_text)
-                        save_message_id_and_text_to_sheet(today, category, message_id, new_message)
-                        logging.info(f"✅ پیام دسته‌بندی {category} ویرایش شد.")
-                else:
-                    logging.warning(f"❌ پیام مرتبط با دسته‌بندی {category} یافت نشد.")
+        # بازیابی message_id و متن پیام‌های قبلی از Google Sheets
+        categories = ["🔵", "🟡", "🍏", "💻", "🟠", "🎮"]
+        for category in categories:
+            message_id, current_text = get_message_id_and_text_from_sheet(today, category)
+            if message_id:
+                # پردازش متن برای escape کردن کاراکترها
+                new_text = escape_markdown(current_text)
+                # فرض کنیم متن پیام تغییری نداشته باشد
+                edit_telegram_message(message_id, current_text, current_text)
+                logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+            else:
+                logging.warning(f"❌ پیام دسته {category} یافت نشد.")
     except Exception as e:
         logging.error(f"❌ خطا در ویرایش پیام‌ها: {e}")
 
