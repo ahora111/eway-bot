@@ -48,7 +48,20 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID", "YOUR_SHEET_ID")
 SHEET_NAME = os.getenv("SHEET_NAME", "PriceData")
 
+
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+
+options = Options()
+options.add_argument('--headless')  # اجرای بدون رابط گرافیکی
+options.add_argument('--no-sandbox')
+options.add_argument('--disable-dev-shm-usage')
+
+self.driver = webdriver.Chrome(options=options)
+
 # ---------------------------- 🏷 مدل‌های داده ----------------------------
+
 @dataclass
 class Product:
     """مدل داده‌ای برای محصولات"""
