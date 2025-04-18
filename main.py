@@ -356,6 +356,17 @@ def check_and_add_headers():
     if not rows:
         ws.append_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"])
 
+def clear_old_rows():
+    try:
+        ws = get_worksheet()
+        rows = ws.get_all_values()
+        if len(rows) > 1:
+            ws.batch_clear([f"A2:D{len(rows)}"])
+            logging.info("🧹 داده‌های قدیمی از شیت پاک شدند.")
+    except Exception as e:
+        logging.error(f"❌ خطا در پاک‌سازی داده‌های شیت: {e}")
+
+
 def get_message_id_and_text_from_sheet(today, category):
     ws = get_worksheet()
     rows = ws.get_all_values()
@@ -466,15 +477,6 @@ def get_last_update_date():
         logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
         return None
 
-def clear_old_rows():
-    try:
-        ws = get_worksheet()
-        rows = ws.get_all_values()
-        if len(rows) > 1:
-            ws.batch_clear([f"A2:D{len(rows)}"])
-            logging.info("🧹 داده‌های قدیمی از شیت پاک شدند.")
-    except Exception as e:
-        logging.error(f"❌ خطا در پاک‌سازی داده‌های شیت: {e}")
 
 
 
