@@ -370,7 +370,6 @@ def get_message_id_and_text_from_sheet(today, category):
     return None, ""
 
 
-
 def save_message_id_and_text_to_sheet(today, category, message_id, text):
     try:
         ws = get_worksheet()
@@ -390,7 +389,15 @@ def save_message_id_and_text_to_sheet(today, category, message_id, text):
         logging.error(f"❌ خطا در ذخیره داده‌ها به Google Sheets: {e}")
 
 
-
+def update_google_sheet_with_new_data(data):
+    ws = get_worksheet()
+    if ws:
+        ws.clear()  # پاک کردن تمامی داده‌های قبلی
+        headers = ["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"]
+        ws.append_row(headers)  # اضافه کردن هدرها
+        for row in data:
+            ws.append_row(row)  # اضافه کردن داده‌های جدید
+        logging.info("✅ داده‌های Google Sheets بروز شدند.")
 
 
 
@@ -478,14 +485,22 @@ def main():
         last_update_date = get_last_update_date()
 
         if last_update_date != today:
-            # ارسال پیام‌های جدید اگر تاریخ تغییر کرده باشد
             logging.info("✅ تاریخ جدید است، ارسال پیام‌های جدید...")
-            send_new_posts(driver, today)
+            update_google_sheet_with_new_data(data)  # بروزرسانی داده‌ها
+            send_new_posts(driver, today)  # ارسال پیام‌ها
+
         else:
             # ویرایش پیام‌های قبلی اگر تاریخ تغییری نکرده باشد
-            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌های قبلی...")
-            update_existing_posts(today)
-
+            logging.info("✅ تاریخ تغییری نکرده است، ویرایش پیام‌ها...")
+            categories = categorize_messages(get_data_lines())  # فرض کنیم داده‌های خطوط از جایی دریافت شده‌اند
+            for category, lines in categories.items():
+                message_id, current_text = get_message_id_and_text_from_sheet(today, category)
+                new_message = prepare_final_message(category, lines, today)
+                if message_id:
+                    edit_telegram_message(message_id, new_message, current_text)
+                    save_message_id_and_text_to_sheet(today, category, message_id, new_message)
+                    logging.info(f"✅ پیام دسته {category} ویرایش شد.")
+        
         # خروج از WebDriver
         driver.quit()
 
@@ -612,18 +627,32 @@ def send_new_posts(driver, today):
 
 def update_existing_posts(today):
     try:
-        # بازیابی message_id و متن پیام‌های قبلی از Google Sheets
-        categories = ["🔵", "🟡", "🍏", "💻", "🟠", "🎮"]
-        for category in categories:
-            message_id, current_text = get_message_id_and_text_from_sheet(today, category)
-            if message_id:
-                # پردازش متن برای escape کردن کاراکترها
-                new_text = escape_markdown(current_text)
-                # فرض کنیم متن پیام تغییری نداشته باشد
-                edit_telegram_message(message_id, current_text, current_text)
-                logging.info(f"✅ پیام دسته {category} ویرایش شد.")
-            else:
-                logging.warning(f"❌ پیام دسته {category} یافت نشد.")
+        # بازیابی داده‌ها از Google Sheets
+        ws = get_worksheet()
+        rows = ws.get_all_values()
+        headers = rows[0] if rows else []
+        categories = {"🔵": [], "🟡": [], "🍏": [], "💻": [], "🟠": [], "🎮": []}
+        
+        # دسته‌بندی داده‌های شیت بر اساس دسته‌بندی‌ها
+        for row in rows[1:]:  # از ردیف دوم شروع کنید
+            record = dict(zip(headers, row))
+            category = record.get("دسته‌بندی")
+            if category in categories:
+                categories[category].append(record)
+        
+        # ویرایش پیام‌ها
+        for category, records in categories.items():
+            if records:
+                message_id, current_text = get_message_id_and_text_from_sheet(today, category)
+                new_message = prepare_final_message(category, [record["متن پیام"] for record in records], today)
+                
+                if message_id:
+                    if new_message != current_text:
+                        edit_telegram_message(message_id, new_message, current_text)
+                        save_message_id_and_text_to_sheet(today, category, message_id, new_message)
+                        logging.info(f"✅ پیام دسته‌بندی {category} ویرایش شد.")
+                else:
+                    logging.warning(f"❌ پیام مرتبط با دسته‌بندی {category} یافت نشد.")
     except Exception as e:
         logging.error(f"❌ خطا در ویرایش پیام‌ها: {e}")
 
