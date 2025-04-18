@@ -1,10 +1,12 @@
 name: Run Python Script for Telegram and Google Sheets Automation
 
 on:
+  schedule:
+    - cron: "*/5 * * * *"  # هر ۵ دقیقه بین ساعت ۶ تا ۱۸ به وقت UTC
   push:
     branches:
       - main
-  workflow_dispatch:
+  workflow_dispatch:  # اجرای دستی
 
 jobs:
   build:
