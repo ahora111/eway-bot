@@ -12,3 +12,4 @@ requests
 pytz
 telethon
 oauth2client
+tenacity
