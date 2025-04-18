@@ -515,7 +515,6 @@ def extract_all_data(driver):
         return [], []
 
 
-# تابع برای پاک کردن داده‌ها جز هدرها
 def clear_sheet_except_header(sheet):
     try:
         all_values = sheet.get_all_values()
@@ -527,7 +526,6 @@ def clear_sheet_except_header(sheet):
     except Exception as e:
         logging.error(f"❌ خطا در پاک کردن داده‌ها از شیت: {e}")
 
-# تابع برای به‌روزرسانی داده‌ها
 def update_google_sheet(sheet, new_data):
     try:
         clear_sheet_except_header(sheet)  # پاک کردن داده‌ها جز هدر
@@ -536,6 +534,27 @@ def update_google_sheet(sheet, new_data):
             logging.info("✅ داده‌های جدید به شیت اضافه شدند.")
     except Exception as e:
         logging.error(f"❌ خطا در به‌روزرسانی داده‌ها: {e}")
+
+
+def process_and_update_data():
+    try:
+        # استخراج داده‌ها از سایت
+        all_brands, all_models = extract_all_data(driver)
+
+        # فرض می‌کنیم این داده‌ها از سایت استخراج شده‌اند و باید به شیت اضافه شوند
+        # این داده‌ها باید مطابق با فرمت و نیاز شما باشند. به عنوان مثال:
+        new_data = [[model['category'], model['title'], model['price'], model['color'], model['link']] for model in all_models] 
+
+        # اتصال به شیت و به‌روزرسانی داده‌ها
+        ws = get_worksheet()
+        update_google_sheet(ws, new_data)
+
+        # ارسال یا ویرایش پیام‌ها در تلگرام
+        for category in ["موبایل", "لپ‌تاپ", "تبلت", "کنسول بازی"]:
+            send_or_edit_message(category, all_models, update_date)
+
+    except Exception as e:
+        logging.error(f"❌ خطا در فرآیند به‌روزرسانی داده‌ها: {e}")
 
 
 def main():
