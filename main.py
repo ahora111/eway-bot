@@ -349,7 +349,27 @@ def get_worksheet():
         logging.error(f"❌ خطا در اتصال به Google Sheets: {e}")
         return None
 
+def clear_and_update_sheet(data):
+    try:
+        ws = get_worksheet()
+        if not ws:
+            logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
+            return
+        
+        # پاک کردن شیت
+        ws.clear()
+        logging.info("✅ شیت پاک‌سازی شد.")
 
+        # آماده‌سازی داده‌ها برای ارسال دسته‌ای
+        headers = [["Brand", "Model"]]  # هدرها
+        data_to_write = headers + data
+
+        # ارسال داده‌ها به صورت دسته‌ای با استفاده از پارامترهای نام‌گذاری‌شده
+        ws.update(values=data_to_write, range_name='A1')
+        logging.info("✅ داده‌ها با موفقیت به‌روزرسانی شدند.")
+    except Exception as e:
+        logging.error(f"❌ خطا در به‌روزرسانی شیت: {e}")
+        
 def check_and_add_headers():
     ws = get_worksheet()
     rows = ws.get_all_values()
@@ -433,26 +453,7 @@ def edit_telegram_message(message_id, new_text, current_text):
     except Exception as e:
         logging.error(f"❌ خطا در فراخوانی editMessageText: {e}")
 
-def clear_and_update_sheet(data):
-    try:
-        ws = get_worksheet()
-        if not ws:
-            logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
-            return
-        
-        # پاک کردن شیت
-        ws.clear()
-        logging.info("✅ شیت پاک‌سازی شد.")
 
-        # آماده‌سازی داده‌ها برای ارسال دسته‌ای
-        headers = [["Brand", "Model"]]  # هدرها
-        data_to_write = headers + data
-
-        # ارسال داده‌ها به صورت دسته‌ای با استفاده از پارامترهای نام‌گذاری‌شده
-        ws.update(values=data_to_write, range_name='A1')
-        logging.info("✅ داده‌ها با موفقیت به‌روزرسانی شدند.")
-    except Exception as e:
-        logging.error(f"❌ خطا در به‌روزرسانی شیت: {e}")
         
 def check_and_add_headers():
     try:
