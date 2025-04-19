@@ -448,19 +448,7 @@ def check_and_add_headers():
             logging.info("✅ هدرها موجود هستند و نیاز به تغییر ندارند.")
     except Exception as e:
         logging.error(f"❌ خطا در بررسی یا ایجاد هدرها: {e}")
-
-def get_last_update_date():
-    try:
-        ws = get_worksheet()
-        rows = ws.get_all_values()
-        if len(rows) > 1:  # اگر اطلاعات ذخیره شده باشد
-            last_row = rows[-1]
-            return last_row[0]  # ستون اول (تاریخ) را برگرداند
-        return None
-    except Exception as e:
-        logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
-        return None
-
+        
 def clear_and_update_sheet(data):
     try:
         # اتصال به شیت
@@ -484,6 +472,20 @@ def clear_and_update_sheet(data):
         logging.info("✅ داده‌های جدید با موفقیت اضافه شدند.")
     except Exception as e:
         logging.error(f"❌ خطا در به‌روزرسانی شیت: {e}")
+        
+def get_last_update_date():
+    try:
+        ws = get_worksheet()
+        rows = ws.get_all_values()
+        if len(rows) > 1:  # اگر اطلاعات ذخیره شده باشد
+            last_row = rows[-1]
+            return last_row[0]  # ستون اول (تاریخ) را برگرداند
+        return None
+    except Exception as e:
+        logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
+        return None
+
+
 
 def main():
     try:
