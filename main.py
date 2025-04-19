@@ -436,9 +436,9 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     message_parts = split_message(message)
     last_message_id = None
     for part in message_parts:
-        # فرار دادن کاراکترهای خاص قبل از ارسال پیام
-        part = escape_special_characters(part)  # استفاده از تابع escape_special_characters برای فرار دادن کاراکترها
-
+        # فرار دادن کاراکترهای خاص
+        part = escape_special_characters(part)
+        
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         params = {
             "chat_id": chat_id,
@@ -446,10 +446,10 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
             "parse_mode": "MarkdownV2"
         }
         if reply_markup:
-            params["reply_markup"] = json.dumps(reply_markup)  # ✅ تبدیل `reply_markup` به JSON
+            params["reply_markup"] = json.dumps(reply_markup)
 
-        headers = {"Content-Type": "application/json"}  # ✅ اضافه کردن `headers` برای `POST`
-        response = requests.post(url, json=params, headers=headers)  
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(url, json=params, headers=headers)
         response_data = response.json()
         if response_data.get('ok'):
             last_message_id = response_data["result"]["message_id"]
@@ -458,7 +458,8 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
             return None
 
     logging.info("✅ پیام ارسال شد!")
-    return last_message_id  # برگشت message_id آخرین پیام
+    return last_message_id
+
 
 def get_last_messages(bot_token, chat_id, limit=5):
     url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
