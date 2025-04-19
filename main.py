@@ -458,6 +458,24 @@ def main():
         brands.extend(console_brands)
         models.extend(console_models)
 
+        
+                # اتصال به Google Sheets
+        sheet = connect_to_google_sheets()
+
+        # بررسی داده‌های گوگل شیت
+        update_date = JalaliDate.today().strftime("%Y-%m-%d")
+        new_data = {"date": update_date, "brands": brands, "models": models}
+
+        # مقایسه تاریخ و انجام عملیات لازم
+        result = check_and_update_posts(sheet, new_data)
+        if result == "ویرایش انجام شد":
+            logging.info("✅ پیام‌ها ویرایش شدند.")
+        elif result == "محتوا تغییری نداشته است":
+            logging.info("ℹ️ محتوای دسته بدون تغییر بود.")
+        else:
+            # ارسال پیام جدید در صورت تفاوت تاریخ
+            handle_new_posts(sheet, new_data)
+            
         driver.quit()
 
         # ذخیره message_id هر دسته‌بندی
