@@ -389,99 +389,75 @@ def update_sheet_data(sheet, emoji, message_id, text):
         sheet.append_row([emoji, today, message_id, text])
 
 
+
+
+
 # ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
-def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
-    today = JalaliDate.today().strftime("%Y-%m-%d")
-    data = sheet_data.get(emoji)
-    
-    # فرار دادن کاراکترها
+def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet):
+    """
+    ارسال پیام جدید و ثبت اطلاعات آن در Google Sheet
+    """
     escaped_text = escape_special_characters(message_text)
 
-    if data and data['date'] == today:
-        if data['text'] == message_text:
-            logging.info(f"🔁 [{emoji}] محتوای پیام تغییری نکرده است.")
-            return None  # نه پیام جدید، نه ویرایش
-
-        # ویرایش پیام
-        edit_url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
-        params = {
-            "chat_id": chat_id,
-            "message_id": data['message_id'],
-            "text": escaped_text,
-            "parse_mode": "MarkdownV2"
-        }
-        response = requests.post(edit_url, json=params)
-        if response.ok:
-            logging.info(f"✅ [{emoji}] پیام ویرایش شد.")
-            update_sheet_data(sheet, emoji, data['message_id'], message_text)
-            return "edited"
-        else:
-            logging.error(f"❌ [{emoji}] خطا در ویرایش: {response.text}")
-            return None
-
-    # ارسال پیام جدید
     send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     params = {
         "chat_id": chat_id,
         "text": escaped_text,
         "parse_mode": "MarkdownV2"
     }
+
     response = requests.post(send_url, json=params)
+
     if response.ok:
-        result = response.json()["result"]
-        message_id = result["message_id"]
-        logging.info(f"📤 [{emoji}] پیام جدید ارسال شد.")
-        update_sheet_data(sheet, emoji, message_id, message_text)
-        return message_id  # فقط اگر پیام جدید ارسال شده
-    else:
-        logging.error(f"❌ [{emoji}] خطا در ارسال پیام: {response.text}")
-        return None
-
-    today = JalaliDate.today().strftime("%Y-%m-%d")
-    data = sheet_data.get(emoji)
-    
-    # فرار دادن کاراکترها
-    escaped_text = escape_special_characters(message_text)
-
-    if data and data['date'] == today:
-        if data['text'] == message_text:
-            logging.info(f"🔁 [{emoji}] محتوای پیام تغییری نکرده است.")
-            return data['message_id']
-
-        # ویرایش پیام
-        edit_url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
-        params = {
-            "chat_id": chat_id,
-            "message_id": data['message_id'],
-            "text": escaped_text,
-            "parse_mode": "MarkdownV2"
-        }
-        response = requests.post(edit_url, json=params)
-        if response.ok:
-            logging.info(f"✅ [{emoji}] پیام ویرایش شد.")
-            update_sheet_data(sheet, emoji, data['message_id'], message_text)
-            return data['message_id']
-        else:
-            logging.error(f"❌ [{emoji}] خطا در ویرایش: {response.text}")
-            return None
-
-    # ارسال پیام جدید
-    send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    params = {
-        "chat_id": chat_id,
-        "text": escaped_text,
-        "parse_mode": "MarkdownV2"
-    }
-    response = requests.post(send_url, json=params)
-    if response.ok:
-        result = response.json()["result"]
-        message_id = result["message_id"]
+        message_id = response.json()["result"]["message_id"]
         logging.info(f"📤 [{emoji}] پیام جدید ارسال شد.")
         update_sheet_data(sheet, emoji, message_id, message_text)
         return message_id
     else:
         logging.error(f"❌ [{emoji}] خطا در ارسال پیام: {response.text}")
         return None
+
+
+
+def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
+    """
+    ارسال یا ویرایش پیام بر اساس اطلاعات روز و ذخیره در Google Sheet
+    """
+    today = JalaliDate.today().strftime("%Y-%m-%d")
+    data = sheet_data.get(emoji)
+
+    escaped_text = escape_special_characters(message_text)
+
+    if data and data.get("date") == today:
+        if data.get("text") == message_text:
+            logging.info(f"🔁 [{emoji}] محتوای پیام تغییری نکرده است.")
+            return data.get("message_id")
+
+        # ویرایش پیام
+        edit_url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+        params = {
+            "chat_id": chat_id,
+            "message_id": data.get("message_id"),
+            "text": escaped_text,
+            "parse_mode": "MarkdownV2"
+        }
+
+        response = requests.post(edit_url, json=params)
+
+        if response.ok:
+            logging.info(f"✅ [{emoji}] پیام ویرایش شد.")
+            update_sheet_data(sheet, emoji, data.get("message_id"), message_text)
+            return data.get("message_id")
+        else:
+            logging.error(f"❌ [{emoji}] خطا در ویرایش: {response.text}")
+
+            if "MESSAGE_ID_INVALID" in response.text:
+                return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
+
+            return None
+
+    # اگر برای امروز پیامی وجود ندارد → پیام جدید ارسال شود
+    return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
 
 
 
