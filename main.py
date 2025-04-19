@@ -374,7 +374,7 @@ def load_sheet_data(sheet):
                 "text": row.get("text")
             }
     return data
-
+    
 def update_sheet_data(sheet, emoji, message_id, text):
     today = JalaliDate.today().strftime("%Y-%m-%d")
     records = sheet.get_all_records()
@@ -382,7 +382,7 @@ def update_sheet_data(sheet, emoji, message_id, text):
 
     for i, row in enumerate(records, start=2):  # سطر 1 برای هدره
         if row.get("emoji") == emoji:
-            sheet.update(f"A{i}", [[emoji, today, message_id, text]])
+            sheet.update(values=[[emoji, today, message_id, text]], range_name=f"A{i}")
             found = True
             break
 
@@ -391,7 +391,6 @@ def update_sheet_data(sheet, emoji, message_id, text):
 
 
 # ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
-
 def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
     today = JalaliDate.today().strftime("%Y-%m-%d")
     data = sheet_data.get(emoji)
