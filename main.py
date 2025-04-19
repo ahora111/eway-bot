@@ -491,7 +491,7 @@ def main():
             "date": update_date,
             "message_id": "12345",
             "identifier": "ایموجی",
-            "text": "این یک متن نمونه است"
+            "text": "این یک متن است"
         }
 
         # به‌روزرسانی داده‌ها
