@@ -65,21 +65,24 @@ def get_driver():
         logging.error(f"خطا در ایجاد WebDriver: {e}")
         return None
 
-def scroll_page(driver, scroll_pause_time=2):
+def scroll_page(driver, scroll_pause_time=3):
     last_height = driver.execute_script("return document.body.scrollHeight")
     while True:
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(scroll_pause_time)
+        time.sleep(scroll_pause_time)  # زمان بیشتر برای بارگذاری
         new_height = driver.execute_script("return document.body.scrollHeight")
         if new_height == last_height:
             break
         last_height = new_height
 
+
 def extract_product_data(driver, valid_brands):
     product_elements = driver.find_elements(By.CLASS_NAME, 'mantine-Text-root')
     brands, models = [], []
     for product in product_elements:
-        name = product.text.strip().replace("تومانءء", "").replace("تومان", "").replace("نامشخص", "").replace("جستجو در مدل‌ها", "").strip()
+        # استخراج و فیلتر داده‌ها
+        name = product.text.strip().replace("تومان", "").replace("نامشخص", "").strip()
+        logging.info(f"🛠 محصول استخراج‌شده: {name}")
         parts = name.split()
         brand = parts[0] if len(parts) >= 2 else name
         model = " ".join(parts[1:]) if len(parts) >= 2 else ""
@@ -87,10 +90,10 @@ def extract_product_data(driver, valid_brands):
             brands.append(brand)
             models.append(model)
         else:
-            models.append(brand + " " + model)
             brands.append("")
+            models.append(name)  # نام کامل محصول بدون فیلتر برند
+    return brands, models
 
-    return brands[25:], models[25:]
 
 def is_number(model_str):
     try:
@@ -560,6 +563,11 @@ def main():
         brands.extend(console_brands)
         models.extend(console_models)
 
+        # ثبت اطلاعات در Google Sheets
+        update_date = JalaliDate.today().strftime("%Y-%m-%d")
+        for i in range(len(brands)):
+            update_google_sheet(sheet, update_date, message_id=None, identifier=brands[i], text=models[i])
+            logging.info(f"📊 اطلاعات ثبت شده: برند={brands[i]}, مدل={models[i]}")
         
 
 
