@@ -346,8 +346,12 @@ def connect_to_google_sheets():
 
 
 def update_google_sheet(sheet, date, message_id, identifier, text):
-    data = sheet.get_all_records()
+    data = sheet.get_all_records()  # داده‌های کامل شیت
+    logging.info(f"📊 داده‌های بازیابی شده از شیت: {data}")  # اضافه کردن لاگ برای بررسی داده‌ها
     for i, row in enumerate(data):
+        if 'تاریخ' not in row:
+            logging.error(f"❌ کلید 'تاریخ' در این ردیف وجود ندارد: {row}")
+            continue
         if row['تاریخ'] == date:  # بررسی تاریخ
             sheet.update_cell(i + 2, 2, message_id)  # بروزرسانی مسیج آی‌دی
             sheet.update_cell(i + 2, 3, identifier)  # بروزرسانی شناسه
@@ -358,8 +362,6 @@ def update_google_sheet(sheet, date, message_id, identifier, text):
     new_row = [date, message_id, identifier, text]
     sheet.append_row(new_row)
 
-sheet = connect_to_google_sheets()
-update_google_sheet(sheet, '2025-04-19', '12345', 'ایموجی', 'این یک متن نمونه است')
 
 
 
