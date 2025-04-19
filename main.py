@@ -344,6 +344,11 @@ def connect_to_google_sheets():
     os.remove("temp_gsheet_credentials.json")
     return sheet
 
+def initialize_google_sheet(sheet):
+    headers = ['تاریخ', 'مسیج آی‌دی', 'شناسه', 'متن پیام']
+    if not sheet.get_all_records():
+        sheet.append_row(headers)
+        logging.info("✅ شیت مقداردهی اولیه شد.")
 
 def update_google_sheet(sheet, date, message_id, identifier, text):
     data = sheet.get_all_records()  # داده‌های کامل شیت
@@ -438,6 +443,10 @@ def get_last_messages(bot_token, chat_id, limit=5):
 
 def main():
     try:
+
+        sheet = connect_to_google_sheets()
+        initialize_google_sheet(sheet)
+
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
