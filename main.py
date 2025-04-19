@@ -332,6 +332,9 @@ def categorize_messages(lines):
 
 
 def connect_to_google_sheets():
+    """
+    اتصال به Google Sheets با استفاده از متغیر سکرت
+    """
     json_credentials = os.getenv("GSHEET_CREDENTIALS_JSON")
     if not json_credentials:
         raise FileNotFoundError("❌ فایل JSON سکرت گوگل شیت یافت نشد. مطمئن شوید سکرت به درستی تنظیم شده باشد.")
@@ -340,14 +343,23 @@ def connect_to_google_sheets():
     with open("temp_gsheet_credentials.json", "w") as temp_file:
         temp_file.write(json_credentials)
     
-    credentials = Credentials.from_service_account_file('temp_gsheet_credentials.json', scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    # ایجاد اتصال
+    credentials = Credentials.from_service_account_file(
+        'temp_gsheet_credentials.json',
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
     client = gspread.authorize(credentials)
-    sheet = client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+    sheet = client.open_by_key('1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E').worksheet('Sheet1')
     
+    # حذف فایل موقت برای امنیت بیشتر
     os.remove("temp_gsheet_credentials.json")
     return sheet
 
+
 def initialize_google_sheet(sheet):
+    """
+    مقداردهی اولیه به شیت در صورت خالی بودن
+    """
     headers = ['تاریخ', 'مسیج آی‌دی', 'شناسه', 'متن پیام']
     if not sheet.get_all_records():
         sheet.append_row(headers)
@@ -355,23 +367,25 @@ def initialize_google_sheet(sheet):
 
 
 def update_google_sheet(sheet, date, message_id, identifier, text):
-    data = sheet.get_all_records()  # داده‌های کامل شیت
-    logging.info(f"📊 داده‌های بازیابی شده از شیت: {data}")  # اضافه کردن لاگ برای بررسی داده‌ها
+    """
+    به‌روزرسانی داده‌ها در شیت. اگر تاریخ موجود باشد، داده‌ها بروزرسانی می‌شوند، 
+    در غیر این صورت داده جدید اضافه می‌شود.
+    """
+    data = sheet.get_all_records()
+    logging.info(f"📊 داده‌های بازیابی شده از شیت: {data}")
+    
     for i, row in enumerate(data):
-        if 'تاریخ' not in row:
-            logging.error(f"❌ کلید 'تاریخ' در این ردیف وجود ندارد: {row}")
-            continue
-        if row['تاریخ'] == date:  # بررسی تاریخ
+        if 'تاریخ' in row and row['تاریخ'] == date:
+            # بروزرسانی رکورد موجود
             sheet.update_cell(i + 2, 2, message_id)  # بروزرسانی مسیج آی‌دی
             sheet.update_cell(i + 2, 3, identifier)  # بروزرسانی شناسه
-            sheet.update_cell(i + 2, 4, text)  # بروزرسانی متن پیام
+            sheet.update_cell(i + 2, 4, text)        # بروزرسانی متن پیام
+            logging.info("✅ داده‌های شیت بروزرسانی شد.")
             return
-
-    # اضافه کردن داده جدید اگر تاریخ وجود نداشت
-    new_row = [date, message_id, identifier, text]
-    sheet.append_row(new_row)
-
-
+    
+    # افزودن رکورد جدید در صورت عدم وجود تاریخ
+    sheet.append_row([date, message_id, identifier, text])
+    logging.info("✅ داده‌های جدید به شیت اضافه شدند.")
 
 
 
@@ -462,22 +476,30 @@ def get_last_messages(bot_token, chat_id, limit=5):
     return []
 
 
-
 def main():
-    # اتصال به Google Sheets
     try:
+        # اتصال به Google Sheets
         sheet = connect_to_google_sheets()
         initialize_google_sheet(sheet)
 
         # اطلاعات جدید برای افزودن به شیت
         update_date = JalaliDate.today().strftime("%Y-%m-%d")
-        message = prepare_final_message(category, lines, update_date)
         new_data = {
             "date": update_date,
             "message_id": "12345",
             "identifier": "ایموجی",
             "text": "این یک متن نمونه است"
         }
+
+        # به‌روزرسانی داده‌ها
+        update_google_sheet(
+            sheet,
+            new_data['date'],
+            new_data['message_id'],
+            new_data['identifier'],
+            new_data['text']
+        )
+
 
         # بررسی و به‌روزرسانی داده‌ها
         existing_data = sheet.get_all_records()
