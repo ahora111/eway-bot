@@ -598,7 +598,6 @@ def main():
 
 if should_send_final_message:
     # ساخت پیام نهایی + دکمه‌ها + ارسال
-
     final_message = (
         "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
         "✅اطلاعات واریز\n"
@@ -635,8 +634,7 @@ if should_send_final_message:
 
 else:
     logging.info("ℹ️ هیچ پیام جدیدی ارسال نشد، پیام نهایی فرستاده نشد.")
-
-            
+       
     except Exception as e:
         logging.error(f"❌ خطا: {e}")
     
