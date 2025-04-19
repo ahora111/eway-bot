@@ -261,6 +261,8 @@ def prepare_final_message(category_name, category_lines, update_date):
                 product_variants.append(line.strip())
                 i += 1
 
+
+    
     # افزودن آخرین محصول
     if current_product:
         formatted_lines.append(current_product)
@@ -275,6 +277,12 @@ def prepare_final_message(category_name, category_lines, update_date):
 
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
+
+
+    if 'text' not in new_data or not new_data['text']:
+    logging.error("❌ مقدار 'text' در داده جدید خالی یا نامعتبر است!")
+    
+    return None
 
     return final_message
 
@@ -389,13 +397,24 @@ def edit_telegram_message(bot_token, chat_id, message_id, new_text):
 def check_and_update_posts(sheet, new_data):
     data = sheet.get_all_records()
     for row in data:
+        if 'تاریخ' not in row or 'متن پیام' not in row:
+            logging.warning(f"⛔ کلیدهای لازم در ردیف وجود ندارد: {row}")
+            continue
+
         if row['تاریخ'] == new_data['date']:
             if row['متن پیام'] != new_data['text']:
                 edit_telegram_message(BOT_TOKEN, CHAT_ID, row['مسیج ایدی'], new_data['text'])
                 return "ویرایش انجام شد"
             else:
                 return "محتوا تغییری نداشته است"
+    
+    try:
+        initialize_google_sheet(sheet)
+    except Exception as e:
+        logging.error(f"❌ خطا در مقداردهی اولیه شیت: {e}")
+    
     return None
+
 
 def handle_new_posts(sheet, new_data):
     if not check_and_update_posts(sheet, new_data):  # اگر تاریخ پیدا نشد یا تغییری نبود
@@ -489,14 +508,17 @@ def main():
         models.extend(console_models)
 
         
-                # اتصال به Google Sheets
-        sheet = connect_to_google_sheets()
 
-        # بررسی داده‌های گوگل شیت
+        # آماده‌سازی داده‌ها
         update_date = JalaliDate.today().strftime("%Y-%m-%d")
-        new_data = {"date": update_date, "brands": brands, "models": models}
+        new_data = {
+            "date": update_date,
+            "message_id": None,  # مقدار message_id را در صورت وجود قرار دهید
+            "identifier": "ایموجی",  # شناسه‌ای که لازم دارید
+            "text": "اینجا می‌توانید متن پیام را بگذارید."
+        }
 
-        # مقایسه تاریخ و انجام عملیات لازم
+        # بررسی و به‌روزرسانی پیام‌ها
         result = check_and_update_posts(sheet, new_data)
         if result == "ویرایش انجام شد":
             logging.info("✅ پیام‌ها ویرایش شدند.")
