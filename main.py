@@ -485,13 +485,6 @@ def main():
         sheet = connect_to_google_sheets()
         initialize_google_sheet(sheet)
 
-        # اطلاعات جدید برای افزودن به شیت
-        update_date = JalaliDate.today().strftime("%Y-%m-%d")
-        new_data = {
-            "date": update_date,
-            "message_id": "12345",
-            "identifier": "ایموجی",
-            "text": "این یک متن است"
         }
 
         # به‌روزرسانی داده‌ها
