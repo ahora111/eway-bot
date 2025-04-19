@@ -379,6 +379,7 @@ def update_google_sheet(sheet, date, message_id, identifier, text):
 
 
 
+### توابع مدیریت تلگرام ###
 def edit_telegram_message(bot_token, chat_id, message_id, new_text):
     url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
     params = {
@@ -465,16 +466,39 @@ def get_last_messages(bot_token, chat_id, limit=5):
     return []
 
 
+
+### فرآیند اصلی ###
 def main():
     try:
-
+        # اتصال به Google Sheets
         sheet = connect_to_google_sheets()
         initialize_google_sheet(sheet)
 
-        driver = get_driver()
-        if not driver:
-            logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
-            return
+        # اطلاعات جدید برای افزودن به شیت
+        update_date = JalaliDate.today().strftime("%Y-%m-%d")
+        new_data = {
+            "date": update_date,
+            "message_id": "12345",
+            "identifier": "ایموجی",
+            "text": "این یک متن نمونه است"
+        }
+
+        # بررسی و به‌روزرسانی داده‌ها
+        existing_data = sheet.get_all_records()
+        for row in existing_data:
+            if row['تاریخ'] == new_data['date']:
+                if row['متن پیام'] != new_data['text']:
+                    edit_telegram_message(BOT_TOKEN, CHAT_ID, row['مسیج آی‌دی'], new_data['text'])
+                    return
+                else:
+                    logging.info("ℹ️ محتوا تغییری نداشته است.")
+                    return
+        
+        # در صورت وجود داده جدید
+        message_id = send_telegram_message(new_data['text'], BOT_TOKEN, CHAT_ID)
+        if message_id:
+            update_google_sheet(sheet, new_data['date'], message_id, new_data['identifier'], new_data['text'])
+
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
@@ -509,25 +533,7 @@ def main():
 
         
 
-        # آماده‌سازی داده‌ها
-        update_date = JalaliDate.today().strftime("%Y-%m-%d")
-        new_data = {
-            "date": update_date,
-            "message_id": None,  # مقدار message_id را در صورت وجود قرار دهید
-            "identifier": "ایموجی",  # شناسه‌ای که لازم دارید
-            "text": "اینجا می‌توانید متن پیام را بگذارید."
-        }
 
-        # بررسی و به‌روزرسانی پیام‌ها
-        result = check_and_update_posts(sheet, new_data)
-        if result == "ویرایش انجام شد":
-            logging.info("✅ پیام‌ها ویرایش شدند.")
-        elif result == "محتوا تغییری نداشته است":
-            logging.info("ℹ️ محتوای دسته بدون تغییر بود.")
-        else:
-            # ارسال پیام جدید در صورت تفاوت تاریخ
-            handle_new_posts(sheet, new_data)
-            
         driver.quit()
 
         # ذخیره message_id هر دسته‌بندی
