@@ -388,6 +388,9 @@ def update_sheet_data(sheet, emoji, message_id, text):
 def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
     today = JalaliDate.today().strftime("%Y-%m-%d")  # تاریخ امروز را بگیرید
     data = sheet_data.get(emoji)
+
+        # فرار دادن کاراکترها
+    escaped_text = escape_special_characters(message_text)
     
     if data and data['date'] == today:  # چک کردن تاریخ
         if data['text'] == message_text:  # چک کردن محتوا
