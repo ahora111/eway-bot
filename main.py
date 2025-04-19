@@ -577,18 +577,27 @@ def main():
         sheet = connect_to_sheet()
         sheet_data = load_sheet_data(sheet)
 
+        should_send_final_message = False
         message_ids = {}
+
 
         for emoji, lines in categorized.items():
             if not lines:
                 continue
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
-            msg_id = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet)
-            message_ids[emoji] = msg_id
+            result = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet)
 
-        if not message_ids.get("🔵"):
-            logging.error("❌ پیام سامسونگ ارسال نشد، دکمه اضافه نخواهد شد!")
-            return
+            if isinstance(result, int):  # یعنی پیام جدید ارسال شده
+                should_send_final_message = True
+                message_ids[emoji] = result
+            elif result == "edited":
+                message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")  # حفظ شناسه قدیمی
+            else:
+                # unchanged یا خطا
+                message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")
+
+        if should_send_final_message:
+            # ساخت پیام نهایی + دکمه‌ها + ارسال
 
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
@@ -623,7 +632,10 @@ def main():
                 ])
 
         send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
-
+        
+        else:
+            logging.info("ℹ️ هیچ پیام جدیدی ارسال نشد، پیام نهایی فرستاده نشد.")
+            
     except Exception as e:
         logging.error(f"❌ خطا: {e}")
 if __name__ == "__main__":
