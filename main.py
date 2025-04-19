@@ -463,10 +463,9 @@ def get_last_messages(bot_token, chat_id, limit=5):
 
 
 
-### فرآیند اصلی ###
 def main():
+    # اتصال به Google Sheets
     try:
-        # اتصال به Google Sheets
         sheet = connect_to_google_sheets()
         initialize_google_sheet(sheet)
 
@@ -485,16 +484,27 @@ def main():
             if row['تاریخ'] == new_data['date']:
                 if row['متن پیام'] != new_data['text']:
                     edit_telegram_message(BOT_TOKEN, CHAT_ID, row['مسیج آی‌دی'], new_data['text'])
+                    logging.info("✅ پیام ویرایش شد.")
                     return
                 else:
                     logging.info("ℹ️ محتوا تغییری نداشته است.")
                     return
-        
-        # در صورت وجود داده جدید
+
+        # ارسال پیام جدید و به‌روزرسانی داده‌ها
         message_id = send_telegram_message(new_data['text'], BOT_TOKEN, CHAT_ID)
         if message_id:
             update_google_sheet(sheet, new_data['date'], message_id, new_data['identifier'], new_data['text'])
 
+    except Exception as e:
+        logging.error(f"❌ خطا در عملیات Google Sheets: {e}")
+
+    # عملیات WebDriver
+    driver = None
+    try:
+        driver = get_driver()
+        if not driver:
+            logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
+            return
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
