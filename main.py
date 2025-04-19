@@ -471,6 +471,7 @@ def main():
 
         # اطلاعات جدید برای افزودن به شیت
         update_date = JalaliDate.today().strftime("%Y-%m-%d")
+        message = prepare_final_message(category, lines, update_date)
         new_data = {
             "date": update_date,
             "message_id": "12345",
@@ -557,6 +558,7 @@ def main():
                 processed_data.append(f"{model_str} {brands[i]}")
 
             update_date = JalaliDate.today().strftime("%Y-%m-%d")
+            message = prepare_final_message(category, lines, update_date)
             message_lines = []
             for row in processed_data:
                 decorated = decorate_line(row)
