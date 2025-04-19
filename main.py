@@ -354,7 +354,7 @@ def check_and_create_headers(sheet):
     
     # اگر هدرها موجود نباشند، اضافه می‌شود
     if first_row != headers:
-        sheet.update("A1:D1", [headers])
+        sheet.update(values=[headers], range_name="A1:D1")
         logging.info("✅ هدرها اضافه شدند.")
     else:
         logging.info("🔄 هدرها قبلاً موجود هستند.")
