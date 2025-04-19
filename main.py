@@ -485,44 +485,10 @@ def main():
         sheet = connect_to_google_sheets()
         initialize_google_sheet(sheet)
 
-        }
-
-        # به‌روزرسانی داده‌ها
-        update_google_sheet(
-            sheet,
-            new_data['date'],
-            new_data['message_id'],
-            new_data['identifier'],
-            new_data['text']
-        )
-
-
-        # بررسی و به‌روزرسانی داده‌ها
-        existing_data = sheet.get_all_records()
-        for row in existing_data:
-            if row['تاریخ'] == new_data['date']:
-                if row['متن پیام'] != new_data['text']:
-                    edit_telegram_message(BOT_TOKEN, CHAT_ID, row['مسیج آی‌دی'], new_data['text'])
-                    logging.info("✅ پیام ویرایش شد.")
-                    return
-                else:
-                    logging.info("ℹ️ محتوا تغییری نداشته است.")
-                    return
-
-        # ارسال پیام جدید و به‌روزرسانی داده‌ها
-        message_id = send_telegram_message(new_data['text'], BOT_TOKEN, CHAT_ID)
-        if message_id:
-            update_google_sheet(sheet, new_data['date'], message_id, new_data['identifier'], new_data['text'])
-
-    except Exception as e:
-        logging.error(f"❌ خطا در عملیات Google Sheets: {e}")
-
-    # عملیات WebDriver
-    driver = None
-    try:
+        # استخراج داده‌ها از سایت
         driver = get_driver()
         if not driver:
-            logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
+            logging.error("❌ WebDriver ایجاد نشد.")
             return
         
         driver.get('https://hamrahtel.com/quick-checkout?category=mobile')
