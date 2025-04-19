@@ -461,6 +461,29 @@ def get_last_update_date():
         logging.error(f"❌ خطا در بازیابی تاریخ آخرین به‌روزرسانی: {e}")
         return None
 
+def clear_and_update_sheet(data):
+    try:
+        # اتصال به شیت
+        ws = get_worksheet()
+        if not ws:
+            logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
+            return
+        
+        # پاک کردن داده‌های موجود (همه سلول‌ها)
+        ws.clear()
+        logging.info("✅ شیت پاک‌سازی شد.")
+
+        # اضافه کردن هدرها (در صورت نیاز)
+        headers = ["Brand", "Model"]
+        ws.append_row(headers)
+        logging.info("✅ هدرها اضافه شدند.")
+
+        # وارد کردن داده‌های جدید
+        for row in data:
+            ws.append_row(row)
+        logging.info("✅ داده‌های جدید با موفقیت اضافه شدند.")
+    except Exception as e:
+        logging.error(f"❌ خطا در به‌روزرسانی شیت: {e}")
 
 def main():
     try:
@@ -527,6 +550,13 @@ def send_new_posts(driver, today):
         brands.extend(console_brands)
         models.extend(console_models)
 
+
+                # ساخت داده‌ها برای شیت
+        data = [[brands[i], models[i]] for i in range(len(brands))]
+        
+        # به‌روزرسانی شیت
+        clear_and_update_sheet(data)
+        
         driver.quit()
 
         # ایجاد و ارسال پیام‌ها
