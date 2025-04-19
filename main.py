@@ -406,6 +406,10 @@ def handle_new_posts(sheet, new_data):
 
 
 def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
+    if not message or not isinstance(message, str):  # بررسی وجود مقدار مناسب
+        logging.error("❌ پارامتر 'text' برای پیام تلگرام خالی یا نامعتبر است!")
+        return None
+
     message_parts = split_message(message)
     last_message_id = None
     for part in message_parts:
@@ -417,19 +421,20 @@ def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
             "parse_mode": "MarkdownV2"
         }
         if reply_markup:
-            params["reply_markup"] = json.dumps(reply_markup)  # ✅ تبدیل `reply_markup` به JSON
+            params["reply_markup"] = json.dumps(reply_markup)
 
-        headers = {"Content-Type": "application/json"}  # ✅ اضافه کردن `headers` برای `POST`
-        response = requests.post(url, json=params, headers=headers)  
+        logging.info(f"📩 ارسال پیام با این پارامترها: {params}")
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(url, json=params, headers=headers)
         response_data = response.json()
         if response_data.get('ok'):
             last_message_id = response_data["result"]["message_id"]
         else:
-            logging.error(f"❌ خطا در ارسال پیام: {response_data}")
+            logging.error(f"❌ خطا در ارسال پیام تلگرام: {response_data}")
             return None
 
-    logging.info("✅ پیام ارسال شد!")
-    return last_message_id  # برگشت message_id آخرین پیام
+    logging.info("✅ پیام با موفقیت ارسال شد.")
+    return last_message_id
 
 
 def get_last_messages(bot_token, chat_id, limit=5):
