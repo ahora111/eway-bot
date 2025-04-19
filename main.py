@@ -27,29 +27,7 @@ CHAT_ID = "-1002505490886"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-# دریافت ساعت کنونی
-def get_current_time():
-    # دریافت ساعت به فرمت HH:MM
-    current_time = datetime.now().strftime("%H:%M")
-    return current_time
 
-# اضافه کردن ساعت به دسته‌بندی‌ها در فرآیند ارسال پیام
-def categorize_messages_with_time(messages):
-    categorized = {}
-    current_time = get_current_time()  # دریافت ساعت کنونی
-    for message in messages:
-        # در اینجا می‌توانید با توجه به ساعت، دسته‌بندی پیام‌ها را انجام دهید
-        # برای مثال اگر ساعت 10:00 یا قبل از آن باشد، آن را در دسته "صبح" قرار دهید
-        if current_time < "12:00":
-            category = "صبح"
-        else:
-            category = "بعدازظهر"
-        
-        if category not in categorized:
-            categorized[category] = []
-        categorized[category].append(message)
-    
-    return categorized
     
 
 def get_driver():
@@ -207,13 +185,26 @@ def remove_extra_blank_lines(lines):
 
     return cleaned_lines
     
+from datetime import datetime
+from persiantools.jdatetime import JalaliDate
+
+# تابع برای دریافت ساعت کنونی به شمسی
+def get_current_time():
+    # دریافت ساعت میلادی به فرمت HH:MM
+    current_time = datetime.now().strftime("%H:%M")
+    
+    # تبدیل ساعت میلادی به شمسی
+    current_time_jalali = JalaliDate.today().strftime('%H:%M')
+    
+    return current_time_jalali
+
 def prepare_final_message(category_name, category_lines, update_date):
     # گرفتن عنوان دسته از روی ایموجی
     category_title = get_category_name(category_name)
     
     # دریافت تاریخ امروز به شمسی
     update_date = JalaliDate.today().strftime("%Y/%m/%d")
-    # دریافت ساعت کنونی
+    # دریافت ساعت کنونی به شمسی
     current_time = get_current_time()
 
     # تعریف نگاشت برای روزهای هفته به فارسی
@@ -235,8 +226,7 @@ def prepare_final_message(category_name, category_lines, update_date):
 
     # ساخت هدر پیام
     header = (
-        f"🗓 بروزرسانی {update_date_formatted}\n"
-        f"🕓 ساعت: {current_time}\n"  # اضافه کردن ساعت به هدر
+        f"🗓 بروزرسانی {update_date_formatted} 🕓 ساعت: {current_time}\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
         f"⬅️ موجودی {category_title} ➡️\n\n"
     )
@@ -287,6 +277,7 @@ def prepare_final_message(category_name, category_lines, update_date):
     final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
 
     return final_message
+
     
 
 # این تابع کمکی برای گرفتن اسم دسته‌بندی‌ها
