@@ -368,23 +368,20 @@ def load_sheet_data(sheet):
             }
     return data
 
-# ذخیره/به‌روزرسانی اطلاعات دسته در Google Sheet
 def update_sheet_data(sheet, emoji, message_id, text):
-    records = sheet.get_all_records()
     today = JalaliDate.today().strftime("%Y-%m-%d")
-    updated = False
-    for idx, row in enumerate(records, start=2):  # row 1 is header
-        if row.get("emoji") == emoji:
-            sheet.update(f"A{idx}", today)
-            sheet.update(f"B{idx}", message_id)
-            sheet.update(f"C{idx}", emoji)
-            sheet.update(f"D{idx}", text)
-            updated = True
-            break
-    if not updated:
-        sheet.append_row([today, message_id, emoji, text])
+    records = sheet.get_all_records()
+    found = False
 
-# ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
+    for i, row in enumerate(records, start=2):  # سطر 1 برای هدره
+        if row.get("emoji") == emoji:
+            sheet.update(f"A{i}", [[emoji, today, message_id, text]])
+            found = True
+            break
+
+    if not found:
+        sheet.append_row([emoji, today, message_id, text])
+
 
 # ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
 def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
