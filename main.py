@@ -202,27 +202,27 @@ def remove_extra_blank_lines(lines):
 
     return cleaned_lines
     
-def prepare_final_message(category_name, category_lines, update_date):
-        # گرفتن عنوان دسته از روی ایموجی
+def prepare_final_message(category_name, category_lines):
+    # گرفتن عنوان دسته از روی ایموجی
     category_title = get_category_name(category_name)
+
     # دریافت تاریخ امروز به شمسی
     update_date = JalaliDate.today().strftime("%Y/%m/%d")
     # تعریف نگاشت برای روزهای هفته به فارسی
     weekday_mapping = {
-            "Saturday": "شنبه💪",
-            "Sunday": "یکشنبه😃",
-            "Monday": "دوشنبه☺️",
-            "Tuesday": "سه شنبه🥱",
-            "Wednesday": "چهارشنبه😕",
-            "Thursday": "پنج شنبه☺️",
-            "Friday": "جمعه😎"
+        "Saturday": "شنبه💪",
+        "Sunday": "یکشنبه😃",
+        "Monday": "دوشنبه☺️",
+        "Tuesday": "سه شنبه🥱",
+        "Wednesday": "چهارشنبه😕",
+        "Thursday": "پنج شنبه☺️",
+        "Friday": "جمعه😎"
     }
     weekday_english = JalaliDate.today().weekday()  # گرفتن ایندکس روز هفته
     weekday_farsi = list(weekday_mapping.values())[weekday_english]  # تبدیل ایندکس به روز فارسی
     update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
 
-    print(f"نام روز هفته به انگلیسی: {weekday_english}")
-    print(update_date_formatted)  # برای تست
+    logging.info(f"📅 تاریخ بروزرسانی: {update_date_formatted}")  # لاگ تست
 
     # ساخت هدر پیام
     header = (
@@ -261,15 +261,13 @@ def prepare_final_message(category_name, category_lines, update_date):
                 product_variants.append(line.strip())
                 i += 1
 
-
-    
     # افزودن آخرین محصول
     if current_product:
         formatted_lines.append(current_product)
         if product_variants:
             formatted_lines.extend(product_variants)
 
-    # حذف | از سطرهایی که ایموجی دارند
+    # حذف خطوط ناقص با | در سطرهای دارای ایموجی
     formatted_lines = [
         line for line in formatted_lines
         if not any(emoji in line for emoji in ["🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮"]) or "|" not in line
@@ -278,9 +276,9 @@ def prepare_final_message(category_name, category_lines, update_date):
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
 
+    return final_message
 
-    if 'text' not in new_data or not new_data['text']:
-    logging.error("❌ مقدار 'text' در داده جدید خالی یا نامعتبر است!")
+
     
     return None
 
