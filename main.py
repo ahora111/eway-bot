@@ -130,16 +130,14 @@ def process_model(model_str):
 
 
 
-def escape_markdown(text):
+
+
+def escape_special_characters(text):
+    # فرار دادن کاراکترهای خاص برای MarkdownV2
     escape_chars = ['\\', '(', ')', '[', ']', '~', '*', '_', '-', '+', '>', '#', '.', '!', '|']
     for char in escape_chars:
         text = text.replace(char, '\\' + char)
     return text
-
-
-def escape_special_characters(text):
-    # فرار دادن کاراکتر '|' و دیگر کاراکترهای خاص
-    return re.sub(r'([|])', r'\\\1', text)
 
 
 
