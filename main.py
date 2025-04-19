@@ -9,6 +9,7 @@ import sys
 import base64
 import gspread
 import re
+from pytz import timezone
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from datetime import datetime, time as dt_time
@@ -185,18 +186,17 @@ def remove_extra_blank_lines(lines):
 
     return cleaned_lines
     
-from datetime import datetime
-from persiantools.jdatetime import JalaliDate
 
-# تابع برای دریافت ساعت کنونی به شمسی
+# تابع برای دریافت ساعت دقیق ایران به شمسی
 def get_current_time():
-    # دریافت ساعت میلادی به فرمت HH:MM
-    current_time = datetime.now().strftime("%H:%M")
+    # زمان ایران (تهران)
+    iran_tz = timezone('Asia/Tehran')
+    iran_time = datetime.now(iran_tz)
     
-    # تبدیل ساعت میلادی به شمسی
-    current_time_jalali = JalaliDate.today().strftime('%H:%M')
+    # تبدیل به فرمت ساعت و دقیقه
+    current_time = iran_time.strftime('%H:%M')  # ساعت به صورت 24 ساعته
     
-    return current_time_jalali
+    return current_time
 
 def prepare_final_message(category_name, category_lines, update_date):
     # گرفتن عنوان دسته از روی ایموجی
