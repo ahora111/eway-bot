@@ -464,11 +464,12 @@ def clear_and_update_sheet(data):
         headers = [["Brand", "Model"]]  # هدرها
         data_to_write = headers + data
 
-        # ارسال داده‌ها به صورت دسته‌ای
-        ws.update('A1', data_to_write)
+        # ارسال داده‌ها به صورت دسته‌ای با استفاده از پارامترهای نام‌گذاری‌شده
+        ws.update(values=data_to_write, range_name='A1')
         logging.info("✅ داده‌ها با موفقیت به‌روزرسانی شدند.")
     except Exception as e:
         logging.error(f"❌ خطا در به‌روزرسانی شیت: {e}")
+
 
         
 def get_last_update_date():
