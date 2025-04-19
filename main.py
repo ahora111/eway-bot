@@ -385,24 +385,26 @@ def update_sheet_data(sheet, emoji, message_id, text):
         sheet.append_row([today, message_id, emoji, text])
 
 # ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
-def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
-    today = JalaliDate.today().strftime("%Y-%m-%d")  # تاریخ امروز را بگیرید
-    data = sheet_data.get(emoji)
 
-        # فرار دادن کاراکترها
-    escaped_text = escape_special_characters(message_text)
+# ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
+def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
+    today = JalaliDate.today().strftime("%Y-%m-%d")
+    data = sheet_data.get(emoji)
     
-    if data and data['date'] == today:  # چک کردن تاریخ
-        if data['text'] == message_text:  # چک کردن محتوا
+    # فرار دادن کاراکترها
+    escaped_text = escape_special_characters(message_text)
+
+    if data and data['date'] == today:
+        if data['text'] == message_text:
             logging.info(f"🔁 [{emoji}] محتوای پیام تغییری نکرده است.")
             return data['message_id']
 
-        # ویرایش پیام اگر محتوا تغییر کرده باشد
+        # ویرایش پیام
         edit_url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
         params = {
             "chat_id": chat_id,
             "message_id": data['message_id'],
-            "text": message_text,
+            "text": escaped_text,
             "parse_mode": "MarkdownV2"
         }
         response = requests.post(edit_url, json=params)
@@ -414,11 +416,11 @@ def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sh
             logging.error(f"❌ [{emoji}] خطا در ویرایش: {response.text}")
             return None
 
-    # اگر تاریخ تغییر کرده یا پیام قبلاً ارسال نشده، پیام جدید ارسال کنید
+    # ارسال پیام جدید
     send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     params = {
         "chat_id": chat_id,
-        "text": message_text,
+        "text": escaped_text,
         "parse_mode": "MarkdownV2"
     }
     response = requests.post(send_url, json=params)
