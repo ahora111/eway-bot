@@ -6,6 +6,9 @@ import logging
 import json
 import pytz
 import sys
+import gspread
+from google.oauth2.service_account import Credentials
+from datetime import datetime
 from datetime import datetime, time as dt_time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -318,6 +321,68 @@ def categorize_messages(lines):
         categories[category] = remove_extra_blank_lines(categories[category])  # حذف خطوط خالی
 
     return categories
+
+
+
+
+def connect_to_google_sheets():
+    credentials = Credentials.from_service_account_file('GSHEET_CREDENTIALS_JSON', scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    client = gspread.authorize(credentials)
+    sheet = client.open_by_key('1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E').worksheet('Sheet1')
+    return sheet
+
+def update_google_sheet(sheet, date, message_id, identifier, text):
+    data = sheet.get_all_records()
+    for i, row in enumerate(data):
+        if row['تاریخ'] == date:  # بررسی تاریخ
+            sheet.update_cell(i + 2, 2, message_id)  # بروزرسانی مسیج آی‌دی
+            sheet.update_cell(i + 2, 3, identifier)  # بروزرسانی شناسه
+            sheet.update_cell(i + 2, 4, text)  # بروزرسانی متن پیام
+            return
+
+    # اضافه کردن داده جدید اگر تاریخ وجود نداشت
+    new_row = [date, message_id, identifier, text]
+    sheet.append_row(new_row)
+
+sheet = connect_to_google_sheets()
+update_google_sheet(sheet, '2025-04-19', '12345', 'ایموجی', 'این یک متن نمونه است')
+
+
+
+
+def edit_telegram_message(bot_token, chat_id, message_id, new_text):
+    url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+    params = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": new_text,
+        "parse_mode": "MarkdownV2"
+    }
+    response = requests.post(url, json=params)
+    if response.json().get("ok"):
+        logging.info("✅ پیام تلگرام با موفقیت ویرایش شد.")
+    else:
+        logging.error(f"❌ خطا در ویرایش پیام: {response.json()}")
+
+# اینجا تابعی می‌نویسیم که داده را از شیت بخواند و مقایسه کند
+def check_and_update_posts(sheet, new_data):
+    data = sheet.get_all_records()
+    for row in data:
+        if row['تاریخ'] == new_data['date']:
+            if row['متن پیام'] != new_data['text']:
+                edit_telegram_message(BOT_TOKEN, CHAT_ID, row['مسیج ایدی'], new_data['text'])
+                return "ویرایش انجام شد"
+            else:
+                return "محتوا تغییری نداشته است"
+    return None
+
+def handle_new_posts(sheet, new_data):
+    if not check_and_update_posts(sheet, new_data):  # اگر تاریخ پیدا نشد یا تغییری نبود
+        send_telegram_message(new_data['text'], BOT_TOKEN, CHAT_ID)
+        update_google_sheet(sheet, new_data['date'], new_data['message_id'], new_data['identifier'], new_data['text'])
+        logging.info("✅ پیام جدید ارسال شد و داده‌ها به شیت اضافه شدند.")
+
+
 
 def send_telegram_message(message, bot_token, chat_id, reply_markup=None):
     message_parts = split_message(message)
