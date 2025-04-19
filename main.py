@@ -354,6 +354,21 @@ def connect_to_sheet():
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
     return sheet
 
+def check_and_create_headers(sheet):
+    # گرفتن داده‌های سطر اول
+    first_row = sheet.get_all_values()[0] if sheet.get_all_values() else []
+    
+    # تعریف هدرها
+    headers = ["emoji", "date", "message_id", "text"]
+    
+    # اگر هدرها موجود نباشند، اضافه می‌شود
+    if first_row != headers:
+        sheet.update("A1:D1", [headers])
+        logging.info("✅ هدرها اضافه شدند.")
+    else:
+        logging.info("🔄 هدرها قبلاً موجود هستند.")
+
+
 # خواندن داده‌های موجود از Google Sheet (به‌صورت dict با کلید emoji)
 def load_sheet_data(sheet):
     records = sheet.get_all_records()
@@ -476,6 +491,12 @@ def get_last_messages(bot_token, chat_id, limit=5):
 
 def main():
     try:
+        # اتصال به Google Sheet
+        sheet = connect_to_sheet()
+
+        # بررسی و اضافه کردن هدرها در صورت نیاز
+        check_and_create_headers(sheet)
+        
         driver = get_driver()
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
