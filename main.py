@@ -221,8 +221,7 @@ def prepare_final_message(category_name, category_lines, update_date):
     weekday_farsi = list(weekday_mapping.values())[weekday_english]  # تبدیل ایندکس به روز فارسی
     update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
 
-    print(f"نام روز هفته به انگلیسی: {weekday_english}")
-    print(update_date_formatted)  # برای تست
+
 
     # ساخت هدر پیام
     header = (
