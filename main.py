@@ -388,6 +388,9 @@ def update_sheet_data(sheet, emoji, message_id, text):
 def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
     today = JalaliDate.today().strftime("%Y-%m-%d")
     data = sheet_data.get(emoji)
+
+    # فرار دادن کاراکترهای خاص
+    message_text = escape_special_characters(message_text)
     
     if data and data['date'] == today:
         if data['text'] == message_text:
@@ -428,6 +431,7 @@ def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sh
     else:
         logging.error(f"❌ [{emoji}] خطا در ارسال پیام: {response.text}")
         return None
+
 
 
 
