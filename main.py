@@ -76,13 +76,12 @@ def scroll_page(driver, scroll_pause_time=3):
         last_height = new_height
 
 
+
 def extract_product_data(driver, valid_brands):
     product_elements = driver.find_elements(By.CLASS_NAME, 'mantine-Text-root')
     brands, models = [], []
     for product in product_elements:
-        # استخراج و فیلتر داده‌ها
-        name = product.text.strip().replace("تومان", "").replace("نامشخص", "").strip()
-        logging.info(f"🛠 محصول استخراج‌شده: {name}")
+        name = product.text.strip().replace("تومانءء", "").replace("تومان", "").replace("نامشخص", "").replace("جستجو در مدل‌ها", "").strip()
         parts = name.split()
         brand = parts[0] if len(parts) >= 2 else name
         model = " ".join(parts[1:]) if len(parts) >= 2 else ""
@@ -90,10 +89,17 @@ def extract_product_data(driver, valid_brands):
             brands.append(brand)
             models.append(model)
         else:
+            models.append(brand + " " + model)
             brands.append("")
-            models.append(name)  # نام کامل محصول بدون فیلتر برند
-    return brands, models
 
+    return brands[25:], models[25:]
+
+def is_number(model_str):
+    try:
+        float(model_str.replace(",", ""))
+        return True
+    except ValueError:
+        return False
 
 def is_number(model_str):
     try:
