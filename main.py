@@ -333,22 +333,19 @@ def categorize_messages(lines):
     return categories
 
 
-
 def connect_to_google_sheets():
-    # دریافت سکرت از متغیر محیطی
     json_credentials = os.getenv("GSHEET_CREDENTIALS_JSON")
     if not json_credentials:
         raise FileNotFoundError("❌ فایل JSON سکرت گوگل شیت یافت نشد. مطمئن شوید سکرت به درستی تنظیم شده باشد.")
     
-    # ذخیره سکرت در فایل موقت (اختیاری برای Google API)
+    # ذخیره سکرت در فایل موقت
     with open("temp_gsheet_credentials.json", "w") as temp_file:
         temp_file.write(json_credentials)
     
     credentials = Credentials.from_service_account_file('temp_gsheet_credentials.json', scopes=["https://www.googleapis.com/auth/spreadsheets"])
     client = gspread.authorize(credentials)
-    sheet = client.open_by_key('1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E').worksheet('Sheet1')
+    sheet = client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
     
-    # حذف فایل موقت برای امنیت بیشتر
     os.remove("temp_gsheet_credentials.json")
     return sheet
 
@@ -357,6 +354,7 @@ def initialize_google_sheet(sheet):
     if not sheet.get_all_records():
         sheet.append_row(headers)
         logging.info("✅ شیت مقداردهی اولیه شد.")
+
 
 def update_google_sheet(sheet, date, message_id, identifier, text):
     data = sheet.get_all_records()  # داده‌های کامل شیت
