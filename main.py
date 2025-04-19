@@ -433,22 +433,6 @@ def edit_telegram_message(message_id, new_text, current_text):
     except Exception as e:
         logging.error(f"❌ خطا در فراخوانی editMessageText: {e}")
 
-
-def check_and_add_headers():
-    try:
-        # اتصال به شیت
-        ws = get_worksheet()
-        rows = ws.get_all_values()
-        
-        # بررسی اینکه آیا شیت خالی است یا اینکه هدرها موجود هستند
-        if not rows or rows[0] != ["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"]:
-            ws.insert_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"], 1)  # اضافه کردن هدر به سطر اول
-            logging.info("✅ هدرها به Google Sheets اضافه شدند.")
-        else:
-            logging.info("✅ هدرها موجود هستند و نیاز به تغییر ندارند.")
-    except Exception as e:
-        logging.error(f"❌ خطا در بررسی یا ایجاد هدرها: {e}")
-        
 def clear_and_update_sheet(data):
     try:
         ws = get_worksheet()
@@ -469,6 +453,23 @@ def clear_and_update_sheet(data):
         logging.info("✅ داده‌ها با موفقیت به‌روزرسانی شدند.")
     except Exception as e:
         logging.error(f"❌ خطا در به‌روزرسانی شیت: {e}")
+        
+def check_and_add_headers():
+    try:
+        # اتصال به شیت
+        ws = get_worksheet()
+        rows = ws.get_all_values()
+        
+        # بررسی اینکه آیا شیت خالی است یا اینکه هدرها موجود هستند
+        if not rows or rows[0] != ["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"]:
+            ws.insert_row(["تاریخ", "شناسه پیام", "دسته‌بندی", "متن پیام"], 1)  # اضافه کردن هدر به سطر اول
+            logging.info("✅ هدرها به Google Sheets اضافه شدند.")
+        else:
+            logging.info("✅ هدرها موجود هستند و نیاز به تغییر ندارند.")
+    except Exception as e:
+        logging.error(f"❌ خطا در بررسی یا ایجاد هدرها: {e}")
+        
+
 
 
         
