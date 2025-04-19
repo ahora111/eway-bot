@@ -451,27 +451,25 @@ def check_and_add_headers():
         
 def clear_and_update_sheet(data):
     try:
-        # اتصال به شیت
         ws = get_worksheet()
         if not ws:
             logging.error("❌ امکان اتصال به Google Sheets وجود ندارد.")
             return
         
-        # پاک کردن داده‌های موجود (همه سلول‌ها)
+        # پاک کردن شیت
         ws.clear()
         logging.info("✅ شیت پاک‌سازی شد.")
 
-        # اضافه کردن هدرها (در صورت نیاز)
-        headers = ["Brand", "Model"]
-        ws.append_row(headers)
-        logging.info("✅ هدرها اضافه شدند.")
+        # آماده‌سازی داده‌ها برای ارسال دسته‌ای
+        headers = [["Brand", "Model"]]  # هدرها
+        data_to_write = headers + data
 
-        # وارد کردن داده‌های جدید
-        for row in data:
-            ws.append_row(row)
-        logging.info("✅ داده‌های جدید با موفقیت اضافه شدند.")
+        # ارسال داده‌ها به صورت دسته‌ای
+        ws.update('A1', data_to_write)
+        logging.info("✅ داده‌ها با موفقیت به‌روزرسانی شدند.")
     except Exception as e:
         logging.error(f"❌ خطا در به‌روزرسانی شیت: {e}")
+
         
 def get_last_update_date():
     try:
