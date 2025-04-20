@@ -417,39 +417,56 @@ def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, s
         logging.error(f"❌ [{emoji}] خطا در ارسال پیام: {response.text}")
         return None
 
-def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
-    """
-    ارسال یا ویرایش پیام بر اساس اطلاعات روز و ذخیره در Google Sheet
-    """
-    today = JalaliDate.today().strftime("%Y-%m-%d")
-    data = sheet_data.get(emoji)
 
-    escaped_text = escape_special_characters(message_text)
+def send_or_edit_message(emoji, message, bot_token, chat_id, sheet_data, sheet):
+    try:
+        # اگر شناسه پیام قبلاً در شیت موجود باشد، سعی در ویرایش پیام داریم
+        message_id = sheet_data.get(emoji, {}).get("message_id")
 
-    if data and data.get("date") == today:
-        if data.get("text") == message_text:
-            logging.info(f"🔁 [{emoji}] محتوای پیام تغییری نکرده است.")
-            return data.get("message_id")
+        if message_id:
+            # ویرایش پیام
+            url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+            payload = {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": message,
+                "parse_mode": "HTML"
+            }
+            response = requests.post(url, data=payload).json()
 
-        # تلاش برای ویرایش پیام
-        edit_url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
-        params = {
+            if response.get("ok"):
+                logging.info(f"✅ پیام {emoji} ویرایش شد.")
+                return "edited"  # پیام با موفقیت ویرایش شد
+            else:
+                error_description = response.get("description", "")
+                if "message to edit not found" in error_description:
+                    logging.warning(f"📛 [${emoji}] پیام ویرایش‌شده پیدا نشد. ارسال پیام جدید.")
+                    # پیام جدید ارسال می‌شود
+                else:
+                    logging.error(f"❌ [${emoji}] خطا در ویرایش پیام: {error_description}")
+                    return "error"  # خطای نامشخص در ویرایش
+
+        # ارسال پیام جدید
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {
             "chat_id": chat_id,
-            "message_id": data.get("message_id"),
-            "text": escaped_text,
-            "parse_mode": "MarkdownV2"
+            "text": message,
+            "parse_mode": "HTML"
         }
+        response = requests.post(url, data=payload).json()
 
-        response = requests.post(edit_url, json=params)
-        if response.ok:
-            logging.info(f"✅ [{emoji}] پیام ویرایش شد.")
-            update_sheet_data(sheet, emoji, data.get("message_id"), message_text)
-            return data.get("message_id")
+        if response.get("ok"):
+            new_message_id = response["result"]["message_id"]
+            logging.info(f"📤 پیام جدید ارسال شد: {emoji}")
+            return new_message_id  # شناسه پیام جدید برگشت
+
         else:
-            logging.error(f"❌ [{emoji}] خطا در ویرایش: {response.json()}")
-            logging.warning(f"📛 [{emoji}] پیام نامعتبر است، ارسال پیام جدید به‌جای ویرایش")
-            # ارسال پیام جدید در هر صورت
-            return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
+            logging.error(f"❌ خطا در ارسال پیام جدید: {response.get('description')}")
+            return "error"  # خطای ارسال پیام جدید
+
+    except Exception as e:
+        logging.error(f"❌ خطا در ارسال/ویرایش پیام {emoji}: {e}")
+        return "error"  # خطای عمومی
 
     # اگر پیامی برای امروز وجود ندارد
     return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
