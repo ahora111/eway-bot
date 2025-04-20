@@ -441,22 +441,17 @@ def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sh
         }
 
         response = requests.post(edit_url, json=params)
-
         if response.ok:
             logging.info(f"✅ [{emoji}] پیام ویرایش شد.")
             update_sheet_data(sheet, emoji, data.get("message_id"), message_text)
             return data.get("message_id")
         else:
-            error_data = response.json()
-            logging.error(f"❌ [{emoji}] خطا در ویرایش: {error_data}")
+            logging.error(f"❌ [{emoji}] خطا در ویرایش: {response.json()}")
+            logging.warning(f"📛 [{emoji}] پیام نامعتبر است، ارسال پیام جدید به‌جای ویرایش")
+            # ارسال پیام جدید در هر صورت
+            return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
 
-            if error_data.get("error_code") == 400 and "MESSAGE_ID_INVALID" in error_data.get("description", ""):
-                logging.warning(f"📛 [{emoji}] پیام نامعتبر است، ارسال پیام جدید به‌جای ویرایش")
-                return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
-
-            return None
-
-    # اگر برای امروز پیامی وجود ندارد → پیام جدید ارسال شود
+    # اگر پیامی برای امروز وجود ندارد
     return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
 
 
