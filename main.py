@@ -389,9 +389,6 @@ def update_sheet_data(sheet, emoji, message_id, text):
         sheet.append_row([emoji, today, message_id, text])
 
 
-
-
-
 # ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
 def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet):
     """
@@ -416,6 +413,7 @@ def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, s
     else:
         logging.error(f"❌ [{emoji}] خطا در ارسال پیام: {response.text}")
         return None
+
 
 # ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
 def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet):
