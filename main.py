@@ -417,6 +417,31 @@ def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, s
         logging.error(f"❌ [{emoji}] خطا در ارسال پیام: {response.text}")
         return None
 
+# ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
+def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet):
+    """
+    ارسال پیام جدید و ثبت اطلاعات آن در Google Sheet
+    """
+    escaped_text = escape_special_characters(message_text)
+
+    send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    params = {
+        "chat_id": chat_id,
+        "text": escaped_text,
+        "parse_mode": "MarkdownV2"
+    }
+
+    response = requests.post(send_url, json=params)
+
+    if response.ok:
+        message_id = response.json()["result"]["message_id"]
+        logging.info(f"📤 [{emoji}] پیام جدید ارسال شد.")
+        update_sheet_data(sheet, emoji, message_id, message_text)
+        return message_id
+    else:
+        logging.error(f"❌ [{emoji}] خطا در ارسال پیام: {response.text}")
+        return None
+
 
 def send_or_edit_message(emoji, message, bot_token, chat_id, sheet_data, sheet):
     try:
@@ -440,11 +465,11 @@ def send_or_edit_message(emoji, message, bot_token, chat_id, sheet_data, sheet):
             else:
                 error_description = response.get("description", "")
                 if "message to edit not found" in error_description:
-                    logging.warning(f"📛 [${emoji}] پیام ویرایش‌شده پیدا نشد. ارسال پیام جدید.")
+                    logging.warning(f"📛 [{emoji}] پیام ویرایش‌شده پیدا نشد. ارسال پیام جدید.")
                     # پیام جدید ارسال می‌شود
                     return send_new_message_and_update_sheet(emoji, message, bot_token, chat_id, sheet)
                 else:
-                    logging.error(f"❌ [${emoji}] خطا در ویرایش پیام: {error_description}")
+                    logging.error(f"❌ [{emoji}] خطا در ویرایش پیام: {error_description}")
                     return "error"  # خطای نامشخص در ویرایش
 
         # اگر پیامی برای امروز وجود ندارد، پیام جدید ارسال می‌شود
@@ -453,6 +478,7 @@ def send_or_edit_message(emoji, message, bot_token, chat_id, sheet_data, sheet):
     except Exception as e:
         logging.error(f"❌ خطا در ارسال/ویرایش پیام {emoji}: {e}")
         return "error"  # خطای عمومی
+
 
 
 
