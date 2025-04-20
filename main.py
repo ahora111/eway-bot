@@ -556,14 +556,17 @@ def main():
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
             result = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet)
 
-            if isinstance(result, int):  # یعنی پیام جدید ارسال شده
+            result = send_or_edit_message(...)
+
+            if isinstance(result, int):  # پیام جدید ارسال شده
                 should_send_final_message = True
                 message_ids[emoji] = result
             elif result == "edited":
-                message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")  # حفظ شناسه قدیمی
-            else:
-                # unchanged یا خطا
                 message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")
+            else:
+                # اگر result == "unchanged" یا None یا error
+                message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")
+
 
         if should_send_final_message:
             # ساخت پیام نهایی + دکمه‌ها + ارسال
