@@ -550,20 +550,54 @@ def main():
         should_send_final_message = False
         message_ids = {}
 
-        for emoji, lines in categorized.items():
-            if not lines:
-                continue
+        for emoji, lines in categorized_messages.items():
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
             result = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet)
 
             if isinstance(result, int):  # یعنی پیام جدید ارسال شده
                 should_send_final_message = True
                 message_ids[emoji] = result
-            elif result == "edited":
-                message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")  # حفظ شناسه قدیمی
             else:
-                # unchanged یا خطا
                 message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")
+
+if should_send_final_message:
+    # ساخت پیام نهایی + دکمه‌ها + ارسال
+    final_message = (
+        "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
+        "✅اطلاعات واریز\n"
+        "🔷 شماره شبا : IR970560611828006154229701\n"
+        "🔷 شماره کارت : 6219861812467917\n"
+        "🔷 بلو بانک   حسین گرئی\n\n"
+        "⭕️ حتما رسید واریز به ایدی تلگرام زیر ارسال شود .\n"
+        "🆔 @lhossein1\n\n"
+        "✅شماره تماس ثبت سفارش :\n"
+        "📞 09371111558\n"
+        "📞 09386373926\n"
+        "📞 09308529712\n"
+        "📞 028-3399-1417"
+    )
+
+    button_markup = {"inline_keyboard": []}
+    emoji_labels = {
+        "🔵": "📱 لیست سامسونگ",
+        "🟡": "📱 لیست شیائومی",
+        "🍏": "📱 لیست آیفون",
+        "💻": "💻 لیست لپ‌تاپ",
+        "🟠": "📱 لیست تبلت",
+        "🎮": "🎮 کنسول بازی"
+    }
+
+    for emoji, label in emoji_labels.items():
+        msg_id = message_ids.get(emoji)
+        if msg_id:
+            button_markup["inline_keyboard"].append([
+                {"text": label, "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
+            ])
+
+    send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
+
+else:
+    logging.info("ℹ️ هیچ پیام جدیدی ارسال نشد، پیام نهایی فرستاده نشد.")
 
         if should_send_final_message:
             # ساخت پیام نهایی + دکمه‌ها + ارسال
@@ -599,7 +633,7 @@ def main():
                         {"text": label, "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
                     ])
 
-            send_telegram_message( BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
+             send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
 
         else:
             logging.info("ℹ️ هیچ پیام جدیدی ارسال نشد، پیام نهایی فرستاده نشد.")
