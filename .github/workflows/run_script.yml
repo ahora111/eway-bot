@@ -1,13 +1,12 @@
-
 name: Run Bot Daily
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # هر ۵ دقیقه بین ساعت ۶ تا ۱۸ به وقت UTC
+    - cron: "*/5 * * * *"
   push:
     branches:
       - main
-  workflow_dispatch:  # اجرای دستی
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -15,8 +14,9 @@ jobs:
 
     env:
       GSHEET_CREDENTIALS_JSON: ${{ secrets.GSHEET_CREDENTIALS_JSON }}
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-      CHAT_ID: ${{ secrets.CHAT_ID }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
 
     steps:
       - uses: actions/checkout@v3
