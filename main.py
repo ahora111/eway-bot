@@ -536,20 +536,19 @@ def main():
 
         sheet_data = load_sheet_data(sheet)
 
+        new_message_sent = False
         message_ids = {}
-        new_message_sent = False  # فقط اگر پیام جدیدی ارسال شد، True بشه
 
         for emoji, lines in categorized.items():
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
             result = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet)
 
-            if isinstance(result, int):  # پیام جدید ارسال شده
+            if isinstance(result, int):  # فقط در صورتی که پیام جدید ارسال شده
                 new_message_sent = True
                 message_ids[emoji] = result
-            else:  # پیام ویرایش شده یا بدون تغییر
-                msg_id = sheet_data.get(emoji, {}).get("message_id")
-                if msg_id:
-                    message_ids[emoji] = msg_id
+            else:
+                message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")
+
 
 
         if new_message_sent:
