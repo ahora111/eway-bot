@@ -423,25 +423,25 @@ def send_or_edit_message(emoji, message, bot_token, chat_id, sheet_data, sheet):
     previous_data = sheet_data.get(emoji)
 
     if previous_data and previous_data.get("date") == today_str:
-        # ویرایش پیام
+        # تلاش برای ویرایش پیام
         msg_id = previous_data["message_id"]
         try:
             edit_telegram_message(message, bot_token, chat_id, msg_id)
             logging.info(f"✅ [{emoji}] پیام ویرایش شد.")
-            return "edited"
-        except:
-            logging.error(f"❌ [{emoji}] خطا در ویرایش پیام.")
-            return None
+            return {"status": "edited", "message_id": msg_id}
+        except Exception as e:
+            logging.error(f"❌ [{emoji}] خطا در ویرایش پیام: {e}")
+            return {"status": "edit_failed", "message_id": msg_id}
     else:
         # ارسال پیام جدید
         try:
             msg_id = send_telegram_message(message, bot_token, chat_id)
             logging.info(f"✅ [{emoji}] پیام جدید ارسال شد.")
             save_to_sheet(sheet, emoji, today_str, msg_id, message)
-            return msg_id  # فقط در این حالت عدد برمی‌گرده
-        except:
-            logging.error(f"❌ [{emoji}] خطا در ارسال پیام جدید.")
-            return None
+            return {"status": "new", "message_id": msg_id}
+        except Exception as e:
+            logging.error(f"❌ [{emoji}] خطا در ارسال پیام جدید: {e}")
+            return {"status": "send_failed", "message_id": None}
 
     # اگر پیامی برای امروز وجود ندارد
     return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
@@ -536,18 +536,20 @@ def main():
 
         sheet_data = load_sheet_data(sheet)
 
-        new_message_sent = False
+        should_send_final_message = False
         message_ids = {}
 
         for emoji, lines in categorized.items():
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
             result = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet)
 
-            if isinstance(result, int):  # فقط در صورتی که پیام جدید ارسال شده
-                new_message_sent = True
-                message_ids[emoji] = result
-            else:
-                message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")
+            status = result["status"]
+            msg_id = result["message_id"]
+            message_ids[emoji] = msg_id
+
+            if status == "new":
+                should_send_final_message = True
+
 
 
 
