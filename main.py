@@ -392,7 +392,11 @@ def update_sheet_data(sheet, emoji, message_id, text):
 
 
 
+# ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
 def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet):
+    """
+    ارسال پیام جدید و ثبت اطلاعات آن در Google Sheet
+    """
     escaped_text = escape_special_characters(message_text)
 
     send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -408,13 +412,16 @@ def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, s
         message_id = response.json()["result"]["message_id"]
         logging.info(f"📤 [{emoji}] پیام جدید ارسال شد.")
         update_sheet_data(sheet, emoji, message_id, message_text)
-        return "new", message_id
+        return message_id
     else:
         logging.error(f"❌ [{emoji}] خطا در ارسال پیام: {response.text}")
-        return "error", None
+        return None
 
 
 def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
+    """
+    ارسال یا ویرایش پیام بر اساس اطلاعات روز و ذخیره در Google Sheet
+    """
     today = JalaliDate.today().strftime("%Y-%m-%d")
     data = sheet_data.get(emoji)
 
@@ -423,7 +430,7 @@ def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sh
     if data and data.get("date") == today:
         if data.get("text") == message_text:
             logging.info(f"🔁 [{emoji}] محتوای پیام تغییری نکرده است.")
-            return "unchanged", data.get("message_id")
+            return data.get("message_id")
 
         # تلاش برای ویرایش پیام
         edit_url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
@@ -438,14 +445,15 @@ def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sh
         if response.ok:
             logging.info(f"✅ [{emoji}] پیام ویرایش شد.")
             update_sheet_data(sheet, emoji, data.get("message_id"), message_text)
-            return "edited", data.get("message_id")
+            return data.get("message_id")
         else:
             logging.error(f"❌ [{emoji}] خطا در ویرایش: {response.json()}")
             logging.warning(f"📛 [{emoji}] پیام نامعتبر است، ارسال پیام جدید به‌جای ویرایش")
+            # ارسال پیام جدید در هر صورت
             return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
 
+    # اگر پیامی برای امروز وجود ندارد
     return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
-
 
 
 
@@ -546,19 +554,6 @@ def main():
             if not lines:
                 continue
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
-            status, msg_id = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet)
-
-            if status == "new":
-                should_send_final_message = True
-
-            message_ids[emoji] = msg_id
-
-        message_ids = {}
-
-        for emoji, lines in categorized.items():
-            if not lines:
-                continue
-            message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
             result = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet)
 
             if isinstance(result, int):  # یعنی پیام جدید ارسال شده
@@ -604,7 +599,7 @@ def main():
                         {"text": label, "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
                     ])
 
-            send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
+            send_telegram_message( BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
 
         else:
             logging.info("ℹ️ هیچ پیام جدیدی ارسال نشد، پیام نهایی فرستاده نشد.")
