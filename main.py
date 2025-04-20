@@ -389,7 +389,17 @@ def update_sheet_data(sheet, emoji, message_id, text):
         sheet.append_row([emoji, today, message_id, text])
 
 
-
+def edit_telegram_message(text, bot_token, chat_id, message_id):
+    url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    response = requests.post(url, json=payload)
+    response.raise_for_status()
+    return response.json()
 
 
 # ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
@@ -442,9 +452,6 @@ def send_or_edit_message(emoji, message, bot_token, chat_id, sheet_data, sheet):
         except Exception as e:
             logging.error(f"❌ [{emoji}] خطا در ارسال پیام جدید: {e}")
             return {"status": "send_failed", "message_id": None}
-
-    # اگر پیامی برای امروز وجود ندارد
-    return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
 
 
 
@@ -537,7 +544,6 @@ def main():
         sheet_data = load_sheet_data(sheet)
 
         should_send_final_message = False
-        message_ids = {}
 
         for emoji, lines in categorized.items():
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
@@ -549,6 +555,7 @@ def main():
 
             if status == "new":
                 should_send_final_message = True
+
 
 
 
