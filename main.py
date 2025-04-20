@@ -545,20 +545,23 @@ def main():
 
         sheet_data = load_sheet_data(sheet)
 
-        should_send_final_message = False
         message_ids = {}
+        new_message_sent = False  # فقط اگر پیام جدیدی ارسال شد، True بشه
 
         for emoji, lines in categorized.items():
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
             result = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet)
 
-            if isinstance(result, int):
-                should_send_final_message = True
+            if isinstance(result, int):  # پیام جدید ارسال شده
+                new_message_sent = True
                 message_ids[emoji] = result
-            else:
-                message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")
+            else:  # پیام ویرایش شده یا بدون تغییر
+                msg_id = sheet_data.get(emoji, {}).get("message_id")
+                if msg_id:
+                    message_ids[emoji] = msg_id
 
-        if should_send_final_message:
+
+        if new_message_sent:
             final_message = (
                 "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
                 "✅اطلاعات واریز\n"
@@ -590,7 +593,7 @@ def main():
                     button_markup["inline_keyboard"].append([
                         {"text": label, "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
                     ])
-
+        
             send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
 
         else:
