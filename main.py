@@ -418,7 +418,7 @@ def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, s
         return None
 
 
-def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
+def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet, should_send_final_message):
     """
     ارسال یا ویرایش پیام بر اساس اطلاعات روز و ذخیره در Google Sheet
     """
@@ -430,7 +430,7 @@ def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sh
     if data and data.get("date") == today:
         if data.get("text") == message_text:
             logging.info(f"🔁 [{emoji}] محتوای پیام تغییری نکرده است.")
-            return data.get("message_id")
+            return data.get("message_id"), should_send_final_message  # در صورت ویرایش، پیام جدید ارسال نشود
 
         # تلاش برای ویرایش پیام
         edit_url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
@@ -445,16 +445,17 @@ def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sh
         if response.ok:
             logging.info(f"✅ [{emoji}] پیام ویرایش شد.")
             update_sheet_data(sheet, emoji, data.get("message_id"), message_text)
-            return data.get("message_id")
+            return data.get("message_id"), should_send_final_message  # پیام ویرایش شده، پیام نهایی ارسال نشود
         else:
             logging.error(f"❌ [{emoji}] خطا در ویرایش: {response.json()}")
             logging.warning(f"📛 [{emoji}] پیام نامعتبر است، ارسال پیام جدید به‌جای ویرایش")
             # ارسال پیام جدید در هر صورت
-            return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
+            should_send_final_message = True
+            return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet), should_send_final_message
 
-    # اگر پیامی برای امروز وجود ندارد
-    return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
-
+    # اگر پیامی برای امروز وجود ندارد یا پیام جدید ارسال می‌شود
+    should_send_final_message = True
+    return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet), should_send_final_message
 
 
 
@@ -547,6 +548,7 @@ def main():
         sheet = connect_to_sheet()
         sheet_data = load_sheet_data(sheet)
 
+        
         should_send_final_message = False
         message_ids = {}
 
@@ -554,10 +556,9 @@ def main():
             if not lines:
                 continue
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
-            result = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet)
+            result, should_send_final_message = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet, should_send_final_message)
 
             if isinstance(result, int):  # یعنی پیام جدید ارسال شده
-                should_send_final_message = True
                 message_ids[emoji] = result
             elif result == "edited":
                 message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")  # حفظ شناسه قدیمی
@@ -565,6 +566,7 @@ def main():
                 # unchanged یا خطا
                 message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")
 
+        
         if should_send_final_message:
             # ساخت پیام نهایی + دکمه‌ها + ارسال
             final_message = (
@@ -595,7 +597,7 @@ def main():
             for emoji, label in emoji_labels.items():
                 msg_id = message_ids.get(emoji)
                 if msg_id:
-                    button_markup["inline_keyboard"].append([
+                    button_markup["inline_keyboard"].append([ 
                         {"text": label, "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
                     ])
 
