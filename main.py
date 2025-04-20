@@ -389,17 +389,7 @@ def update_sheet_data(sheet, emoji, message_id, text):
         sheet.append_row([emoji, today, message_id, text])
 
 
-def edit_telegram_message(text, bot_token, chat_id, message_id):
-    url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
-    payload = {
-        "chat_id": chat_id,
-        "message_id": message_id,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    response = requests.post(url, json=payload)
-    response.raise_for_status()
-    return response.json()
+
 
 
 # ارسال یا ویرایش پیام در تلگرام بسته به تاریخ و محتوا
@@ -428,30 +418,42 @@ def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, s
         return None
 
 
-def send_or_edit_message(emoji, message, bot_token, chat_id, sheet_data, sheet):
-    today_str = JalaliDate.today().strftime("%Y-%m-%d")
-    previous_data = sheet_data.get(emoji)
+def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet):
+    """
+    ارسال یا ویرایش پیام بر اساس اطلاعات روز و ذخیره در Google Sheet
+    """
+    today = JalaliDate.today().strftime("%Y-%m-%d")
+    data = sheet_data.get(emoji)
 
-    if previous_data and previous_data.get("date") == today_str:
+    escaped_text = escape_special_characters(message_text)
+
+    if data and data.get("date") == today:
+        if data.get("text") == message_text:
+            logging.info(f"🔁 [{emoji}] محتوای پیام تغییری نکرده است.")
+            return data.get("message_id")
+
         # تلاش برای ویرایش پیام
-        msg_id = previous_data["message_id"]
-        try:
-            edit_telegram_message(message, bot_token, chat_id, msg_id)
+        edit_url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+        params = {
+            "chat_id": chat_id,
+            "message_id": data.get("message_id"),
+            "text": escaped_text,
+            "parse_mode": "MarkdownV2"
+        }
+
+        response = requests.post(edit_url, json=params)
+        if response.ok:
             logging.info(f"✅ [{emoji}] پیام ویرایش شد.")
-            return {"status": "edited", "message_id": msg_id}
-        except Exception as e:
-            logging.error(f"❌ [{emoji}] خطا در ویرایش پیام: {e}")
-            return {"status": "edit_failed", "message_id": msg_id}
-    else:
-        # ارسال پیام جدید
-        try:
-            msg_id = send_telegram_message(message, bot_token, chat_id)
-            logging.info(f"✅ [{emoji}] پیام جدید ارسال شد.")
-            save_to_sheet(sheet, emoji, today_str, msg_id, message)
-            return {"status": "new", "message_id": msg_id}
-        except Exception as e:
-            logging.error(f"❌ [{emoji}] خطا در ارسال پیام جدید: {e}")
-            return {"status": "send_failed", "message_id": None}
+            update_sheet_data(sheet, emoji, data.get("message_id"), message_text)
+            return data.get("message_id")
+        else:
+            logging.error(f"❌ [{emoji}] خطا در ویرایش: {response.json()}")
+            logging.warning(f"📛 [{emoji}] پیام نامعتبر است، ارسال پیام جدید به‌جای ویرایش")
+            # ارسال پیام جدید در هر صورت
+            return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
+
+    # اگر پیامی برای امروز وجود ندارد
+    return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
 
 
 
@@ -509,6 +511,7 @@ def main():
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
 
+        # باز کردن دسته‌بندی‌ها
         categories_urls = {
             "mobile": "https://hamrahtel.com/quick-checkout?category=mobile",
             "laptop": "https://hamrahtel.com/quick-checkout?category=laptop",
@@ -541,26 +544,29 @@ def main():
         message_lines = [decorate_line(row) for row in processed_data]
         categorized = categorize_messages(message_lines)
 
+        sheet = connect_to_sheet()
         sheet_data = load_sheet_data(sheet)
 
         should_send_final_message = False
+        message_ids = {}
 
         for emoji, lines in categorized.items():
+            if not lines:
+                continue
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
             result = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet)
 
-            status = result["status"]
-            msg_id = result["message_id"]
-            message_ids[emoji] = msg_id
-
-            if status == "new":
+            if isinstance(result, int):  # یعنی پیام جدید ارسال شده
                 should_send_final_message = True
+                message_ids[emoji] = result
+            elif result == "edited":
+                message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")  # حفظ شناسه قدیمی
+            else:
+                # unchanged یا خطا
+                message_ids[emoji] = sheet_data.get(emoji, {}).get("message_id")
 
-
-
-
-
-        if new_message_sent:
+        if should_send_final_message:
+            # ساخت پیام نهایی + دکمه‌ها + ارسال
             final_message = (
                 "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
                 "✅اطلاعات واریز\n"
@@ -592,7 +598,7 @@ def main():
                     button_markup["inline_keyboard"].append([
                         {"text": label, "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
                     ])
-        
+
             send_telegram_message(final_message, BOT_TOKEN, CHAT_ID, reply_markup=button_markup)
 
         else:
@@ -603,4 +609,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
