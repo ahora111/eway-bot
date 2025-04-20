@@ -442,34 +442,17 @@ def send_or_edit_message(emoji, message, bot_token, chat_id, sheet_data, sheet):
                 if "message to edit not found" in error_description:
                     logging.warning(f"📛 [${emoji}] پیام ویرایش‌شده پیدا نشد. ارسال پیام جدید.")
                     # پیام جدید ارسال می‌شود
+                    return send_new_message_and_update_sheet(emoji, message, bot_token, chat_id, sheet)
                 else:
                     logging.error(f"❌ [${emoji}] خطا در ویرایش پیام: {error_description}")
                     return "error"  # خطای نامشخص در ویرایش
 
-        # ارسال پیام جدید
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML"
-        }
-        response = requests.post(url, data=payload).json()
-
-        if response.get("ok"):
-            new_message_id = response["result"]["message_id"]
-            logging.info(f"📤 پیام جدید ارسال شد: {emoji}")
-            return new_message_id  # شناسه پیام جدید برگشت
-
-        else:
-            logging.error(f"❌ خطا در ارسال پیام جدید: {response.get('description')}")
-            return "error"  # خطای ارسال پیام جدید
+        # اگر پیامی برای امروز وجود ندارد، پیام جدید ارسال می‌شود
+        return send_new_message_and_update_sheet(emoji, message, bot_token, chat_id, sheet)
 
     except Exception as e:
         logging.error(f"❌ خطا در ارسال/ویرایش پیام {emoji}: {e}")
         return "error"  # خطای عمومی
-
-    # اگر پیامی برای امروز وجود ندارد
-    return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet)
 
 
 
