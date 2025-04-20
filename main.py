@@ -22,7 +22,7 @@ from persiantools.jdatetime import JalaliDate
 
 SPREADSHEET_ID = '1nMtYsaa9_ZSGrhQvjdVx91WSG4gANg2R0s4cSZAZu7E'
 SHEET_NAME = 'Sheet1'
-BOT_TOKEN = "8187924543:AAH0jZJvZdpq_34um8R_yCyHQvkorxczXNQ"
+BOT_TOKEN = "7640898509:AAG1IKrpNUx1bbsdFF5ThYBAC771SQ0PpeQ"
 CHAT_ID = "-1002505490886"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
