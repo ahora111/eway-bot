@@ -28,9 +28,22 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+def is_execution_time_allowed():
+    # منطقه زمانی ایران
+    iran_tz = pytz.timezone('Asia/Tehran')
+    now = datetime.now(iran_tz)
+    current_time = now.time()
 
+    # بازه مجاز هر روز هفته
+    start_time = dt_time(9, 30)
+    end_time = dt_time(23, 0)
 
-    
+    if not (start_time <= current_time <= end_time):
+        print("🕒 خارج از بازه مجاز اجرا (۰۹:۳۰ تا ۲۳:۰۰). اسکریپت متوقف شد.")
+        return False
+
+    return True
+
 
 def get_driver():
     try:
