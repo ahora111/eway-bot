@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 import os
 import time
@@ -41,8 +42,7 @@ end_time = dt_time(23, 30)
 if not (start_time <= current_time <= end_time):
     print("🕒 خارج از بازه مجاز اجرا (۹:۳۰ تا ۲۳:۳۰). اسکریپت متوقف شد.")
     sys.exit()
-
-
+    
 def get_driver():
     try:
         options = webdriver.ChromeOptions()
@@ -525,23 +525,17 @@ def main():
             return
 
         # باز کردن دسته‌بندی‌ها
-        categories_urls = {
-            "mobile": "https://hamrahtel.com/quick-checkout?category=mobile",
-            "laptop": "https://hamrahtel.com/quick-checkout?category=laptop",
-            "tablet": "https://hamrahtel.com/quick-checkout?category=tablet",
-            "console": "https://hamrahtel.com/quick-checkout?category=game-console"
-        }
+        source_url = "https://naminet.co/quick-commerce"
+
 
         valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
         brands, models = [], []
 
-        for name, url in categories_urls.items():
-            driver.get(url)
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
-            scroll_page(driver)
-            b, m = extract_product_data(driver, valid_brands)
-            brands.extend(b)
-            models.extend(m)
+        driver.get(source_url)
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+        scroll_page(driver)
+        brands, models = extract_product_data(driver, valid_brands)
+
 
         driver.quit()
 
