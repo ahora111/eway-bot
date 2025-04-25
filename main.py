@@ -11,6 +11,7 @@ import base64
 import gspread
 import re
 from pytz import timezone
+from bs4 import BeautifulSoup
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from datetime import datetime, time as dt_time
@@ -66,22 +67,36 @@ def scroll_page(driver, scroll_pause_time=2):
             break
         last_height = new_height
 
+
 def extract_product_data(driver, valid_brands):
-    product_elements = driver.find_elements(By.CLASS_NAME, 'mantine-Text-root')
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+    # گرفتن عنوان‌ها
+    titles = soup.find_all('h1', class_='my-auto text-left lg:ml-4 text-sm')
+    prices = soup.find_all('span', class_='price text-sm whitespace-nowrap font-bold actual-price flex lg:text-black')
+
     brands, models = [], []
-    for product in product_elements:
-        name = product.text.strip().replace("تومانءء", "").replace("تومان", "").replace("نامشخص", "").replace("جستجو در مدل‌ها", "").strip()
+
+    for i in range(min(len(titles), len(prices))):
+        name = titles[i].get_text(strip=True)
+        price = prices[i].get_text(strip=True).replace("تومان", "").strip()
+
         parts = name.split()
         brand = parts[0] if len(parts) >= 2 else name
         model = " ".join(parts[1:]) if len(parts) >= 2 else ""
+
+        # اضافه کردن قیمت به مدل
+        model_with_price = f"{model}\n{price}"
+
         if brand in valid_brands:
             brands.append(brand)
-            models.append(model)
+            models.append(model_with_price)
         else:
-            models.append(brand + " " + model)
             brands.append("")
+            models.append(name + "\n" + price)
 
-    return brands[25:], models[25:]
+    return brands, models
+
 
 def is_number(model_str):
     try:
@@ -532,7 +547,7 @@ def main():
         brands, models = [], []
 
         driver.get(source_url)
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, 'h1')))
         scroll_page(driver)
         brands, models = extract_product_data(driver, valid_brands)
 
