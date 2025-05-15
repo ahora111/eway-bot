@@ -367,19 +367,17 @@ def connect_to_sheet():
     return sheet
 
 def check_and_create_headers(sheet):
-    # گرفتن داده‌های سطر اول
     all_values = sheet.get_all_values()
     first_row = all_values[0] if all_values else []
     
-    # تعریف هدرها
     headers = ["date", "emoji", "part_number", "text", "message_id"]
     
-    # اگر هدرها متفاوت باشند یا اصلاً نباشند، اضافه یا به‌روزرسانی می‌شود
     if first_row != headers:
-        sheet.update("A1:E1", [headers])
+        sheet.update(values=[headers], range_name="A1:E1")
         logging.info("✅ هدرها اضافه یا به‌روزرسانی شدند.")
     else:
         logging.info("🔄 هدرها قبلاً موجود هستند.")
+
 
 
 
