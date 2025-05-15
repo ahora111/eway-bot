@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import os
 import time
@@ -11,7 +10,6 @@ import base64
 import gspread
 import re
 from pytz import timezone
-from bs4 import BeautifulSoup
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from datetime import datetime, time as dt_time
@@ -21,7 +19,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from persiantools.jdatetime import JalaliDate
-
 
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SHEET_NAME = 'Sheet1'
@@ -67,36 +64,22 @@ def scroll_page(driver, scroll_pause_time=2):
             break
         last_height = new_height
 
-
 def extract_product_data(driver, valid_brands):
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-    # گرفتن عنوان‌ها
-    titles = soup.find_all('h1', class_='my-auto text-left lg:ml-4 text-sm')
-    prices = soup.find_all('span', class_='price text-sm whitespace-nowrap font-bold actual-price flex lg:text-black')
-
+    product_elements = driver.find_elements(By.CLASS_NAME, 'mantine-Text-root')
     brands, models = [], []
-
-    for i in range(min(len(titles), len(prices))):
-        name = titles[i].get_text(strip=True)
-        price = prices[i].get_text(strip=True).replace("تومان", "").strip()
-
+    for product in product_elements:
+        name = product.text.strip().replace("تومانءء", "").replace("تومان", "").replace("نامشخص", "").replace("جستجو در مدل‌ها", "").strip()
         parts = name.split()
         brand = parts[0] if len(parts) >= 2 else name
         model = " ".join(parts[1:]) if len(parts) >= 2 else ""
-
-        # اضافه کردن قیمت به مدل
-        model_with_price = f"{model}\n{price}"
-
         if brand in valid_brands:
             brands.append(brand)
-            models.append(model_with_price)
+            models.append(model)
         else:
+            models.append(brand + " " + model)
             brands.append("")
-            models.append(name + "\n" + price)
 
-    return brands, models
-
+    return brands[25:], models[25:]
 
 def is_number(model_str):
     try:
@@ -104,6 +87,17 @@ def is_number(model_str):
         return True
     except ValueError:
         return False
+        
+def split_message(text, max_length=4000):
+    parts = []
+    while len(text) > max_length:
+        split_index = text.rfind('\n', 0, max_length)
+        if split_index == -1:
+            split_index = max_length
+        parts.append(text[:split_index])
+        text = text[split_index:].lstrip('\n')
+    parts.append(text)
+    return parts
 
 def process_model(model_str):
     # حذف کاراکترهای غیرضروری و بررسی اینکه آیا مقدار عددی است
@@ -540,17 +534,23 @@ def main():
             return
 
         # باز کردن دسته‌بندی‌ها
-        source_url = "https://naminet.co/quick-commerce"
-
+        categories_urls = {
+            "mobile": "https://hamrahtel.com/quick-checkout?category=mobile",
+            "laptop": "https://hamrahtel.com/quick-checkout?category=laptop",
+            "tablet": "https://hamrahtel.com/quick-checkout?category=tablet",
+            "console": "https://hamrahtel.com/quick-checkout?category=game-console"
+        }
 
         valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
         brands, models = [], []
 
-        driver.get(source_url)
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, 'h1')))
-        scroll_page(driver)
-        brands, models = extract_product_data(driver, valid_brands)
-
+        for name, url in categories_urls.items():
+            driver.get(url)
+            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+            scroll_page(driver)
+            b, m = extract_product_data(driver, valid_brands)
+            brands.extend(b)
+            models.extend(m)
 
         driver.quit()
 
@@ -577,7 +577,19 @@ def main():
             if not lines:
                 continue
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
-            result, should_send_final_message = send_or_edit_message(emoji, message, BOT_TOKEN, CHAT_ID, sheet_data, sheet, should_send_final_message)
+            message_parts = split_message(message)
+
+            for idx, part in enumerate(message_parts):
+                part_suffix = f" (بخش {idx+1})" if len(message_parts) > 1 else ""
+                result, should_send_final_message = send_or_edit_message(
+                    emoji,
+                    part + part_suffix,
+                    BOT_TOKEN,
+                    CHAT_ID,
+                    sheet_data,
+                    sheet,
+                    should_send_final_message
+                )
 
             if isinstance(result, int):  # یعنی پیام جدید ارسال شده
                 message_ids[emoji] = result
