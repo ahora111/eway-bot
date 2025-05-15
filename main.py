@@ -577,18 +577,25 @@ def main():
             if not lines:
                 continue
                 
+
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
-            message_parts = split_message(message)
+
+            # جدا کردن هدر از متن
+            header, *rest = message.split("\n\n", 1)
+            body = rest[0] if rest else ""
+
+            # حالا تقسیم بدنه پیام به بخش‌های کوچک‌تر
+            message_parts = split_message(body)
 
             for idx, part in enumerate(message_parts):
                 part_suffix = f" (بخش {idx+1})" if len(message_parts) > 1 else ""
-    
-                # افزودن عنوان به ابتدای هر بخش
-                full_part = f"{update_date_formatted}\n\n{part.strip()}"
+
+                # اضافه کردن هدر موجود به همه بخش‌ها
+                full_part = f"{header}\n\n{part.strip()}" + part_suffix
 
                 temp_result, temp_flag = send_or_edit_message(
                     emoji,
-                    full_part + part_suffix,
+                    full_part,
                     BOT_TOKEN,
                     CHAT_ID,
                     sheet_data,
@@ -596,7 +603,6 @@ def main():
                     should_send_final_message
                 )
 
-                # فقط در اولین بخش، message_id و وضعیت رو ذخیره کن
                 if idx == 0:
                     result = temp_result
                     should_send_final_message = temp_flag
