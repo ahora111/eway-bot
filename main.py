@@ -576,21 +576,26 @@ def main():
         for emoji, lines in categorized.items():
             if not lines:
                 continue
+                
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
             message_parts = split_message(message)
 
             for idx, part in enumerate(message_parts):
                 part_suffix = f" (بخش {idx+1})" if len(message_parts) > 1 else ""
+    
+                # افزودن عنوان به ابتدای هر بخش
+                full_part = f"{title}\n\n{part.strip()}"
+
                 temp_result, temp_flag = send_or_edit_message(
                     emoji,
-                    part + part_suffix,
+                    full_part + part_suffix,
                     BOT_TOKEN,
                     CHAT_ID,
                     sheet_data,
                     sheet,
                     should_send_final_message
                 )
-    
+
                 # فقط در اولین بخش، message_id و وضعیت رو ذخیره کن
                 if idx == 0:
                     result = temp_result
