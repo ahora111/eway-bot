@@ -439,44 +439,63 @@ def send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, s
         return None
 
 
-def send_or_edit_message(emoji, message_text, bot_token, chat_id, sheet_data, sheet, should_send_final_message):
-    """
-    ارسال یا ویرایش پیام بر اساس اطلاعات روز و ذخیره در Google Sheet
-    """
-    today = JalaliDate.today().strftime("%Y-%m-%d")
-    data = sheet_data.get(emoji)
+def send_or_edit_message(emoji, text, BOT_TOKEN, CHAT_ID, sheet_data, sheet, should_send, part_number=1):
+    from datetime import datetime
+    import requests
+    from jdatetime import date as JalaliDate
 
-    escaped_text = escape_special_characters(message_text)
+    today_str = JalaliDate.today().strftime("%Y-%m-%d")
+    message_id = None
 
-    if data and data.get("date") == today:
-        if data.get("text") == message_text:
-            logging.info(f"🔁 [{emoji}] محتوای پیام تغییری نکرده است.")
-            return data.get("message_id"), should_send_final_message  # در صورت ویرایش، پیام جدید ارسال نشود
+    # بررسی اینکه پیام قبلاً ارسال شده یا نه (براساس ایموجی و شماره بخش)
+    row_match = next((row for row in sheet_data if row[0] == today_str and row[1] == emoji and str(row[2]) == str(part_number)), None)
 
-        # تلاش برای ویرایش پیام
-        edit_url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
-        params = {
-            "chat_id": chat_id,
-            "message_id": data.get("message_id"),
-            "text": escaped_text,
-            "parse_mode": "MarkdownV2"
+    if row_match:
+        message_id = int(row_match[4])
+        old_text = row_match[3]
+
+        if old_text.strip() == text.strip():
+            logging.info(f"🔁 [{emoji}] (بخش {part_number}) محتوای پیام تغییری نکرده است.")
+            return True, should_send
+
+        # پیام قبلی ویرایش شود
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+        payload = {
+            "chat_id": CHAT_ID,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": "HTML"
         }
-
-        response = requests.post(edit_url, json=params)
+        response = requests.post(url, data=payload)
         if response.ok:
-            logging.info(f"✅ [{emoji}] پیام ویرایش شد.")
-            update_sheet_data(sheet, emoji, data.get("message_id"), message_text)
-            return data.get("message_id"), should_send_final_message  # پیام ویرایش شده، پیام نهایی ارسال نشود
+            logging.info(f"✅ [{emoji}] (بخش {part_number}) پیام ویرایش شد.")
+            row_index = sheet_data.index(row_match) + 2
+            sheet.update(f"D{row_index}:E{row_index}", [[text, message_id]])
+            return True, should_send
         else:
-            logging.error(f"❌ [{emoji}] خطا در ویرایش: {response.json()}")
-            logging.warning(f"📛 [{emoji}] پیام نامعتبر است، ارسال پیام جدید به‌جای ویرایش")
-            # ارسال پیام جدید در هر صورت
-            should_send_final_message = True
-            return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet), should_send_final_message
+            logging.error(f"❌ [{emoji}] (بخش {part_number}) خطا در ویرایش پیام: {response.text}")
+            return False, should_send
 
-    # اگر پیامی برای امروز وجود ندارد یا پیام جدید ارسال می‌شود
-    should_send_final_message = True
-    return send_new_message_and_update_sheet(emoji, message_text, bot_token, chat_id, sheet), should_send_final_message
+    elif should_send:
+        # پیام جدید ارسال شود
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML"
+        }
+        response = requests.post(url, data=payload)
+        if response.ok:
+            message_id = response.json()["result"]["message_id"]
+            sheet.append_row([today_str, emoji, part_number, text, message_id])
+            logging.info(f"✅ [{emoji}] (بخش {part_number}) پیام ارسال شد!")
+            return True, False
+        else:
+            logging.error(f"❌ [{emoji}] (بخش {part_number}) خطا در ارسال پیام: {response.text}")
+            return False, should_send
+
+    return False, should_send
+
 
 
 
@@ -579,19 +598,16 @@ def main():
                 
 
             message = prepare_final_message(emoji, lines, JalaliDate.today().strftime("%Y-%m-%d"))
-
-            # جدا کردن هدر از متن
-            header, *rest = message.split("\n\n", 1)
-            body = rest[0] if rest else ""
-
-            # حالا تقسیم بدنه پیام به بخش‌های کوچک‌تر
-            message_parts = split_message(body)
+            message_parts = split_message(message)
 
             for idx, part in enumerate(message_parts):
-                part_suffix = f" (بخش {idx+1})" if len(message_parts) > 1 else ""
+                part_number = idx + 1
 
-                # اضافه کردن هدر موجود به همه بخش‌ها
-                full_part = f"{header}\n\n{part.strip()}" + part_suffix
+                # افزودن هدر (فقط یکبار تولید شده ولی برای همه بخش‌ها تکرار میشه)
+                full_part = message_parts[0].split("\n\n")[0] + "\n\n" + part
+
+                part_suffix = f" (بخش {part_number})" if len(message_parts) > 1 else ""
+                full_part += part_suffix
 
                 temp_result, temp_flag = send_or_edit_message(
                     emoji,
@@ -600,12 +616,15 @@ def main():
                     CHAT_ID,
                     sheet_data,
                     sheet,
-                    should_send_final_message
+                    should_send_final_message,
+                    part_number=part_number
                 )
 
+                # فقط برای بخش اول، این مقدارها رو نگه داریم
                 if idx == 0:
                     result = temp_result
                     should_send_final_message = temp_flag
+
 
 
             if isinstance(result, int):  # یعنی پیام جدید ارسال شده
