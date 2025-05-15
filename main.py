@@ -584,7 +584,7 @@ def main():
                 part_suffix = f" (بخش {idx+1})" if len(message_parts) > 1 else ""
     
                 # افزودن عنوان به ابتدای هر بخش
-                full_part = f"{title}\n\n{part.strip()}"
+                full_part = f"{update_date_formatted}\n\n{part.strip()}"
 
                 temp_result, temp_flag = send_or_edit_message(
                     emoji,
