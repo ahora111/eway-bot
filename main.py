@@ -581,7 +581,7 @@ def main():
 
             for idx, part in enumerate(message_parts):
                 part_suffix = f" (بخش {idx+1})" if len(message_parts) > 1 else ""
-                result, should_send_final_message = send_or_edit_message(
+                temp_result, temp_flag = send_or_edit_message(
                     emoji,
                     part + part_suffix,
                     BOT_TOKEN,
@@ -590,6 +590,12 @@ def main():
                     sheet,
                     should_send_final_message
                 )
+    
+                # فقط در اولین بخش، message_id و وضعیت رو ذخیره کن
+                if idx == 0:
+                    result = temp_result
+                    should_send_final_message = temp_flag
+
 
             if isinstance(result, int):  # یعنی پیام جدید ارسال شده
                 message_ids[emoji] = result
