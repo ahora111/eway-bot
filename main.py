@@ -8,7 +8,6 @@ import pytz
 import sys
 import base64
 import gspread
-import re
 from pytz import timezone
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
@@ -27,16 +26,11 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# منطقه زمانی ایران
 iran_tz = pytz.timezone('Asia/Tehran')
 now = datetime.now(iran_tz)
 current_time = now.time()
-
-# بازه مجاز اجرا
 start_time = dt_time(9, 30)
 end_time = dt_time(23, 30)
-
-# بررسی
 if not (start_time <= current_time <= end_time):
     print("🕒 خارج از بازه مجاز اجرا (۹:۳۰ تا ۲۳:۳۰). اسکریپت متوقف شد.")
     sys.exit()
@@ -333,7 +327,7 @@ def update_sheet_data(sheet, emoji, messages):
     records = sheet.get_all_records()
     rows_to_delete = [i+2 for i, row in enumerate(records) if row.get("emoji") == emoji and row.get("date") == today]
     for row_num in reversed(rows_to_delete):
-        sheet.delete_rows(row_num)
+        sheet.delete_row(row_num)
     for part, (message_id, text) in enumerate(messages, 1):
         sheet.append_row([emoji, today, part, message_id, text])
 
@@ -457,8 +451,7 @@ def main():
             "🍏": "📱 لیست آیفون",
             "💻": "💻 لیست لپ‌تاپ",
             "🟠": "📱 لیست تبلت",
-            "🎮": "🎮 کنسول بازی",
-            "🟣": "📱 لیست گوشیای متفرقه"
+            "🎮": "🎮 کنسول بازی"
         }
         for emoji, msg_ids in all_message_ids.items():
             for msg_id in msg_ids:
