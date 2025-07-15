@@ -472,6 +472,7 @@ def main():
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
+
         categories_urls = {
             "mobile": "https://hamrahtel.com/quick-checkout?category=mobile",
             "laptop": "https://hamrahtel.com/quick-checkout?category=laptop",
@@ -480,6 +481,7 @@ def main():
         }
         valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
         brands, models = [], []
+
         for name, url in categories_urls.items():
             driver.get(url)
             WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
@@ -488,18 +490,23 @@ def main():
             brands.extend(b)
             models.extend(m)
         driver.quit()
+
         if not brands:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
             return
+
         processed_data = []
         for i in range(len(brands)):
             model_str = process_model(models[i])
             processed_data.append(f"{model_str} {brands[i]}")
+
         message_lines = [decorate_line(row) for row in processed_data]
         categorized = categorize_messages(message_lines)
         today = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
         should_send_final_message = False
+
+        # 1. ارسال پیام‌های دسته‌بندی
         for emoji, lines in categorized.items():
             if not lines:
                 continue
@@ -509,7 +516,26 @@ def main():
             all_message_ids[emoji] = message_ids
             if changed:
                 should_send_final_message = True
-        # پیام نهایی و دکمه‌ها
+
+        # 2. ساخت دکمه‌ها (فقط پیام‌هایی که واقعاً ارسال شده‌اند)
+        button_markup = {"inline_keyboard": []}
+        emoji_labels = {
+            "🔵": "📱 لیست سامسونگ",
+            "🟡": "📱 لیست شیائومی",
+            "🍏": "📱 لیست آیفون",
+            "💻": "💻 لیست لپ‌تاپ",
+            "🟠": "📱 لیست تبلت",
+            "🎮": "🎮 کنسول بازی",
+            "🟣": "📱 لیست گوشیای متفرقه"
+        }
+        for emoji, msg_ids in all_message_ids.items():
+            for msg_id in msg_ids:
+                if msg_id:
+                    button_markup["inline_keyboard"].append([
+                        {"text": emoji_labels.get(emoji, emoji), "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
+                    ])
+
+        # 3. پیام نهایی را در آخر ارسال/ویرایش کن
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
@@ -524,26 +550,10 @@ def main():
             "📞 09308529712\n"
             "📞 028-3399-1417"
         )
-        button_markup = {"inline_keyboard": []}
-        emoji_labels = {
-            "🔵": "📱 لیست سامسونگ",
-            "🟡": "📱 لیست شیائومی",
-            "🍏": "📱 لیست آیفون",
-            "💻": "💻 لیست لپ‌تاپ",
-            "🟠": "📱 لیست تبلت",
-            "🎮": "🎮 کنسول بازی",
-            "🟣": "📱 لیست گوشیای متفرقه"
-        }
-        for emoji, msg_ids in all_message_ids.items():
-            for msg_id in msg_ids:
-                if msg_id:  # فقط اگر پیام واقعاً ارسال شده
-                    button_markup["inline_keyboard"].append([
-                        {"text": emoji_labels.get(emoji, emoji), "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
-                    ])
-        # اگر دسته 🟣 پیام دارد، دکمه‌اش اضافه می‌شود
         send_or_edit_final_message(sheet, final_message, BOT_TOKEN, CHAT_ID, button_markup, should_send_final_message)
+
     except Exception as e:
         logging.error(f"❌ خطا: {e}")
-
+        
 if __name__ == "__main__":
     main()
