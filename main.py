@@ -109,17 +109,20 @@ def escape_special_characters(text):
         text = text.replace(char, '\\' + char)
     return text
 
-def split_message(message, max_length=4000):
+def split_message_by_product(message, max_length=4000):
     lines = message.split('\n')
     parts = []
     current = ""
     for line in lines:
-        if len(current) + len(line) + 1 > max_length:
-            parts.append(current)
+        if line.startswith(('🔵', '🟡', '🍏', '🟣', '💻', '🟠', '🎮')) and len(current) > 0 and len(current) + len(line) + 1 > max_length:
+            parts.append(current.rstrip('\n'))
+            current = ""
+        elif len(current) + len(line) + 1 > max_length:
+            parts.append(current.rstrip('\n'))
             current = ""
         current += line + '\n'
     if current.strip():
-        parts.append(current)
+        parts.append(current.rstrip('\n'))
     return parts
 
 def decorate_line(line):
@@ -392,7 +395,6 @@ def process_category_messages(emoji, messages, bot_token, chat_id, sheet, today)
     update_sheet_data(sheet, emoji, new_msgs)
     return [msg_id for msg_id, _ in new_msgs], should_send_final_message
 
-# --- پیام نهایی ---
 def update_final_message_in_sheet(sheet, message_id, text):
     today = JalaliDate.today().strftime("%Y-%m-%d")
     records = sheet.get_all_records()
@@ -472,7 +474,6 @@ def main():
         if not driver:
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
-
         categories_urls = {
             "mobile": "https://hamrahtel.com/quick-checkout?category=mobile",
             "laptop": "https://hamrahtel.com/quick-checkout?category=laptop",
@@ -481,7 +482,6 @@ def main():
         }
         valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
         brands, models = [], []
-
         for name, url in categories_urls.items():
             driver.get(url)
             WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
@@ -490,28 +490,23 @@ def main():
             brands.extend(b)
             models.extend(m)
         driver.quit()
-
         if not brands:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
             return
-
         processed_data = []
         for i in range(len(brands)):
             model_str = process_model(models[i])
             processed_data.append(f"{model_str} {brands[i]}")
-
         message_lines = [decorate_line(row) for row in processed_data]
         categorized = categorize_messages(message_lines)
         today = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
         should_send_final_message = False
-
-        # 1. ارسال پیام‌های دسته‌بندی
         for emoji, lines in categorized.items():
             if not lines:
                 continue
             message = prepare_final_message(emoji, lines, today)
-            message_parts = split_message(message)
+            message_parts = split_message_by_product(message)
             current_time = get_current_time()
             for idx in range(1, len(message_parts)):
                 message_parts[idx] = f"⏰ {current_time}\n" + message_parts[idx]
@@ -519,8 +514,20 @@ def main():
             all_message_ids[emoji] = message_ids
             if changed:
                 should_send_final_message = True
-
-        # 2. ساخت دکمه‌ها (فقط پیام‌هایی که واقعاً ارسال شده‌اند)
+        final_message = (
+            "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
+            "✅اطلاعات واریز\n"
+            "🔷 شماره شبا : IR970560611828006154229701\n"
+            "🔷 شماره کارت : 6219861812467917\n"
+            "🔷 بلو بانک   حسین گرئی\n\n"
+            "⭕️ حتما رسید واریز به ایدی تلگرام زیر ارسال شود .\n"
+            "🆔 @lhossein1\n\n"
+            "✅شماره تماس ثبت سفارش :\n"
+            "📞 09371111558\n"
+            "📞 09386373926\n"
+            "📞 09308529712\n"
+            "📞 028-3399-1417"
+        )
         button_markup = {"inline_keyboard": []}
         emoji_labels = {
             "🔵": "📱 لیست سامسونگ",
@@ -537,26 +544,9 @@ def main():
                     button_markup["inline_keyboard"].append([
                         {"text": emoji_labels.get(emoji, emoji), "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
                     ])
-
-        # 3. پیام نهایی را در آخر ارسال/ویرایش کن
-        final_message = (
-            "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
-            "✅اطلاعات واریز\n"
-            "🔷 شماره شبا : IR970560611828006154229701\n"
-            "🔷 شماره کارت : 6219861812467917\n"
-            "🔷 بلو بانک   حسین گرئی\n\n"
-            "⭕️ حتما رسید واریز به ایدی تلگرام زیر ارسال شود .\n"
-            "🆔 @lhossein1\n\n"
-            "✅شماره تماس ثبت سفارش :\n"
-            "📞 09371111558\n"
-            "📞 09386373926\n"
-            "📞 09308529712\n"
-            "📞 028-3399-1417"
-        )
         send_or_edit_final_message(sheet, final_message, BOT_TOKEN, CHAT_ID, button_markup, should_send_final_message)
-
     except Exception as e:
         logging.error(f"❌ خطا: {e}")
-        
+
 if __name__ == "__main__":
     main()
