@@ -458,7 +458,7 @@ def main():
             "💻": "💻 لیست لپ‌تاپ",
             "🟠": "📱 لیست تبلت",
             "🎮": "🎮 کنسول بازی"
-            "🟣": "📱 لیست گوشیای متفرقه",
+            "🟣": "📱 لیست گوشیای متفرقه"
         }
         for emoji, msg_ids in all_message_ids.items():
             for msg_id in msg_ids:
