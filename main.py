@@ -512,6 +512,9 @@ def main():
                 continue
             message = prepare_final_message(emoji, lines, today)
             message_parts = split_message(message)
+            current_time = get_current_time()
+            for idx in range(1, len(message_parts)):
+                message_parts[idx] = f"⏰ {current_time}\n" + message_parts[idx]
             message_ids, changed = process_category_messages(emoji, message_parts, BOT_TOKEN, CHAT_ID, sheet, today)
             all_message_ids[emoji] = message_ids
             if changed:
