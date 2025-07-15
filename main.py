@@ -333,7 +333,7 @@ def update_sheet_data(sheet, emoji, messages):
     records = sheet.get_all_records()
     rows_to_delete = [i+2 for i, row in enumerate(records) if row.get("emoji") == emoji and row.get("date") == today]
     for row_num in reversed(rows_to_delete):
-        sheet.delete_row(row_num)
+        sheet.delete_rows(row_num)
     for part, (message_id, text) in enumerate(messages, 1):
         sheet.append_row([emoji, today, part, message_id, text])
 
