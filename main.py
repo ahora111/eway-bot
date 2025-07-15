@@ -110,7 +110,6 @@ def escape_special_characters(text):
     return text
 
 def split_message(message, max_length=4000):
-    # پیام را به خطوط تقسیم کن و هر پیام را تا حد ممکن کامل نگه دار
     lines = message.split('\n')
     parts = []
     current = ""
@@ -251,7 +250,8 @@ def get_category_name(emoji):
         "🍏": "آیفون",
         "💻": "لپ‌تاپ‌ها",
         "🟠": "تبلت‌ها",
-        "🎮": "کنسول‌ بازی"
+        "🎮": "کنسول‌ بازی",
+        "🟣": "گوشیای متفرقه"
     }
     return mapping.get(emoji, "گوشیای متفرقه")
 
@@ -369,23 +369,88 @@ def process_category_messages(emoji, messages, bot_token, chat_id, sheet, today)
     sheet_data = load_sheet_data(sheet)
     prev_msgs = sorted([row for row in sheet_data.get((emoji, today), [])], key=lambda x: x["part"])
     new_msgs = []
+    should_send_final_message = False
     for i, msg in enumerate(messages):
         if i < len(prev_msgs):
             if prev_msgs[i]["text"] != msg:
                 ok = edit_telegram_message(prev_msgs[i]["message_id"], msg, bot_token, chat_id)
                 if not ok:
                     message_id = send_telegram_message(msg, bot_token, chat_id)
+                    should_send_final_message = True
                 else:
                     message_id = prev_msgs[i]["message_id"]
+                    should_send_final_message = True
             else:
                 message_id = prev_msgs[i]["message_id"]
         else:
             message_id = send_telegram_message(msg, bot_token, chat_id)
+            should_send_final_message = True
         new_msgs.append((message_id, msg))
     for j in range(len(messages), len(prev_msgs)):
         delete_telegram_message(prev_msgs[j]["message_id"], bot_token, chat_id)
+        should_send_final_message = True
     update_sheet_data(sheet, emoji, new_msgs)
-    return [msg_id for msg_id, _ in new_msgs]
+    return [msg_id for msg_id, _ in new_msgs], should_send_final_message
+
+# --- پیام نهایی ---
+def update_final_message_in_sheet(sheet, message_id, text):
+    today = JalaliDate.today().strftime("%Y-%m-%d")
+    records = sheet.get_all_records()
+    found = False
+    for i, row in enumerate(records, start=2):
+        if row.get("emoji") == "FINAL" and row.get("date") == today:
+            sheet.update(values=[["FINAL", today, 1, message_id, text]], range_name=f"A{i}:E{i}")
+            found = True
+            break
+    if not found:
+        sheet.append_row(["FINAL", today, 1, message_id, text])
+
+def get_final_message_from_sheet(sheet):
+    today = JalaliDate.today().strftime("%Y-%m-%d")
+    records = sheet.get_all_records()
+    for row in records:
+        if row.get("emoji") == "FINAL" and row.get("date") == today:
+            return row.get("message_id"), row.get("text")
+    return None, None
+
+def send_or_edit_final_message(sheet, final_message, bot_token, chat_id, button_markup, should_send):
+    message_id, prev_text = get_final_message_from_sheet(sheet)
+    escaped_text = escape_special_characters(final_message)
+    if message_id and prev_text == final_message and not should_send:
+        logging.info("🔁 پیام نهایی تغییری نکرده است.")
+        return message_id
+    if message_id and (prev_text != final_message or should_send):
+        url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+        params = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": escaped_text,
+            "parse_mode": "MarkdownV2",
+            "reply_markup": json.dumps(button_markup)
+        }
+        response = requests.post(url, json=params)
+        if response.ok:
+            update_final_message_in_sheet(sheet, message_id, final_message)
+            logging.info("✅ پیام نهایی ویرایش شد.")
+            return message_id
+        else:
+            logging.warning("❌ خطا در ویرایش پیام نهایی، ارسال پیام جدید.")
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    params = {
+        "chat_id": chat_id,
+        "text": escaped_text,
+        "parse_mode": "MarkdownV2",
+        "reply_markup": json.dumps(button_markup)
+    }
+    response = requests.post(url, json=params)
+    if response.ok:
+        message_id = response.json()["result"]["message_id"]
+        update_final_message_in_sheet(sheet, message_id, final_message)
+        logging.info("✅ پیام نهایی ارسال شد.")
+        return message_id
+    else:
+        logging.error("❌ خطا در ارسال پیام نهایی: %s", response.text)
+        return None
 
 def main():
     try:
@@ -422,13 +487,16 @@ def main():
         categorized = categorize_messages(message_lines)
         today = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
+        should_send_final_message = False
         for emoji, lines in categorized.items():
             if not lines:
                 continue
             message = prepare_final_message(emoji, lines, today)
             message_parts = split_message(message)
-            message_ids = process_category_messages(emoji, message_parts, BOT_TOKEN, CHAT_ID, sheet, today)
+            message_ids, changed = process_category_messages(emoji, message_parts, BOT_TOKEN, CHAT_ID, sheet, today)
             all_message_ids[emoji] = message_ids
+            if changed:
+                should_send_final_message = True
         # پیام نهایی و دکمه‌ها
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
@@ -451,23 +519,16 @@ def main():
             "🍏": "📱 لیست آیفون",
             "💻": "💻 لیست لپ‌تاپ",
             "🟠": "📱 لیست تبلت",
-            "🎮": "🎮 کنسول بازی"
+            "🎮": "🎮 کنسول بازی",
+            "🟣": "📱 لیست گوشیای متفرقه"
         }
         for emoji, msg_ids in all_message_ids.items():
             for msg_id in msg_ids:
                 button_markup["inline_keyboard"].append([
                     {"text": emoji_labels.get(emoji, emoji), "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
                 ])
-        # ارسال پیام نهایی با دکمه‌ها
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        params = {
-            "chat_id": CHAT_ID,
-            "text": escape_special_characters(final_message),
-            "parse_mode": "MarkdownV2",
-            "reply_markup": json.dumps(button_markup)
-        }
-        requests.post(url, json=params)
-        logging.info("✅ پیام نهایی ارسال شد.")
+        # اگر دسته 🟣 پیام دارد، دکمه‌اش اضافه می‌شود
+        send_or_edit_final_message(sheet, final_message, BOT_TOKEN, CHAT_ID, button_markup, should_send_final_message)
     except Exception as e:
         logging.error(f"❌ خطا: {e}")
 
