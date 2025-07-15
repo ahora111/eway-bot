@@ -536,9 +536,10 @@ def main():
         }
         for emoji, msg_ids in all_message_ids.items():
             for msg_id in msg_ids:
-                button_markup["inline_keyboard"].append([
-                    {"text": emoji_labels.get(emoji, emoji), "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
-                ])
+                if msg_id:  # فقط اگر پیام واقعاً ارسال شده
+                    button_markup["inline_keyboard"].append([
+                        {"text": emoji_labels.get(emoji, emoji), "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
+                    ])
         # اگر دسته 🟣 پیام دارد، دکمه‌اش اضافه می‌شود
         send_or_edit_final_message(sheet, final_message, BOT_TOKEN, CHAT_ID, button_markup, should_send_final_message)
     except Exception as e:
