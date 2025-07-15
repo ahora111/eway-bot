@@ -109,18 +109,25 @@ def escape_special_characters(text):
         text = text.replace(char, '\\' + char)
     return text
 
-def split_message_by_product(message, max_length=4000):
+def split_message_by_emoji_group(message, max_length=4000):
     lines = message.split('\n')
     parts = []
     current = ""
+    group = ""
     for line in lines:
-        if line.startswith(('🔵', '🟡', '🍏', '🟣', '💻', '🟠', '🎮')) and len(current) > 0 and len(current) + len(line) + 1 > max_length:
-            parts.append(current.rstrip('\n'))
-            current = ""
-        elif len(current) + len(line) + 1 > max_length:
-            parts.append(current.rstrip('\n'))
-            current = ""
-        current += line + '\n'
+        if line.startswith(('🔵', '🟡', '🍏', '🟣', '💻', '🟠', '🎮')):
+            # اگر گروه فعلی با اضافه کردن گروه جدید از حد مجاز بیشتر می‌شود، پارت جدید بساز
+            if current and len(current) + len(group) > max_length:
+                parts.append(current.rstrip('\n'))
+                current = ""
+            current += group
+            group = ""
+        group += line + '\n'
+    # اضافه کردن آخرین گروه
+    if current and len(current) + len(group) > max_length:
+        parts.append(current.rstrip('\n'))
+        current = ""
+    current += group
     if current.strip():
         parts.append(current.rstrip('\n'))
     return parts
@@ -506,7 +513,7 @@ def main():
             if not lines:
                 continue
             message = prepare_final_message(emoji, lines, today)
-            message_parts = split_message_by_product(message)
+            message_parts = split_message_by_emoji_group(message)
             current_time = get_current_time()
             for idx in range(1, len(message_parts)):
                 message_parts[idx] = f"⏰ {current_time}\n" + message_parts[idx]
