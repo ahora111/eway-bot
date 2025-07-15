@@ -434,7 +434,19 @@ def send_or_edit_final_message(sheet, final_message, bot_token, chat_id, button_
             logging.info("✅ پیام نهایی ویرایش شد.")
             return message_id
         else:
-            logging.warning("❌ خطا در ویرایش پیام نهایی، ارسال پیام جدید.")
+            logging.warning("❌ خطا در ویرایش پیام نهایی، حذف پیام قبلی و ارسال پیام جدید.")
+            # حذف پیام قبلی
+            del_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+            del_params = {
+                "chat_id": chat_id,
+                "message_id": message_id
+            }
+            del_response = requests.post(del_url, json=del_params)
+            if del_response.ok:
+                logging.info("✅ پیام نهایی قبلی حذف شد.")
+            else:
+                logging.warning("❌ حذف پیام نهایی قبلی موفق نبود: %s", del_response.text)
+    # ارسال پیام جدید
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     params = {
         "chat_id": chat_id,
