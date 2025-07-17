@@ -60,12 +60,15 @@ def scroll_page(driver, scroll_pause_time=2):
 
 def extract_product_data(driver):
     products = []
-    product_boxes = driver.find_elements(By.XPATH, '//div[contains(@class, "cursor-pointer")]')
-    for box in product_boxes:
+    # فقط h1هایی که کلاسشان شامل text-left و text-sm است (نام محصول)
+    name_els = driver.find_elements(By.XPATH, '//h1[contains(@class, "text-left") and contains(@class, "text-sm")]')
+    for name_el in name_els:
         try:
-            name_el = box.find_element(By.TAG_NAME, 'h1')
             name = name_el.text.strip()
-            color_price_divs = box.find_elements(By.XPATH, './/div[contains(@class, "bg-gray-100") and contains(@class, "items-center")]')
+            # والد این h1 همان div محصول است
+            parent_div = name_el.find_element(By.XPATH, './../..')
+            # همه رنگ‌ها و قیمت‌ها را در این div پیدا کن
+            color_price_divs = parent_div.find_elements(By.XPATH, './/div[contains(@class, "bg-gray-100") and contains(@class, "items-center")]')
             for cp in color_price_divs:
                 try:
                     color = cp.find_element(By.TAG_NAME, 'p').text.strip()
@@ -340,8 +343,7 @@ def main():
         brands, models = [], []
         for name, url in categories_urls.items():
             driver.get(url)
-            # صبر کن تا حداقل یک h1 لود شود (نام محصول)
-            WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.TAG_NAME, 'h1')))
+            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.XPATH, '//h1[contains(@class, "text-left") and contains(@class, "text-sm")]')))
             scroll_page(driver)
             products = extract_product_data(driver)
             logging.info(f"تعداد محصولات پیدا شده: {len(products)}")
