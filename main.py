@@ -58,50 +58,30 @@ def scroll_page(driver, scroll_pause_time=2):
             break
         last_height = new_height
 
-def extract_product_data(driver, valid_brands):
-    product_elements = driver.find_elements(By.CLASS_NAME, 'mantine-Text-root')
-    brands, models = [], []
-    for product in product_elements:
-        name = product.text.strip().replace("تومانءء", "").replace("تومان", "").replace("نامشخص", "").replace("جستجو در مدل‌ها", "").strip()
-        parts = name.split()
-        brand = parts[0] if len(parts) >= 2 else name
-        model = " ".join(parts[1:]) if len(parts) >= 2 else ""
-        if brand in valid_brands:
-            brands.append(brand)
-            models.append(model)
-        else:
-            models.append(brand + " " + model)
-            brands.append("")
-    return brands[25:], models[25:]
-
-def is_number(model_str):
-    try:
-        float(model_str.replace(",", ""))
-        return True
-    except ValueError:
-        return False
-
-def process_model(model_str):
-    model_str = model_str.replace("٬", "").replace(",", "").strip()
-    if is_number(model_str):
-        model_value = float(model_str)
-        if model_value <= 1:
-            model_value_with_increase = model_value * 0
-        elif model_value <= 7000000:
-            model_value_with_increase = model_value + 260000
-        elif model_value <= 10000000:
-            model_value_with_increase = model_value * 1.035
-        elif model_value <= 20000000:
-            model_value_with_increase = model_value * 1.025
-        elif model_value <= 30000000:
-            model_value_with_increase = model_value * 1.02
-        elif model_value <= 40000000:
-            model_value_with_increase = model_value * 1.015
-        else:
-            model_value_with_increase = model_value * 1.015
-        model_value_with_increase = round(model_value_with_increase, -5)
-        return f"{model_value_with_increase:,.0f}"
-    return model_str
+def extract_product_data(driver):
+    products = []
+    # هر محصول یک div با کلاس cursor-pointer ... دارد
+    product_boxes = driver.find_elements(By.XPATH, '//div[contains(@class, "cursor-pointer") and contains(@class, "border-lowOp-blue53")]')
+    for box in product_boxes:
+        try:
+            # نام محصول
+            name_el = box.find_element(By.XPATH, './/h1')
+            name = name_el.text.strip()
+            # لیست رنگ‌ها و قیمت‌ها
+            color_price_divs = box.find_elements(By.XPATH, './/div[contains(@class, "bg-gray-100") and contains(@class, "items-center")]')
+            for cp in color_price_divs:
+                try:
+                    color = cp.find_element(By.XPATH, './/p').text.strip()
+                    price = cp.find_element(By.XPATH, './/span[contains(@class, "price")]').text.strip()
+                    price = price.replace("تومان", "").replace("از", "").replace("٬", "").replace(",", "").strip()
+                    if not price or not any(char.isdigit() for char in price):
+                        continue
+                    products.append((name, color, price))
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return products
 
 def escape_special_characters(text):
     escape_chars = ['\\', '(', ')', '[', ']', '~', '*', '_', '-', '+', '>', '#', '.', '!', '|']
@@ -116,14 +96,12 @@ def split_message_by_emoji_group(message, max_length=4000):
     group = ""
     for line in lines:
         if line.startswith(('🔵', '🟡', '🍏', '🟣', '💻', '🟠', '🎮')):
-            # اگر گروه فعلی با اضافه کردن گروه جدید از حد مجاز بیشتر می‌شود، پارت جدید بساز
             if current and len(current) + len(group) > max_length:
                 parts.append(current.rstrip('\n'))
                 current = ""
             current += group
             group = ""
         group += line + '\n'
-    # اضافه کردن آخرین گروه
     if current and len(current) + len(group) > max_length:
         parts.append(current.rstrip('\n'))
         current = ""
@@ -133,62 +111,8 @@ def split_message_by_emoji_group(message, max_length=4000):
     return parts
 
 def decorate_line(line):
-    if line.startswith(('🔵', '🟡', '🍏', '🟣', '💻', '🟠', '🎮')):
-        return line  
-    if any(keyword in line for keyword in ["Nartab", "Tab", "تبلت"]):
-        return f"🟠 {line}"
-    elif "Galaxy" in line:
-        return f"🔵 {line}"
-    elif "POCO" in line or "Poco" in line or "Redmi" in line:
-        return f"🟡 {line}"
-    elif "iPhone" in line:
-        return f"🍏 {line}"
-    elif any(keyword in line for keyword in ["اینچی", "لپ تاپ"]):
-        return f"💻 {line}"   
-    elif any(keyword in line for keyword in ["RAM", "FA", "Classic", "Otel", "DOX", "General", "Bloom", "NOKIA", "TCH", "ALCATEL"]): 
-        return f"🟣 {line}"
-    elif any(keyword in line for keyword in ["Play Station", "کنسول بازی", "پلی استیشن", "بازی"]):
-        return f"🎮 {line}"
-    else:
-        return line
-
-def sort_lines_together_by_price(lines):
-    def extract_price(group):
-        for line in reversed(group):
-            parts = line.split()
-            for part in parts:
-                try:
-                    return float(part.replace(',', '').replace('،', ''))
-                except ValueError:
-                    continue
-        return float('inf')
-    grouped_lines = []
-    current_group = []
-    for line in lines:
-        if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            if current_group:
-                grouped_lines.append(current_group)
-            current_group = [line]
-        else:
-            current_group.append(line)
-    if current_group:
-        grouped_lines.append(current_group)
-    grouped_lines.sort(key=extract_price)
-    sorted_lines = [line for group in grouped_lines for line in group]
-    return sorted_lines
-
-def remove_extra_blank_lines(lines):
-    cleaned_lines = []
-    blank_count = 0
-    for line in lines:
-        if line.strip() == "":
-            blank_count += 1
-            if blank_count <= 1:
-                cleaned_lines.append(line)
-        else:
-            blank_count = 0
-            cleaned_lines.append(line)
-    return cleaned_lines
+    # فقط یک ایموجی برای همه محصولات چون فقط یک دسته داری
+    return f"🟣 {line}"
 
 def get_current_time():
     iran_tz = timezone('Asia/Tehran')
@@ -197,7 +121,7 @@ def get_current_time():
     return current_time
 
 def prepare_final_message(category_name, category_lines, update_date):
-    category_title = get_category_name(category_name)
+    # فقط یک دسته داری
     update_date = JalaliDate.today().strftime("%Y/%m/%d")
     current_time = get_current_time()
     weekday_mapping = {
@@ -215,80 +139,12 @@ def prepare_final_message(category_name, category_lines, update_date):
     header = (
         f"🗓 بروزرسانی {update_date_formatted} 🕓 ساعت: {current_time}\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
-        f"⬅️ موجودی {category_title} ➡️\n\n"
+        f"⬅️ موجودی گوشیای متفرقه ➡️\n\n"
     )
-    formatted_lines = []
-    current_product = None
-    product_variants = []
-    i = 0
-    while i < len(category_lines):
-        line = category_lines[i]
-        if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            if current_product:
-                formatted_lines.append(current_product)
-                if product_variants:
-                    formatted_lines.extend(product_variants)
-                formatted_lines.append("")
-                product_variants = []
-            current_product = line.strip()
-            i += 1
-        else:
-            if i + 1 < len(category_lines):
-                color = line.strip()
-                price = category_lines[i + 1].strip()
-                product_variants.append(f"{color} | {price}")
-                i += 2
-            else:
-                product_variants.append(line.strip())
-                i += 1
-    if current_product:
-        formatted_lines.append(current_product)
-        if product_variants:
-            formatted_lines.extend(product_variants)
-    formatted_lines = [
-        line for line in formatted_lines
-        if not any(emoji in line for emoji in ["🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮"]) or "|" not in line
-    ]
+    formatted_lines = category_lines
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
     return final_message
-
-def get_category_name(emoji):
-    mapping = {
-        "🔵": "سامسونگ",
-        "🟡": "شیائومی",
-        "🍏": "آیفون",
-        "💻": "لپ‌تاپ‌ها",
-        "🟠": "تبلت‌ها",
-        "🎮": "کنسول‌ بازی",
-        "🟣": "گوشیای متفرقه"
-    }
-    return mapping.get(emoji, "گوشیای متفرقه")
-
-def categorize_messages(lines):
-    categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}
-    current_category = None
-    for line in lines:
-        if line.startswith("🔵"):
-            current_category = "🔵"
-        elif line.startswith("🟡"):
-            current_category = "🟡"
-        elif line.startswith("🍏"):
-            current_category = "🍏"
-        elif line.startswith("🟣"):
-            current_category = "🟣"
-        elif line.startswith("💻"):
-            current_category = "💻"
-        elif line.startswith("🟠"):
-            current_category = "🟠"
-        elif line.startswith("🎮"):
-            current_category = "🎮"
-        if current_category:
-            categories[current_category].append(line)
-    for category in categories:
-        categories[category] = sort_lines_together_by_price(categories[category])
-        categories[category] = remove_extra_blank_lines(categories[category])
-    return categories
 
 def get_credentials():
     encoded = os.getenv("GSHEET_CREDENTIALS_JSON")
@@ -482,30 +338,24 @@ def main():
             logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
             return
         categories_urls = {
-            "mobile": "https://hamrahtel.com/quick-checkout?category=mobile",
-            "laptop": "https://hamrahtel.com/quick-checkout?category=laptop",
-            "tablet": "https://hamrahtel.com/quick-checkout?category=tablet",
-            "console": "https://hamrahtel.com/quick-checkout?category=game-console"
+            "all": "https://naminet.co/quick-commerce"
         }
-        valid_brands = ["Galaxy", "POCO", "Redmi", "iPhone", "Redtone", "VOCAL", "TCL", "NOKIA", "Honor", "Huawei", "GLX", "+Otel", "اینچی"]
         brands, models = [], []
         for name, url in categories_urls.items():
             driver.get(url)
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CLASS_NAME, 'mantine-Text-root')))
+            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.XPATH, '//div[contains(@class, "cursor-pointer") and contains(@class, "border-lowOp-blue53")]')))
             scroll_page(driver)
-            b, m = extract_product_data(driver, valid_brands)
-            brands.extend(b)
-            models.extend(m)
+            products = extract_product_data(driver)
+            for prod_name, color, prod_price in products:
+                brands.append("")  # برند جدا نداری
+                models.append(f"{prod_name} | {color} | {prod_price}")
         driver.quit()
-        if not brands:
+        if not models:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
             return
-        processed_data = []
-        for i in range(len(brands)):
-            model_str = process_model(models[i])
-            processed_data.append(f"{model_str} {brands[i]}")
-        message_lines = [decorate_line(row) for row in processed_data]
-        categorized = categorize_messages(message_lines)
+        # فقط یک دسته داری، همه را با ایموجی 🟣 نمایش بده
+        message_lines = [decorate_line(row) for row in models]
+        categorized = {"🟣": message_lines}
         today = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
         should_send_final_message = False
@@ -537,12 +387,6 @@ def main():
         )
         button_markup = {"inline_keyboard": []}
         emoji_labels = {
-            "🔵": "📱 لیست سامسونگ",
-            "🟡": "📱 لیست شیائومی",
-            "🍏": "📱 لیست آیفون",
-            "💻": "💻 لیست لپ‌تاپ",
-            "🟠": "📱 لیست تبلت",
-            "🎮": "🎮 کنسول بازی",
             "🟣": "📱 لیست گوشیای متفرقه"
         }
         for emoji, msg_ids in all_message_ids.items():
