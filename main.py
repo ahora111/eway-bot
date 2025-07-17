@@ -328,16 +328,12 @@ def main():
         categories_urls = {
             "all": "https://naminet.co/quick-commerce"
         }
-        brands, models = [], []
         for name, url in categories_urls.items():
             driver.get(url)
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.XPATH, '//h1[contains(@class, "text-left") and contains(@class, "text-sm")]')))
+            time.sleep(5)
             scroll_page(driver)
             products = extract_product_data(driver)
             logging.info(f"تعداد محصولات پیدا شده: {len(products)}")
-            for prod_name, color, prod_price in products:
-                brands.append("")
-                models.append(f"{prod_name} | {color} | {prod_price}")
         driver.quit()
         if not models:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
