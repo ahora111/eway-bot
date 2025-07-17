@@ -60,15 +60,20 @@ def scroll_page(driver, scroll_pause_time=2):
 
 def extract_product_data(driver):
     products = []
-    # فقط h1هایی که کلاسشان شامل text-left و text-sm است (نام محصول)
     name_els = driver.find_elements(By.XPATH, '//h1[contains(@class, "text-left") and contains(@class, "text-sm")]')
+    logging.info(f"تعداد h1 محصولات: {len(name_els)}")
     for name_el in name_els:
         try:
             name = name_el.text.strip()
-            # والد این h1 همان div محصول است
+            # والد مستقیم h1 را بگیر (div با justify-between)
             parent_div = name_el.find_element(By.XPATH, './../..')
-            # همه رنگ‌ها و قیمت‌ها را در این div پیدا کن
-            color_price_divs = parent_div.find_elements(By.XPATH, './/div[contains(@class, "bg-gray-100") and contains(@class, "items-center")]')
+            # والد والد را بگیر (div با کلاس cursor-pointer)
+            try:
+                product_box = parent_div.find_element(By.XPATH, './../..')
+            except:
+                product_box = parent_div
+            # همه رنگ‌ها و قیمت‌ها را در این product_box پیدا کن
+            color_price_divs = product_box.find_elements(By.XPATH, './/div[contains(@class, "bg-gray-100") and contains(@class, "items-center")]')
             for cp in color_price_divs:
                 try:
                     color = cp.find_element(By.TAG_NAME, 'p').text.strip()
@@ -79,7 +84,8 @@ def extract_product_data(driver):
                     products.append((name, color, price))
                 except Exception:
                     continue
-        except Exception:
+        except Exception as e:
+            logging.warning(f"خطا در استخراج محصول: {e}")
             continue
     return products
 
