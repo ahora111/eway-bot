@@ -60,18 +60,15 @@ def scroll_page(driver, scroll_pause_time=2):
 
 def extract_product_data(driver):
     products = []
-    # هر محصول یک div با کلاس cursor-pointer ... دارد
-    product_boxes = driver.find_elements(By.XPATH, '//div[contains(@class, "cursor-pointer") and contains(@class, "border-lowOp-blue53")]')
+    product_boxes = driver.find_elements(By.XPATH, '//div[contains(@class, "cursor-pointer")]')
     for box in product_boxes:
         try:
-            # نام محصول
-            name_el = box.find_element(By.XPATH, './/h1')
+            name_el = box.find_element(By.TAG_NAME, 'h1')
             name = name_el.text.strip()
-            # لیست رنگ‌ها و قیمت‌ها
             color_price_divs = box.find_elements(By.XPATH, './/div[contains(@class, "bg-gray-100") and contains(@class, "items-center")]')
             for cp in color_price_divs:
                 try:
-                    color = cp.find_element(By.XPATH, './/p').text.strip()
+                    color = cp.find_element(By.TAG_NAME, 'p').text.strip()
                     price = cp.find_element(By.XPATH, './/span[contains(@class, "price")]').text.strip()
                     price = price.replace("تومان", "").replace("از", "").replace("٬", "").replace(",", "").strip()
                     if not price or not any(char.isdigit() for char in price):
@@ -343,11 +340,13 @@ def main():
         brands, models = [], []
         for name, url in categories_urls.items():
             driver.get(url)
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.XPATH, '//div[contains(@class, "cursor-pointer") and contains(@class, "border-lowOp-blue53")]')))
+            # صبر کن تا حداقل یک h1 لود شود (نام محصول)
+            WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.TAG_NAME, 'h1')))
             scroll_page(driver)
             products = extract_product_data(driver)
+            logging.info(f"تعداد محصولات پیدا شده: {len(products)}")
             for prod_name, color, prod_price in products:
-                brands.append("")  # برند جدا نداری
+                brands.append("")
                 models.append(f"{prod_name} | {color} | {prod_price}")
         driver.quit()
         if not models:
