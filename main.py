@@ -65,27 +65,9 @@ def extract_product_data(driver):
     for name_el in name_els:
         try:
             name = name_el.text.strip()
-            # والد مستقیم h1 را بگیر (div با justify-between)
-            parent_div = name_el.find_element(By.XPATH, './../..')
-            # والد والد را بگیر (div با کلاس cursor-pointer)
-            try:
-                product_box = parent_div.find_element(By.XPATH, './../..')
-            except:
-                product_box = parent_div
-            # همه رنگ‌ها و قیمت‌ها را در این product_box پیدا کن
-            color_price_divs = product_box.find_elements(By.XPATH, './/div[contains(@class, "bg-gray-100") and contains(@class, "items-center")]')
-            for cp in color_price_divs:
-                try:
-                    color = cp.find_element(By.TAG_NAME, 'p').text.strip()
-                    price = cp.find_element(By.XPATH, './/span[contains(@class, "price")]').text.strip()
-                    price = price.replace("تومان", "").replace("از", "").replace("٬", "").replace(",", "").strip()
-                    if not price or not any(char.isdigit() for char in price):
-                        continue
-                    products.append((name, color, price))
-                except Exception:
-                    continue
+            logging.info(f"نام محصول: {name}")
         except Exception as e:
-            logging.warning(f"خطا در استخراج محصول: {e}")
+            logging.warning(f"خطا در استخراج نام محصول: {e}")
             continue
     return products
 
