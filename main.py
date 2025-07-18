@@ -26,7 +26,6 @@ BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 
-
 # -------------------- دریافت داده از API نامی‌نت --------------------
 def fetch_from_naminet_api():
     url = "https://panel.naminet.co/api/catalog/productGroupsAttrNew?term="
@@ -40,11 +39,19 @@ def fetch_from_naminet_api():
         products = []
         for parent in data.get("ParentCategories", []):
             for category in parent.get("Data", []):
+                category_name = category.get("Name", "")
                 for item in category.get("Data", []):
-                    full_name = f"{item.get('ProductName', '')} {item.get('Name', '')}".strip()
+                    product_name = item.get("ProductName", "")
+                    color = item.get("Name", "")
                     price = item.get("final_price_value", 0)
-                    if full_name and price > 0:
-                        products.append({"name": full_name, "price": int(price)})
+                    if product_name and price > 0:
+                        # نام استاندارد: مدل + رنگ (اگر رنگ وجود داشت)
+                        full_name = f"{product_name} {color}".strip()
+                        products.append({
+                            "name": full_name,
+                            "category": category_name,
+                            "price": int(price)
+                        })
         return products
     except Exception as e:
         logging.error(f"❌ خطا در دریافت اطلاعات از منبع اول: {e}")
@@ -89,7 +96,11 @@ def fetch_from_hamrahtel_site():
                 name = cleaned_elements[i]
                 price_str = cleaned_elements[i+1].replace("تومان", "").replace(",", "").replace("٬", "").strip()
                 if price_str.isdigit():
-                    products.append({"name": name, "price": int(price_str)})
+                    products.append({
+                        "name": name,
+                        "category": category,  # دسته‌بندی کلی (mobile/tablet/console)
+                        "price": int(price_str)
+                    })
                     i += 2
                 else:
                     i += 1
@@ -111,27 +122,43 @@ def process_price(price):
     return round(increase, -5)
 
 def normalize_name(name):
+    # استانداردسازی نام برای مقایسه (حذف فاصله و کاراکترهای خاص و ...)
     return ' '.join(name.lower().strip().replace('ی', 'ي').replace('ک', 'ك').split())
 
-# -------------------- ساخت لیست نهایی محصولات با کمترین قیمت --------------------
+# -------------------- ادغام و انتخاب کمترین قیمت --------------------
 def get_final_product_list():
     naminet_products = fetch_from_naminet_api()
     hamrahtel_products = fetch_from_hamrahtel_site()
-    all_products_raw = defaultdict(list)
+    all_products = defaultdict(list)
+    # هر محصول را با نام استاندارد ذخیره کن و قیمت را اضافه کن
     for p in naminet_products:
-        all_products_raw[normalize_name(p['name'])].append(p['price'])
+        all_products[normalize_name(p['name'])].append({
+            "name": p['name'],
+            "category": p.get('category', ''),
+            "price": p['price']
+        })
     for p in hamrahtel_products:
-        all_products_raw[normalize_name(p['name'])].append(p['price'])
+        all_products[normalize_name(p['name'])].append({
+            "name": p['name'],
+            "category": p.get('category', ''),
+            "price": p['price']
+        })
+    # انتخاب کمترین قیمت برای هر محصول
     final_products = []
-    for name, prices in all_products_raw.items():
-        best_raw_price = min(prices)
-        final_price = process_price(best_raw_price)
+    for name, items in all_products.items():
+        # انتخاب آیتم با کمترین قیمت خام
+        best_item = min(items, key=lambda x: x['price'])
+        final_price = process_price(best_item['price'])
         if final_price > 0:
-            final_products.append({"name": name.title(), "price": final_price})
+            final_products.append({
+                "name": best_item['name'],
+                "category": best_item['category'],
+                "price": final_price
+            })
     final_products.sort(key=lambda x: x['price'])
     return final_products
 
-# -------------------- دسته‌بندی محصولات و ساخت پیام --------------------
+# -------------------- دسته‌بندی و ساخت پیام --------------------
 def categorize_products(products):
     categorized = defaultdict(list)
     emoji_map = {
