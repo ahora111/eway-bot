@@ -497,8 +497,6 @@ def main():
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
             return
 
-            line = f"{emoji} {p['product']} | {p['color']} | {p['price']} تومان"
-            categorized.setdefault(emoji, []).append(line)
         today = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
         should_send_final_message = False
