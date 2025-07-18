@@ -38,9 +38,10 @@ if not (start_time <= current_time <= end_time):
 def get_driver():
     try:
         options = webdriver.ChromeOptions()
-        options.add_argument("--headless")
+        # options.add_argument("--headless")  # این خط را کامنت کن تا مرورگر باز شود
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         service = Service()
         driver = webdriver.Chrome(service=service, options=options)
         return driver
