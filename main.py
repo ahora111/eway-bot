@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import time
 import requests
@@ -18,7 +17,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from persiantools.jdatetime import JalaliDate
-import undetected_chromedriver as uc
 
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SHEET_NAME = 'Sheet1'
@@ -36,10 +34,9 @@ if not (start_time <= current_time <= end_time):
     print("🕒 خارج از بازه مجاز اجرا (۹:۳۰ تا ۲۳:۳۰). اسکریپت متوقف شد.")
     sys.exit()
 
-
-
 def get_driver():
     try:
+        import undetected_chromedriver as uc
         options = uc.ChromeOptions()
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
@@ -51,25 +48,26 @@ def get_driver():
         logging.error(f"خطا در ایجاد WebDriver: {e}")
         return None
 
-def expand_all_categories(driver):
-    # همه دکمه‌های دسته‌بندی که باید باز بشن (مثلاً دکمه‌های با فلش یا عنوان دسته)
-    category_buttons = driver.find_elements(By.XPATH, '//div[contains(@class, "cursor-pointer") and contains(@class, "bg-lowOp-blue53")]')
-    for btn in category_buttons:
-        try:
-            btn.click()
-            time.sleep(1)  # صبر برای لود محصولات
-        except Exception:
-            continue
-            
 def scroll_page(driver, scroll_pause_time=2):
     last_height = driver.execute_script("return document.body.scrollHeight")
-    while True:
+    for _ in range(10):  # چند بار اسکرول کن تا همه محصولات لود شوند
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(scroll_pause_time)
         new_height = driver.execute_script("return document.body.scrollHeight")
         if new_height == last_height:
             break
         last_height = new_height
+
+def expand_all_categories(driver):
+    # همه دسته‌بندی‌ها را باز کن (روی همه دکمه‌های دسته کلیک کن)
+    category_buttons = driver.find_elements(By.XPATH, '//div[contains(@class, "cursor-pointer") and contains(@class, "bg-lowOp-blue53")]')
+    for btn in category_buttons:
+        try:
+            driver.execute_script("arguments[0].scrollIntoView();", btn)
+            btn.click()
+            time.sleep(1)
+        except Exception:
+            continue
 
 def extract_product_data(driver):
     products = []
@@ -120,7 +118,6 @@ def split_message_by_emoji_group(message, max_length=4000):
     return parts
 
 def decorate_line(line):
-    # فقط یک ایموجی برای همه محصولات چون فقط یک دسته داری
     return f"🟣 {line}"
 
 def get_current_time():
@@ -130,7 +127,6 @@ def get_current_time():
     return current_time
 
 def prepare_final_message(category_name, category_lines, update_date):
-    # فقط یک دسته داری
     update_date = JalaliDate.today().strftime("%Y/%m/%d")
     current_time = get_current_time()
     weekday_mapping = {
@@ -349,21 +345,21 @@ def main():
         categories_urls = {
             "all": "https://naminet.co/quick-commerce"
         }
-for name, url in categories_urls.items():
-    driver.get(url)
-    time.sleep(5)
-    expand_all_categories(driver)
-    scroll_page(driver)
-    products = extract_product_data(driver)
-    logging.info(f"تعداد محصولات پیدا شده: {len(products)}")
-    for prod_name, color, prod_price in products:
-        brands.append("")
-        models.append(f"{prod_name} | {color} | {prod_price}")
+        brands, models = [], []
+        for name, url in categories_urls.items():
+            driver.get(url)
+            time.sleep(5)
+            expand_all_categories(driver)
+            scroll_page(driver)
+            products = extract_product_data(driver)
+            logging.info(f"تعداد محصولات پیدا شده: {len(products)}")
+            for prod_name, color, prod_price in products:
+                brands.append("")
+                models.append(f"{prod_name} | {color} | {prod_price}")
         driver.quit()
         if not models:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
             return
-        # فقط یک دسته داری، همه را با ایموجی 🟣 نمایش بده
         message_lines = [decorate_line(row) for row in models]
         categorized = {"🟣": message_lines}
         today = JalaliDate.today().strftime("%Y-%m-%d")
