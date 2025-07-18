@@ -39,7 +39,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 iran_tz = timezone('Asia/Tehran')
 now = datetime.now(iran_tz)
 start_time = dt_time(23, 39)
-end_time = dt_time(23, 30)
+end_time = dt_time(09, 30)
 if not (start_time <= now.time() <= end_time):
     logging.info("🕒 خارج از بازه مجاز اجرا (۹:۳۰ تا ۲۳:۳۰). اسکریپت متوقف شد.")
     sys.exit()
