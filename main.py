@@ -1,4 +1,3 @@
-
 import os
 import time
 import requests
@@ -15,277 +14,358 @@ from datetime import datetime
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# --- Configuration (خواندن متغیرها از محیط) ---
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SHEET_NAME = 'Sheet1'
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-# مهم: توکن API از اینجا خوانده می‌شود و دیگر در کد نیست
-NAMINet_API_TOKEN = os.getenv("NAMINET_API_TOKEN")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def fetch_products_json():
-    """اطلاعات محصولات را از API دریافت می‌کند."""
-    if not NAMINet_API_TOKEN:
-        logging.error("❌ توکن Naminet API در متغیرهای محیطی (NAMINET_API_TOKEN) یافت نشد.")
-        return None
-
     url = "https://panel.naminet.co/api/catalog/productGroupsAttrNew?term="
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
-        "Authorization": f"Bearer {NAMINet_API_TOKEN}" # استفاده از توکن خوانده شده
+        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
     }
-
-    try:
-        response = requests.get(url, headers=headers, verify=False, timeout=30)
-        response.raise_for_status()
-        logging.info("✅ اطلاعات با موفقیت از API دریافت شد. وضعیت: %s", response.status_code)
-        return response.json()
-    except requests.exceptions.RequestException as err:
-        logging.error("❌ خطا در درخواست به API: %s", err)
-    return None
+    response = requests.get(url, headers=headers, verify=False)
+    print("Status code:", response.status_code)
+    print("Response text:", response.text[:500])
+    data = response.json()
+    return data
 
 def extract_products(data):
-    """اطلاعات محصولات را از داده خام استخراج و فرمت‌بندی می‌کند."""
-    if not data or "ParentCategories" not in data:
-        return []
-        
     products = []
     for parent in data.get("ParentCategories", []):
         for category in parent.get("Data", []):
-            category_name = category.get("Name", "متفرقه")
+            category_name = category.get("Name", "")
             for item in category.get("Data", []):
+                product_name = item.get("ProductName", "")
+                color = item.get("Name", "")
                 price = item.get("final_price_value", 0)
+                price = f"{int(price):,}"
                 products.append({
                     "category": category_name,
-                    "product": item.get("ProductName", "نامشخص"),
-                    "color": item.get("Name", "نامشخص"),
-                    "price": f"{int(price):,}"
+                    "product": product_name,
+                    "color": color,
+                    "price": price
                 })
     return products
 
 def escape_special_characters(text):
-    """کاراکترهای خاص تلگرام برای MarkdownV2 را اصلاح می‌کند."""
-    escape_chars = r'\_*[]()~`>#+-=|{}.!'
-    return ''.join(f'\\{char}' if char in escape_chars else char for char in text)
+    escape_chars = ['\\', '(', ')', '[', ']', '~', '*', '_', '-', '+', '>', '#', '.', '!', '|']
+    for char in escape_chars:
+        text = text.replace(char, '\\' + char)
+    return text
 
-def split_message(message, max_length=4000):
-    """یک پیام طولانی را به بخش‌های کوچک‌تر تقسیم می‌کند."""
+def split_message_by_emoji_group(message, max_length=4000):
     lines = message.split('\n')
     parts = []
-    current_part = ""
+    current = ""
+    group = ""
     for line in lines:
-        if len(current_part) + len(line) + 1 > max_length:
-            if current_part:
-                parts.append(current_part.strip())
-            current_part = line + '\n'
-        else:
-            current_part += line + '\n'
-    if current_part.strip():
-        parts.append(current_part.strip())
+        if line.startswith(('🔵', '🟡', '🍏', '🟣', '💻', '🟠', '🎮')):
+            if current and len(current) + len(group) > max_length:
+                parts.append(current.rstrip('\n'))
+                current = ""
+            current += group
+            group = ""
+        group += line + '\n'
+    if current and len(current) + len(group) > max_length:
+        parts.append(current.rstrip('\n'))
+        current = ""
+    current += group
+    if current.strip():
+        parts.append(current.rstrip('\n'))
     return parts
 
-def get_current_time_and_date():
-    """تاریخ و زمان فعلی شمسی و نام روز هفته را برمی‌گرداند."""
+def get_current_time():
     iran_tz = timezone('Asia/Tehran')
-    now = datetime.now(iran_tz)
-    jalali_today = JalaliDate(now)
-    date_str_slash = jalali_today.strftime("%Y/%m/%d")
-    date_str_dash = jalali_today.strftime("%Y-%m-%d")
-    time_str = now.strftime('%H:%M')
-    weekday_map = {0: "شنبه💪", 1: "یکشنبه😃", 2: "دوشنبه☺️", 3: "سه‌شنبه🥱", 4: "چهارشنبه😕", 5: "پنج‌شنبه🥳", 6: "جمعه😎"}
-    weekday_farsi = weekday_map[jalali_today.weekday()]
-    return date_str_slash, date_str_dash, time_str, weekday_farsi
+    iran_time = datetime.now(iran_tz)
+    current_time = iran_time.strftime('%H:%M')
+    return current_time
 
-def prepare_category_message(category_lines, update_date_str, time_str, weekday_farsi):
-    """متن پیام برای یک دسته‌بندی خاص را آماده می‌کند."""
-    update_date_formatted = f"{weekday_farsi} {update_date_str}"
-    header = f"🗓 بروزرسانی {update_date_formatted} 🕓 ساعت: {time_str}\n✅ لیست پخش موبایل اهورا\n\n"
-    content = "\n".join(category_lines)
+def prepare_final_message(category_name, category_lines, update_date):
+    update_date = JalaliDate.today().strftime("%Y/%m/%d")
+    current_time = get_current_time()
+    weekday_mapping = {
+            "Saturday": "شنبه💪",
+            "Sunday": "یکشنبه😃",
+            "Monday": "دوشنبه☺️",
+            "Tuesday": "سه شنبه🥱",
+            "Wednesday": "چهارشنبه😕",
+            "Thursday": "پنج شنبه☺️",
+            "Friday": "جمعه😎"
+    }
+    weekday_english = JalaliDate.today().weekday()
+    weekday_farsi = list(weekday_mapping.values())[weekday_english]
+    update_date_formatted = f"{weekday_farsi} {update_date.replace('-', '/')}"
+    header = (
+        f"🗓 بروزرسانی {update_date_formatted} 🕓 ساعت: {current_time}\n"
+        f"✅ لیست پخش موبایل اهورا\n\n"
+        f"⬅️ موجودی گوشیای متفرقه ➡️\n\n"
+    )
+    formatted_lines = category_lines
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
-    return f"{header}{content}{footer}"
+    final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
+    return final_message
 
 def get_credentials():
-    """اطلاعات گوگل شیت را از متغیر محیطی می‌خواند."""
-    encoded_creds = os.getenv("GSHEET_CREDENTIALS_JSON")
-    if not encoded_creds:
-        raise ValueError("❌ متغیر GSHEET_CREDENTIALS_JSON یافت نشد.")
-    decoded_creds = base64.b64decode(encoded_creds)
-    temp_path = "/tmp/gsheet_creds.json"
+    encoded = os.getenv("GSHEET_CREDENTIALS_JSON")
+    if not encoded:
+        raise Exception("Google Sheets credentials not found in environment variable")
+    decoded = base64.b64decode(encoded)
+    temp_path = "/tmp/creds.json"
     with open(temp_path, "wb") as f:
-        f.write(decoded_creds)
+        f.write(decoded)
     return temp_path
 
 def connect_to_sheet():
-    """به گوگل شیت متصل می‌شود."""
     creds_path = get_credentials()
-    scope = ["https://spreadsheets.google.com/feeds", 'https://www.googleapis.com/auth/spreadsheets', "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
-    client = gspread.authorize(creds)
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    credentials = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+    client = gspread.authorize(credentials)
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
-    logging.info("✅ با موفقیت به گوگل شیت متصل شد.")
     return sheet
 
 def check_and_create_headers(sheet):
-    """هدرهای شیت را بررسی و در صورت نیاز ایجاد می‌کند."""
-    try:
-        first_row = sheet.row_values(1)
-    except (gspread.exceptions.APIError, IndexError):
-        first_row = []
+    first_row = sheet.get_all_values()[0] if sheet.get_all_values() else []
     headers = ["emoji", "date", "part", "message_id", "text"]
     if first_row != headers:
-        sheet.insert_row(headers, 1)
-        logging.info("✅ هدرها در شیت ایجاد شدند.")
+        sheet.update(values=[headers], range_name="A1:E1")
+        logging.info("✅ هدرها اضافه شدند.")
     else:
-        logging.info("🔄 هدرها از قبل موجود هستند.")
+        logging.info("🔄 هدرها قبلاً موجود هستند.")
 
-def load_sheet_data(sheet, date_str_dash):
-    """اطلاعات پیام‌های امروز را از شیت بارگذاری می‌کند."""
+def load_sheet_data(sheet):
     records = sheet.get_all_records()
-    today_data = {}
+    data = {}
     for row in records:
-        if str(row.get("date")) == date_str_dash:
-            emoji = row.get("emoji")
-            if emoji and emoji not in today_data:
-                today_data[emoji] = {}
-            today_data[emoji][int(row["part"])] = {"message_id": row["message_id"], "text": row["text"]}
-    return today_data
+        emoji = row.get("emoji")
+        date = row.get("date")
+        part = row.get("part")
+        if emoji and date:
+            data.setdefault((emoji, date), []).append({
+                "part": int(part),
+                "message_id": row.get("message_id"),
+                "text": row.get("text")
+            })
+    return data
 
-def update_sheet_data(sheet, emoji, date_str_dash, new_messages):
-    """اطلاعات جدید پیام‌ها را در شیت آپدیت (حذف و اضافه) می‌کند."""
-    cell_list = sheet.findall(emoji, in_column=1)
-    date_cell_list = sheet.findall(date_str_dash, in_column=2)
-    emoji_rows = {cell.row for cell in cell_list}
-    date_rows = {cell.row for cell in date_cell_list}
-    for row_num in sorted(list(emoji_rows.intersection(date_rows)), reverse=True):
+def update_sheet_data(sheet, emoji, messages):
+    today = JalaliDate.today().strftime("%Y-%m-%d")
+    records = sheet.get_all_records()
+    rows_to_delete = [i+2 for i, row in enumerate(records) if row.get("emoji") == emoji and row.get("date") == today]
+    for row_num in reversed(rows_to_delete):
         sheet.delete_rows(row_num)
-    rows_to_add = []
-    for part, (message_id, text) in enumerate(new_messages, 1):
-        if message_id:
-            rows_to_add.append([emoji, date_str_dash, part, message_id, text])
-    if rows_to_add:
-        sheet.append_rows(rows_to_add)
-    logging.info(f"🔄 شیت برای ایموجی '{emoji}' بروزرسانی شد.")
+    for part, (message_id, text) in enumerate(messages, 1):
+        sheet.append_row([emoji, today, part, message_id, text])
 
-def send_telegram_api(method, params):
-    """یک متد را در API تلگرام فراخوانی می‌کند."""
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+def send_telegram_message(message, bot_token, chat_id):
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    params = {
+        "chat_id": chat_id,
+        "text": escape_special_characters(message),
+        "parse_mode": "MarkdownV2"
+    }
     response = requests.post(url, json=params)
-    if not response.ok:
-        # خطای "message is not modified" یک خطای واقعی نیست، پس آن را نادیده می‌گیریم
-        if "message is not modified" not in response.text:
-            logging.warning("⚠️ خطا در API تلگرام (%s): %s", method, response.text)
+    if response.ok:
+        return response.json()["result"]["message_id"]
+    else:
+        logging.error("خطا در ارسال پیام: %s", response.text)
         return None
-    return response.json().get("result")
 
-def process_category_messages(emoji, new_messages, today_sheet_data, bot_token, chat_id):
-    """پیام‌های یک دسته را مدیریت (ارسال، ویرایش، حذف) می‌کند."""
-    prev_msgs = today_sheet_data.get(emoji, {})
-    final_message_data = []
-    changes_made = False
-    for i, new_msg_text in enumerate(new_messages, 1):
-        message_id = None
-        if i in prev_msgs:
-            old_msg = prev_msgs[i]
-            if old_msg["text"] != new_msg_text:
-                changes_made = True
-                result = send_telegram_api("editMessageText", {"chat_id": chat_id, "message_id": old_msg["message_id"], "text": escape_special_characters(new_msg_text), "parse_mode": "MarkdownV2"})
-                message_id = old_msg["message_id"] if result else None
+def edit_telegram_message(message_id, message, bot_token, chat_id):
+    url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+    params = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": escape_special_characters(message),
+        "parse_mode": "MarkdownV2"
+    }
+    response = requests.post(url, json=params)
+    return response.ok
+
+def delete_telegram_message(message_id, bot_token, chat_id):
+    url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+    params = {
+        "chat_id": chat_id,
+        "message_id": message_id
+    }
+    response = requests.post(url, json=params)
+    return response.ok
+
+def process_category_messages(emoji, messages, bot_token, chat_id, sheet, today):
+    sheet_data = load_sheet_data(sheet)
+    prev_msgs = sorted([row for row in sheet_data.get((emoji, today), [])], key=lambda x: x["part"])
+    new_msgs = []
+    should_send_final_message = False
+    for i, msg in enumerate(messages):
+        if i < len(prev_msgs):
+            if prev_msgs[i]["text"] != msg:
+                ok = edit_telegram_message(prev_msgs[i]["message_id"], msg, bot_token, chat_id)
+                if not ok:
+                    message_id = send_telegram_message(msg, bot_token, chat_id)
+                    should_send_final_message = True
+                else:
+                    message_id = prev_msgs[i]["message_id"]
+                    should_send_final_message = True
             else:
-                message_id = old_msg["message_id"]
+                message_id = prev_msgs[i]["message_id"]
         else:
-            changes_made = True
-        
-        if not message_id: # اگر نیاز به ارسال پیام جدید باشد (چه برای اولین بار، چه به دلیل شکست ویرایش)
-            if i in prev_msgs: send_telegram_api("deleteMessage", {"chat_id": chat_id, "message_id": prev_msgs[i]["message_id"]})
-            result = send_telegram_api("sendMessage", {"chat_id": chat_id, "text": escape_special_characters(new_msg_text), "parse_mode": "MarkdownV2"})
-            if result: message_id = result["message_id"]
+            message_id = send_telegram_message(msg, bot_token, chat_id)
+            should_send_final_message = True
+        new_msgs.append((message_id, msg))
+    for j in range(len(messages), len(prev_msgs)):
+        delete_telegram_message(prev_msgs[j]["message_id"], bot_token, chat_id)
+        should_send_final_message = True
+    update_sheet_data(sheet, emoji, new_msgs)
+    return [msg_id for msg_id, _ in new_msgs], should_send_final_message
 
-        if message_id: final_message_data.append((message_id, new_msg_text))
+def update_final_message_in_sheet(sheet, message_id, text):
+    today = JalaliDate.today().strftime("%Y-%m-%d")
+    records = sheet.get_all_records()
+    found = False
+    for i, row in enumerate(records, start=2):
+        if row.get("emoji") == "FINAL" and row.get("date") == today:
+            sheet.update(values=[["FINAL", today, 1, message_id, text]], range_name=f"A{i}:E{i}")
+            found = True
+            break
+    if not found:
+        sheet.append_row(["FINAL", today, 1, message_id, text])
 
-    for part_num, old_msg in prev_msgs.items():
-        if part_num > len(new_messages):
-            changes_made = True
-            send_telegram_api("deleteMessage", {"chat_id": chat_id, "message_id": old_msg["message_id"]})
-            
-    return final_message_data, changes_made
+def get_final_message_from_sheet(sheet):
+    today = JalaliDate.today().strftime("%Y-%m-%d")
+    records = sheet.get_all_records()
+    for row in records:
+        if row.get("emoji") == "FINAL" and row.get("date") == today:
+            return row.get("message_id"), row.get("text")
+    return None, None
 
-def send_or_edit_final_message(text, markup, today_data, bot_token, chat_id, force_resend=False):
-    """پیام نهایی (پین شده) را مدیریت می‌کند."""
-    prev_final = today_data.get("FINAL", {}).get(1)
-    if prev_final:
-        message_id = prev_final["message_id"]
-        if prev_final["text"] == text and not force_resend:
-            logging.info("🔁 پیام نهایی بدون تغییر است.")
-            return [(message_id, text)]
-        
-        result = send_telegram_api("editMessageText", {"chat_id": chat_id, "message_id": message_id, "text": escape_special_characters(text), "parse_mode": "MarkdownV2", "reply_markup": markup})
-        if result: return [(message_id, text)]
-        send_telegram_api("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
-
-    logging.info("🚀 در حال ارسال پیام نهایی جدید...")
-    result = send_telegram_api("sendMessage", {"chat_id": chat_id, "text": escape_special_characters(text), "parse_mode": "MarkdownV2", "reply_markup": markup})
-    if result: return [(result["message_id"], text)]
-    return []
+def send_or_edit_final_message(sheet, final_message, bot_token, chat_id, button_markup, should_send):
+    message_id, prev_text = get_final_message_from_sheet(sheet)
+    escaped_text = escape_special_characters(final_message)
+    if message_id and prev_text == final_message and not should_send:
+        logging.info("🔁 پیام نهایی تغییری نکرده است.")
+        return message_id
+    if message_id and (prev_text != final_message or should_send):
+        url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+        params = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": escaped_text,
+            "parse_mode": "MarkdownV2",
+            "reply_markup": json.dumps(button_markup)
+        }
+        response = requests.post(url, json=params)
+        if response.ok:
+            update_final_message_in_sheet(sheet, message_id, final_message)
+            logging.info("✅ پیام نهایی ویرایش شد.")
+            return message_id
+        else:
+            logging.warning("❌ خطا در ویرایش پیام نهایی، حذف پیام قبلی و ارسال پیام جدید.")
+            # حذف پیام قبلی
+            del_url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+            del_params = {
+                "chat_id": chat_id,
+                "message_id": message_id
+            }
+            del_response = requests.post(del_url, json=del_params)
+            if del_response.ok:
+                logging.info("✅ پیام نهایی قبلی حذف شد.")
+            else:
+                logging.warning("❌ حذف پیام نهایی قبلی موفق نبود: %s", del_response.text)
+    # ارسال پیام جدید
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    params = {
+        "chat_id": chat_id,
+        "text": escaped_text,
+        "parse_mode": "MarkdownV2",
+        "reply_markup": json.dumps(button_markup)
+    }
+    response = requests.post(url, json=params)
+    if response.ok:
+        message_id = response.json()["result"]["message_id"]
+        update_final_message_in_sheet(sheet, message_id, final_message)
+        logging.info("✅ پیام نهایی ارسال شد.")
+        return message_id
+    else:
+        logging.error("❌ خطا در ارسال پیام نهایی: %s", response.text)
+        return None
 
 def main():
-    """تابع اصلی اجرای اسکریپت."""
-    if not all([SPREADSHEET_ID, BOT_TOKEN, CHAT_ID, NAMINet_API_TOKEN]):
-        logging.error("❌ یک یا چند متغیر محیطی ضروری تعریف نشده‌اند. لطفا از وجود SPREADSHEET_ID, TELEGRAM_TOKEN, CHAT_ID, NAMINet_API_TOKEN اطمینان حاصل کنید.")
-        return
-
     try:
-        json_data = fetch_products_json()
-        if not json_data: return
-        products = extract_products(json_data)
-        if not products:
-            logging.info("✅ در حال حاضر محصولی برای نمایش وجود ندارد.")
-            return
-
-        date_slash, date_dash, current_time, weekday_farsi = get_current_time_and_date()
         sheet = connect_to_sheet()
         check_and_create_headers(sheet)
-        today_sheet_data = load_sheet_data(sheet, date_dash)
-
-        emoji_map = {"گوشی سامسونگ": "🔵", "گوشی شیائومی": "🟡", "گوشی آیفون": "🍏", "تبلت": "🟠", "لپ تاپ": "💻"}
-        categorized_lines = {}
+        data = fetch_products_json()
+        products = extract_products(data)
+        if not products:
+            logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
+            return
+        emoji_map = {
+            "گوشی سامسونگ": "🔵",
+            "گوشی شیائومی": "🟡",
+            "گوشی آیفون": "🍏",
+            "گوشی نوکیا": "🟣",
+            "گوشی وکال": "🟣",
+            "گوشی داریا": "🟣",
+            "گوشی تی سی ال": "🟣",
+            "گوشی رد تون": "🟣",
+            "گوشی ریلمی": "🟣",
+            "ناتینگ فون": "🟣",
+            "تبلت": "🟠",
+        }
+        categorized = {}
         for p in products:
             emoji = emoji_map.get(p["category"], "🟣")
             line = f"{emoji} {p['product']} | {p['color']} | {p['price']} تومان"
-            categorized_lines.setdefault(emoji, []).append(line)
-        
-        any_changes_made = False
-        all_message_ids_for_buttons = {}
-
-        for emoji, lines in categorized_lines.items():
-            full_message = prepare_category_message(lines, date_slash, current_time, weekday_farsi)
-            message_parts = split_message(full_message)
-            final_data, changed = process_category_messages(emoji, message_parts, today_sheet_data, BOT_TOKEN, CHAT_ID)
+            categorized.setdefault(emoji, []).append(line)
+        today = JalaliDate.today().strftime("%Y-%m-%d")
+        all_message_ids = {}
+        should_send_final_message = False
+        for emoji, lines in categorized.items():
+            if not lines:
+                continue
+            message = prepare_final_message(emoji, lines, today)
+            message_parts = split_message_by_emoji_group(message)
+            current_time = get_current_time()
+            for idx in range(1, len(message_parts)):
+                message_parts[idx] = f"⏰ {current_time}\n" + message_parts[idx]
+            message_ids, changed = process_category_messages(emoji, message_parts, BOT_TOKEN, CHAT_ID, sheet, today)
+            all_message_ids[emoji] = message_ids
             if changed:
-                any_changes_made = True
-                update_sheet_data(sheet, emoji, date_dash, final_data)
-            all_message_ids_for_buttons[emoji] = [msg_id for msg_id, _ in final_data]
-
-        final_message_text = "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد.\n\n✅اطلاعات واریز\n🔷 شماره شبا : IR970560611828006154229701\n🔷 شماره کارت : 6219861812467917\n🔷 بلو بانک   حسین گرئی\n\n⭕️ حتما رسید واریز به ایدی تلگرام زیر ارسال شود .\n🆔 @lhossein1\n\n✅شماره تماس ثبت سفارش :\n📞 09371111558\n📞 09386373926\n📞 09308529712\n📞 028-3399-1417"
-        button_labels = {"🔵": "📱 لیست سامسونگ", "🟡": "📱 لیست شیائومی", "🍏": "📱 لیست آیفون", "🟣": "📱 لیست سایر برندها", "🟠": "📱 لیست تبلت", "💻": "💻 لیست لپ‌تاپ"}
-        channel_numeric_id = CHAT_ID.replace('-100', '')
-        inline_keyboard = []
-        for emoji, label in button_labels.items():
-            if all_message_ids_for_buttons.get(emoji):
-                first_message_id = all_message_ids_for_buttons[emoji][0]
-                inline_keyboard.append([{"text": label, "url": f"https://t.me/c/{channel_numeric_id}/{first_message_id}"}])
-        
-        button_markup = {"inline_keyboard": inline_keyboard}
-        final_message_data = send_or_edit_final_message(final_message_text, button_markup, today_sheet_data, BOT_TOKEN, CHAT_ID, force_resend=any_changes_made)
-        if final_message_data:
-            update_sheet_data(sheet, "FINAL", date_dash, final_message_data)
-        
-        logging.info("🎉 اسکریپت با موفقیت اجرا شد.")
-
+                should_send_final_message = True
+        final_message = (
+            "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
+            "✅اطلاعات واریز\n"
+            "🔷 شماره شبا : IR970560611828006154229701\n"
+            "🔷 شماره کارت : 6219861812467917\n"
+            "🔷 بلو بانک   حسین گرئی\n\n"
+            "⭕️ حتما رسید واریز به ایدی تلگرام زیر ارسال شود .\n"
+            "🆔 @lhossein1\n\n"
+            "✅شماره تماس ثبت سفارش :\n"
+            "📞 09371111558\n"
+            "📞 09386373926\n"
+            "📞 09308529712\n"
+            "📞 028-3399-1417"
+        )
+        button_markup = {"inline_keyboard": []}
+        emoji_labels = {
+            "🔵": "📱 لیست سامسونگ",
+            "🟡": "📱 لیست شیائومی",
+            "🍏": "📱 لیست آیفون",
+            "🟣": "📱 لیست گوشیای متفرقه",
+            "🟠": "📱 لیست تبلت"
+        }
+        for emoji, msg_ids in all_message_ids.items():
+            for msg_id in msg_ids:
+                if msg_id:
+                    button_markup["inline_keyboard"].append([
+                        {"text": emoji_labels.get(emoji, emoji), "url": f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"}
+                    ])
+        send_or_edit_final_message(sheet, final_message, BOT_TOKEN, CHAT_ID, button_markup, should_send_final_message)
     except Exception as e:
-        logging.error(f"❌ یک خطای پیش‌بینی نشده در اجرای اصلی رخ داد: {e}", exc_info=True)
+        logging.error(f"❌ خطا: {e}")
 
 if __name__ == "__main__":
     main()
