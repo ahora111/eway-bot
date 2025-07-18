@@ -18,6 +18,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from persiantools.jdatetime import JalaliDate
+import undetected_chromedriver as uc
 
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SHEET_NAME = 'Sheet1'
@@ -35,16 +36,16 @@ if not (start_time <= current_time <= end_time):
     print("🕒 خارج از بازه مجاز اجرا (۹:۳۰ تا ۲۳:۳۰). اسکریپت متوقف شد.")
     sys.exit()
 
+
+
 def get_driver():
     try:
-        options = webdriver.ChromeOptions()
-        options.add_argument("--headless=new")  # یا فقط --headless
+        options = uc.ChromeOptions()
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        # هیچ user-data-dir اضافه نکن!
-        service = Service()
-        driver = webdriver.Chrome(service=service, options=options)
+        driver = uc.Chrome(options=options, headless=True)
         return driver
     except Exception as e:
         logging.error(f"خطا در ایجاد WebDriver: {e}")
