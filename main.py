@@ -10,7 +10,7 @@ from persiantools.jdatetime import JalaliDate
 from pytz import timezone
 from datetime import datetime
 
-# --- متغیرهای محیطی ---
+# --- متغیرهای محیطی برای اتصال به گوگل شیت و تلگرام ---
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SHEET_NAME = 'Sheet1'
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -18,29 +18,35 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# --- گرفتن داده محصولات از API نامی‌نت ---
+# --- گرفتن داده محصولات از API سایت نامی‌نت ---
 def fetch_products_json():
     url = "https://panel.naminet.co/api/catalog/productGroupsAttrNew?term="
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
+        # توکن را از Network مرورگر کپی کن و اینجا قرار بده
         "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
     }
     response = requests.get(url, headers=headers)
+    print("Status code:", response.status_code)
+    print("Response text:", response.text[:500])
     data = response.json()
     return data
 
-# --- استخراج محصولات از JSON ---
+# --- استخراج محصولات از ساختار JSON دریافتی ---
 def extract_products(data):
     products = []
+    # حلقه روی دسته‌بندی‌های اصلی (ParentCategories)
     for parent in data.get("ParentCategories", []):
+        # حلقه روی هر زیر دسته (مثلاً گوشی سامسونگ، آیفون و ...)
         for category in parent.get("Data", []):
             category_name = category.get("Name", "")
+            # حلقه روی هر محصول (هر رنگ و مدل)
             for item in category.get("Data", []):
                 product_name = item.get("ProductName", "")
                 color = item.get("Name", "")
                 price = item.get("final_price_value", 0)
-                price = f"{int(price):,}"
+                price = f"{int(price):,}"  # تبدیل عدد به رشته با کاما
                 products.append({
                     "category": category_name,
                     "product": product_name,
@@ -56,7 +62,7 @@ def escape_special_characters(text):
         text = text.replace(char, '\\' + char)
     return text
 
-# --- تقسیم پیام به پارت‌های تلگرام ---
+# --- تقسیم پیام به پارت‌های تلگرام (هر پارت حداکثر 4000 کاراکتر) ---
 def split_message_by_emoji_group(message, max_length=4000):
     lines = message.split('\n')
     parts = []
@@ -111,7 +117,7 @@ def prepare_final_message(category_name, category_lines, update_date):
     final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
     return final_message
 
-# --- اتصال به گوگل شیت ---
+# --- گرفتن credentials گوگل شیت از متغیر محیطی (base64) ---
 def get_credentials():
     encoded = os.getenv("GSHEET_CREDENTIALS_JSON")
     if not encoded:
@@ -122,6 +128,7 @@ def get_credentials():
         f.write(decoded)
     return temp_path
 
+# --- اتصال به گوگل شیت ---
 def connect_to_sheet():
     creds_path = get_credentials()
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -130,6 +137,7 @@ def connect_to_sheet():
     sheet = client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
     return sheet
 
+# --- بررسی و ساخت هدرهای شیت در صورت نیاز ---
 def check_and_create_headers(sheet):
     first_row = sheet.get_all_values()[0] if sheet.get_all_values() else []
     headers = ["emoji", "date", "part", "message_id", "text"]
@@ -139,6 +147,7 @@ def check_and_create_headers(sheet):
     else:
         logging.info("🔄 هدرها قبلاً موجود هستند.")
 
+# --- خواندن داده‌های قبلی از شیت ---
 def load_sheet_data(sheet):
     records = sheet.get_all_records()
     data = {}
@@ -154,6 +163,7 @@ def load_sheet_data(sheet):
             })
     return data
 
+# --- آپدیت یا اضافه کردن پیام‌ها در شیت ---
 def update_sheet_data(sheet, emoji, messages):
     today = JalaliDate.today().strftime("%Y-%m-%d")
     records = sheet.get_all_records()
@@ -163,7 +173,7 @@ def update_sheet_data(sheet, emoji, messages):
     for part, (message_id, text) in enumerate(messages, 1):
         sheet.append_row([emoji, today, part, message_id, text])
 
-# --- ارسال و ویرایش پیام تلگرام ---
+# --- ارسال پیام به تلگرام ---
 def send_telegram_message(message, bot_token, chat_id):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     params = {
@@ -178,6 +188,7 @@ def send_telegram_message(message, bot_token, chat_id):
         logging.error("خطا در ارسال پیام: %s", response.text)
         return None
 
+# --- ویرایش پیام تلگرام ---
 def edit_telegram_message(message_id, message, bot_token, chat_id):
     url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
     params = {
@@ -189,6 +200,7 @@ def edit_telegram_message(message_id, message, bot_token, chat_id):
     response = requests.post(url, json=params)
     return response.ok
 
+# --- حذف پیام تلگرام ---
 def delete_telegram_message(message_id, bot_token, chat_id):
     url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
     params = {
@@ -198,6 +210,7 @@ def delete_telegram_message(message_id, bot_token, chat_id):
     response = requests.post(url, json=params)
     return response.ok
 
+# --- مدیریت ارسال/ویرایش/حذف پیام‌های هر دسته و ذخیره در شیت ---
 def process_category_messages(emoji, messages, bot_token, chat_id, sheet, today):
     sheet_data = load_sheet_data(sheet)
     prev_msgs = sorted([row for row in sheet_data.get((emoji, today), [])], key=lambda x: x["part"])
@@ -225,6 +238,7 @@ def process_category_messages(emoji, messages, bot_token, chat_id, sheet, today)
     update_sheet_data(sheet, emoji, new_msgs)
     return [msg_id for msg_id, _ in new_msgs], should_send_final_message
 
+# --- مدیریت پیام نهایی (دکمه‌ها و پیام کلی) ---
 def update_final_message_in_sheet(sheet, message_id, text):
     today = JalaliDate.today().strftime("%Y-%m-%d")
     records = sheet.get_all_records()
@@ -299,8 +313,10 @@ def send_or_edit_final_message(sheet, final_message, bot_token, chat_id, button_
 # --- تابع اصلی برنامه ---
 def main():
     try:
+        # اتصال به گوگل شیت و بررسی هدرها
         sheet = connect_to_sheet()
         check_and_create_headers(sheet)
+        # گرفتن داده محصولات از API
         data = fetch_products_json()
         products = extract_products(data)
         if not products:
@@ -324,7 +340,8 @@ def main():
         categorized = {}
         for p in products:
             emoji = emoji_map.get(p["category"], "🟣")
-            line = f"{emoji} {p['product']} | {p['color']} | {p['price']} تومان"
+            line = f"{p['product']} | {p['color']} | {p['price']} تومان"
+            line = f"{emoji} {line}"
             categorized.setdefault(emoji, []).append(line)
         today = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
