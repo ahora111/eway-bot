@@ -10,8 +10,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # اطلاعات ووکامرس سایت شما
 WC_API_URL = "https://pakhshemobile.ir/wp-json/wc/v3/products"
-WC_CONSUMER_KEY = "ck_..."  # کلید خودت را اینجا بگذار
-WC_CONSUMER_SECRET = "cs_..."  # کلید خودت را اینجا بگذار
+WC_CONSUMER_KEY = "ck_b4666104bd0f31a9aeddde0f09f84081cb40b39a"  # کلید خودت را اینجا بگذار
+WC_CONSUMER_SECRET = "cs_0201b57511de7e4b146e67aac3d1c25465ebb26d"  # کلید خودت را اینجا بگذار
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
