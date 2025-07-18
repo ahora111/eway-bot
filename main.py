@@ -51,6 +51,35 @@ def extract_products(data):
                 })
     return products
 
+def is_number(model_str):
+    try:
+        float(model_str.replace(",", ""))
+        return True
+    except ValueError:
+        return False
+
+def process_model(model_str):
+    model_str = model_str.replace("٬", "").replace(",", "").strip()
+    if is_number(model_str):
+        model_value = float(model_str)
+        if model_value <= 1:
+            model_value_with_increase = model_value * 0
+        elif model_value <= 7000000:
+            model_value_with_increase = model_value + 260000
+        elif model_value <= 10000000:
+            model_value_with_increase = model_value * 1.035
+        elif model_value <= 20000000:
+            model_value_with_increase = model_value * 1.025
+        elif model_value <= 30000000:
+            model_value_with_increase = model_value * 1.02
+        elif model_value <= 40000000:
+            model_value_with_increase = model_value * 1.015
+        else:
+            model_value_with_increase = model_value * 1.015
+        model_value_with_increase = round(model_value_with_increase, -5)
+        return f"{model_value_with_increase:,.0f}"
+    return model_str
+
 def escape_special_characters(text):
     escape_chars = ['\\', '(', ')', '[', ']', '~', '*', '_', '-', '+', '>', '#', '.', '!', '|']
     for char in escape_chars:
@@ -60,7 +89,9 @@ def escape_special_characters(text):
 def build_category_message(emoji, products):
     model_map = defaultdict(list)
     for p in products:
-        model_map[p['product']].append((p['color'], p['price']))
+        # افزایش قیمت روی قیمت اصلی
+        price_with_increase = process_model(p['price'])
+        model_map[p['product']].append((p['color'], price_with_increase))
     lines = []
     for model, color_prices in model_map.items():
         lines.append(f"{emoji} {model}")
@@ -68,7 +99,7 @@ def build_category_message(emoji, products):
             lines.append(f"{color} | {price}")
         lines.append("")
     return lines
-    
+
 def split_message_by_emoji_group(message, max_length=4000):
     lines = message.split('\n')
     parts = []
