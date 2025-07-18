@@ -18,31 +18,25 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+# ... (بخش ۱, ۲, ۳ بدون تغییر) ...
 # ==============================================================================
 # بخش ۱: تنظیمات و پیکربندی اولیه
 # ==============================================================================
-
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SHEET_NAME = 'Sheet1'
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-
 # ==============================================================================
 # بخش ۲: توابع استخراج داده از منابع مختلف
 # ==============================================================================
-
 def fetch_from_naminet_api():
     logging.info("در حال دریافت اطلاعات از منبع اول (API Naminet)...")
     url = "https://panel.naminet.co/api/catalog/productGroupsAttrNew?term="
-    headers = {
-        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
-    }
+    headers = { "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA" }
     try:
         response = requests.get(url, headers=headers, verify=False, timeout=30)
         response.raise_for_status()
@@ -53,8 +47,7 @@ def fetch_from_naminet_api():
                 for item in category.get("Data", []):
                     full_name = f"{item.get('ProductName', '')} {item.get('Name', '')}".strip()
                     price = item.get("final_price_value", 0)
-                    if full_name and price > 0:
-                        products.append({"name": full_name, "price": int(price)})
+                    if full_name and price > 0: products.append({"name": full_name, "price": int(price)})
         logging.info(f"✅ از منبع اول {len(products)} محصول دریافت شد.")
         return products
     except Exception as e:
@@ -63,9 +56,7 @@ def fetch_from_naminet_api():
 
 def get_driver():
     options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--headless"); options.add_argument("--no-sandbox"); options.add_argument("--disable-dev-shm-usage")
     service = Service()
     return webdriver.Chrome(service=service, options=options)
 
@@ -83,11 +74,7 @@ def fetch_from_hamrahtel_site():
     driver = get_driver()
     products = []
     try:
-        urls = {
-            "mobile": "https://hamrahtel.com/quick-checkout?category=mobile",
-            "tablet": "https://hamrahtel.com/quick-checkout?category=tablet",
-            "console": "https://hamrahtel.com/quick-checkout?category=game-console"
-        }
+        urls = {"mobile": "https://hamrahtel.com/quick-checkout?category=mobile", "tablet": "https://hamrahtel.com/quick-checkout?category=tablet", "console": "https://hamrahtel.com/quick-checkout?category=game-console"}
         for category, url in urls.items():
             driver.get(url)
             WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[class^="mantine-"] > .mantine-Text-root')))
@@ -101,20 +88,17 @@ def fetch_from_hamrahtel_site():
                 if price_str.isdigit():
                     products.append({"name": name, "price": int(price_str)})
                     i += 2
-                else:
-                    i += 1
+                else: i += 1
         logging.info(f"✅ از منبع دوم {len(products)} محصول دریافت شد.")
         return products
     except Exception as e:
         logging.warning(f"⚠️ هشدار: دریافت اطلاعات از منبع دوم ناموفق بود. دلیل: {e}")
         return []
-    finally:
-        driver.quit()
+    finally: driver.quit()
 
 # ==============================================================================
 # بخش ۳: توابع پردازش داده، مقایسه و نهایی‌سازی
 # ==============================================================================
-
 def process_price(price):
     if price <= 1: return 0
     elif price <= 7000000: increase = price + 260000
@@ -131,16 +115,13 @@ def get_combined_best_price_list():
     naminet_products = fetch_from_naminet_api()
     hamrahtel_products = fetch_from_hamrahtel_site()
     all_products_raw = defaultdict(list)
-    for p in naminet_products:
-        all_products_raw[normalize_name(p['name'])].append(p['price'])
-    for p in hamrahtel_products:
-        all_products_raw[normalize_name(p['name'])].append(p['price'])
+    for p in naminet_products: all_products_raw[normalize_name(p['name'])].append(p['price'])
+    for p in hamrahtel_products: all_products_raw[normalize_name(p['name'])].append(p['price'])
     final_products = []
     for name_norm, prices in all_products_raw.items():
         best_raw_price = min(prices)
         final_price = process_price(best_raw_price)
-        if final_price > 0:
-            final_products.append({"name": name_norm.title(), "price": final_price})
+        if final_price > 0: final_products.append({"name": name_norm.title(), "price": final_price})
     final_products.sort(key=lambda x: x['price'])
     logging.info(f"✅ در مجموع {len(final_products)} محصول منحصر به فرد با بهترین قیمت آماده شد.")
     return final_products
@@ -148,7 +129,6 @@ def get_combined_best_price_list():
 # ==============================================================================
 # بخش ۴: توابع آماده‌سازی پیام برای تلگرام
 # ==============================================================================
-
 def categorize_products(products):
     categorized = defaultdict(list)
     emoji_map = {"samsung": "🔵", "galaxy": "🔵", "xiaomi": "🟡", "poco": "🟡", "redmi": "🟡", "iphone": "🍏", "apple": "🍏", "nokia": "🟢", "vocal": "⚪️", "nothing": "⚫️", "tablet": "🟠", "tab": "🟠", "pad": "🟠", "speaker": "🔉", "watch": "⌚️", "laptop": "💻", "console": "🎮", "playstation": "🎮"}
@@ -157,23 +137,19 @@ def categorize_products(products):
         assigned_emoji = "🟣"
         for keyword, emoji in emoji_map.items():
             if keyword in name_lower:
-                assigned_emoji = emoji
-                break
+                assigned_emoji = emoji; break
         categorized[assigned_emoji].append(p)
     return categorized
 
 def escape_special_characters(text):
     escape_chars = ['\\', '(', ')', '[', ']', '~', '*', '_', '-', '+', '>', '#', '.', '!', '|']
-    for char in escape_chars:
-        text = text.replace(char, '\\' + char)
+    for char in escape_chars: text = text.replace(char, '\\' + char)
     return text
 
 def build_message_body(products):
-    lines = []
-    product_groups = defaultdict(list)
+    lines, product_groups = [], defaultdict(list)
     for p in products:
-        parts = p['name'].split()
-        base_name = ' '.join(parts[:-1]) if len(parts) > 1 else p['name']
+        parts = p['name'].split(); base_name = ' '.join(parts[:-1]) if len(parts) > 1 else p['name']
         product_groups[base_name].append(p)
     for base_name, variants in product_groups.items():
         lines.append(base_name)
@@ -184,11 +160,8 @@ def build_message_body(products):
     return "\n".join(lines)
 
 def get_current_time_and_date():
-    """تابع اصلاح شده: متغیر تایم‌زون در داخل تابع تعریف شده است."""
-    iran_tz = timezone('Asia/Tehran')
-    now = datetime.now(iran_tz)
-    current_time = now.strftime('%H:%M')
-    jalali_date = JalaliDate(now)
+    iran_tz = timezone('Asia/Tehran'); now = datetime.now(iran_tz)
+    current_time = now.strftime('%H:%M'); jalali_date = JalaliDate(now)
     weekday_map = ["شنبه💪", "یکشنبه😃", "دوشنبه☺️", "سه‌شنبه🥱", "چهارشنبه😕", "پنج‌شنبه☺️", "جمعه😎"]
     weekday_farsi = weekday_map[jalali_date.weekday()]
     date_formatted = f"{weekday_farsi} {jalali_date.strftime('%Y/%m/%d')}"
@@ -196,9 +169,7 @@ def get_current_time_and_date():
 
 def prepare_final_message(category_title, body):
     current_time, update_date_formatted = get_current_time_and_date()
-    header = (f"🗓 بروزرسانی {update_date_formatted} 🕓 ساعت: {current_time}\n"
-              f"✅ لیست پخش موبایل اهورا\n\n"
-              f"⬅️ موجودی {category_title} ➡️\n\n")
+    header = (f"🗓 بروزرسانی {update_date_formatted} 🕓 ساعت: {current_time}\n✅ لیست پخش موبایل اهورا\n\n⬅️ موجودی {category_title} ➡️\n\n")
     footer = "\n\n☎️ شماره های تماس:\n📞 09371111558\n📞 02833991417"
     return f"{header}{body}{footer}"
 
@@ -208,8 +179,7 @@ def split_message(message, max_length=4000):
         split_pos = message.rfind('\n\n', 0, max_length)
         if split_pos == -1: split_pos = message.rfind('\n', 0, max_length)
         if split_pos == -1: split_pos = max_length
-        parts.append(message[:split_pos])
-        message = message[split_pos:].lstrip()
+        parts.append(message[:split_pos]); message = message[split_pos:].lstrip()
     parts.append(message)
     return parts
 
@@ -219,8 +189,7 @@ def split_message(message, max_length=4000):
 def get_credentials():
     encoded = os.getenv("GSHEET_CREDENTIALS_JSON")
     if not encoded: raise Exception("GSHEET_CREDENTIALS_JSON not found")
-    decoded = base64.b64decode(encoded)
-    temp_path = "/tmp/creds.json"
+    decoded = base64.b64decode(encoded); temp_path = "/tmp/creds.json"
     with open(temp_path, "wb") as f: f.write(decoded)
     return temp_path
 
@@ -236,21 +205,26 @@ def check_and_create_headers(sheet):
         first_row = sheet.row_values(1)
         expected_headers = ["emoji", "date", "part", "message_id", "text"]
         if first_row != expected_headers:
-             sheet.clear()
-             sheet.insert_row(expected_headers, 1)
+             sheet.clear(); sheet.insert_row(expected_headers, 1)
              logging.info("هدرهای شیت پاکسازی و اصلاح شدند.")
     except (gspread.exceptions.APIError, IndexError):
         sheet.insert_row(["emoji", "date", "part", "message_id", "text"], 1)
         logging.info("شیت خالی بود، هدرها ایجاد شدند.")
 
 def load_sheet_data(sheet):
+    """تابع اصلاح شده: داده‌ها را با بررسی اعتبار آن‌ها می‌خواند."""
     try:
         expected_headers = ["emoji", "date", "part", "message_id", "text"]
         records = sheet.get_all_records(expected_headers=expected_headers)
         data = defaultdict(list)
         for row in records:
-            if all(k in row for k in expected_headers):
-                data[(row["emoji"], str(row["date"]))].append({"part": int(row["part"]), "message_id": str(row["message_id"]), "text": row["text"]})
+            # فقط ردیف‌هایی را پردازش کن که part آنها عدد معتبر است
+            if all(k in row for k in expected_headers) and str(row.get("part")).isdigit():
+                data[(row["emoji"], str(row["date"]))].append({
+                    "part": int(row["part"]),
+                    "message_id": str(row.get("message_id", "")),
+                    "text": str(row.get("text", ""))
+                })
         return data
     except Exception as e:
         logging.error(f"خطا در خواندن اطلاعات از گوگل شیت: {e}. یک دیکشنری خالی برگردانده شد.")
@@ -259,13 +233,9 @@ def load_sheet_data(sheet):
 def update_sheet_data(sheet, emoji, messages):
     today = JalaliDate.today().strftime("%Y-%m-%d")
     all_values = sheet.get_all_values()
-    rows_to_delete_indices = []
-    for i, row in enumerate(all_values):
-        if len(row) > 1 and row[0] == emoji and row[1] == today:
-            rows_to_delete_indices.append(i + 1)
+    rows_to_delete_indices = [i + 1 for i, row in enumerate(all_values) if len(row) > 1 and row[0] == emoji and row[1] == today]
     if rows_to_delete_indices:
-        for row_index in sorted(rows_to_delete_indices, reverse=True):
-            sheet.delete_rows(row_index)
+        for row_index in sorted(rows_to_delete_indices, reverse=True): sheet.delete_rows(row_index)
     rows_to_append = [[emoji, today, part, message_id, text] for part, (message_id, text) in enumerate(messages, 1)]
     if rows_to_append: sheet.append_rows(rows_to_append, value_input_option='USER_ENTERED')
 
@@ -303,18 +273,14 @@ def process_category_messages(emoji, messages, sheet, today):
                 if not edit_telegram_message(prev_msg_id, msg_text, BOT_TOKEN, CHAT_ID):
                     delete_telegram_message(prev_msg_id, BOT_TOKEN, CHAT_ID)
                     msg_id = send_telegram_message(msg_text, BOT_TOKEN, CHAT_ID)
-                else:
-                    msg_id = prev_msg_id
+                else: msg_id = prev_msg_id
                 changed = True
-            else:
-                msg_id = prev_msg_id
+            else: msg_id = prev_msg_id
         else:
-            msg_id = send_telegram_message(msg_text, BOT_TOKEN, CHAT_ID)
-            changed = True
+            msg_id = send_telegram_message(msg_text, BOT_TOKEN, CHAT_ID); changed = True
         if msg_id: new_msgs.append((str(msg_id), msg_text))
     for j in range(len(messages), len(prev_msgs)):
-        delete_telegram_message(prev_msgs[j]["message_id"], BOT_TOKEN, CHAT_ID)
-        changed = True
+        delete_telegram_message(prev_msgs[j]["message_id"], BOT_TOKEN, CHAT_ID); changed = True
     if changed: update_sheet_data(sheet, emoji, new_msgs)
     return [msg_id for msg_id, _ in new_msgs], changed
 
@@ -327,8 +293,7 @@ def send_or_edit_final_message(sheet, final_message_text, button_markup, should_
         if edit_telegram_message(prev_msg_id, final_message_text, BOT_TOKEN, CHAT_ID, button_markup):
             logging.info("✅ پیام نهایی تغییری نکرده، فقط دکمه‌ها به‌روزرسانی شدند.")
             return
-    if prev_msg_id:
-        delete_telegram_message(prev_msg_id, BOT_TOKEN, CHAT_ID)
+    if prev_msg_id: delete_telegram_message(prev_msg_id, BOT_TOKEN, CHAT_ID)
     new_msg_id = send_telegram_message(final_message_text, BOT_TOKEN, CHAT_ID, button_markup)
     if new_msg_id:
         update_sheet_data(sheet, "FINAL", [(str(new_msg_id), final_message_text)])
@@ -337,7 +302,6 @@ def send_or_edit_final_message(sheet, final_message_text, button_markup, should_
 # ==============================================================================
 # بخش ۶: تابع اصلی (main)
 # ==============================================================================
-
 def main():
     try:
         sheet = connect_to_sheet()
@@ -348,8 +312,7 @@ def main():
             return
         categorized_products = categorize_products(final_products)
         today_str = JalaliDate.today().strftime("%Y-%m-%d")
-        all_message_ids = {}
-        any_change_detected = False
+        all_message_ids, any_change_detected = {}, False
         category_titles = {"🔵": "سامسونگ", "🟡": "شیائومی", "🍏": "آیفون", "🟢": "نوکیا", "⚪️": "وکال", "⚫️": "ناتینگ فون", "🟠": "تبلت", "🔉": "اسپیکر", "⌚️": "ساعت هوشمند", "💻": "لپ‌تاپ", "🎮": "کنسول بازی", "🟣": "متفرقه"}
         sorted_emojis = sorted(categorized_products.keys(), key=lambda e: "🔵🟡🍏🟠💻🎮🟣⚫️🟢🔉⌚️".find(e))
         for emoji in sorted_emojis:
