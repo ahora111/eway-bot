@@ -29,8 +29,6 @@ def fetch_products_json():
         "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
     }
     response = requests.get(url, headers=headers, verify=False)
-    print("Status code:", response.status_code)
-    print("Response text:", response.text[:500])
     data = response.json()
     return data
 
@@ -52,52 +50,11 @@ def extract_products(data):
                 })
     return products
 
-
-
-
-
-
-def is_number(model_str):
-    try:
-        float(model_str.replace(",", ""))
-        return True
-    except ValueError:
-        return False
-
-def process_model(model_str):
-    model_str = model_str.replace("٬", "").replace(",", "").strip()
-    if is_number(model_str):
-        model_value = float(model_str)
-        if model_value <= 1:
-            model_value_with_increase = model_value * 0
-        elif model_value <= 7000000:
-            model_value_with_increase = model_value + 260000
-        elif model_value <= 10000000:
-            model_value_with_increase = model_value * 1.035
-        elif model_value <= 20000000:
-            model_value_with_increase = model_value * 1.025
-        elif model_value <= 30000000:
-            model_value_with_increase = model_value * 1.02
-        elif model_value <= 40000000:
-            model_value_with_increase = model_value * 1.015
-        else:
-            model_value_with_increase = model_value * 1.015
-        model_value_with_increase = round(model_value_with_increase, -5)
-        return f"{model_value_with_increase:,.0f}"
-    return model_str
-
-
-
-
-
-
 def escape_special_characters(text):
     escape_chars = ['\\', '(', ')', '[', ']', '~', '*', '_', '-', '+', '>', '#', '.', '!', '|']
     for char in escape_chars:
         text = text.replace(char, '\\' + char)
     return text
-
-
 
 def split_message_by_emoji_group(message, max_length=4000):
     lines = message.split('\n')
@@ -120,88 +77,13 @@ def split_message_by_emoji_group(message, max_length=4000):
         parts.append(current.rstrip('\n'))
     return parts
 
-
-
-
-def decorate_line(line):
-    if line.startswith(('🔵', '🟡', '🍏', '🟣', '💻', '🟠', '🎮')):
-        return line
-    if any(keyword in line for keyword in ["Nartab", "Tab", "تبلت"]):
-        return f"🟠 {line}"
-    elif "Galaxy" in line:
-        return f"🔵 {line}"
-    elif "POCO" in line or "Poco" in line or "Redmi" in line:
-        return f"🟡 {line}"
-    elif "iPhone" in line:
-        return f"🍏 {line}"
-    elif any(keyword in line for keyword in ["اینچی", "لپ تاپ"]):
-        return f"💻 {line}"
-    elif any(keyword in line for keyword in ["RAM", "FA", "Classic", "Otel", "DOX", "General", "Bloom", "NOKIA", "TCH", "ALCATEL"]):
-        return f"🟣 {line}"
-    elif any(keyword in line for keyword in ["Play Station", "کنسول بازی", "پلی استیشن", "بازی"]):
-        return f"🎮 {line}"
-    else:
-        return line
-
-def sort_lines_together_by_price(lines):
-    def extract_price(group):
-        for line in reversed(group):
-            parts = line.split()
-            for part in parts:
-                try:
-                    return float(part.replace(',', '').replace('،', ''))
-                except ValueError:
-                    continue
-        return float('inf')
-    grouped_lines = []
-    current_group = []
-    for line in lines:
-        if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            if current_group:
-                grouped_lines.append(current_group)
-            current_group = [line]
-        else:
-            current_group.append(line)
-    if current_group:
-        grouped_lines.append(current_group)
-    grouped_lines.sort(key=extract_price)
-    sorted_lines = [line for group in grouped_lines for line in group]
-    return sorted_lines
-
-def remove_extra_blank_lines(lines):
-    cleaned_lines = []
-    blank_count = 0
-    for line in lines:
-        if line.strip() == "":
-            blank_count += 1
-            if blank_count <= 1:
-                cleaned_lines.append(line)
-        else:
-            blank_count = 0
-            cleaned_lines.append(line)
-    return cleaned_lines
-
-
-
-
-
-
-
 def get_current_time():
     iran_tz = timezone('Asia/Tehran')
     iran_time = datetime.now(iran_tz)
     current_time = iran_time.strftime('%H:%M')
     return current_time
 
-
-
-
-
-
-
-
-def prepare_final_message(category_name, category_lines, update_date):
-    category_title = get_category_name(category_name)
+def prepare_final_message(category_title, category_lines, update_date):
     update_date = JalaliDate.today().strftime("%Y/%m/%d")
     current_time = get_current_time()
     weekday_mapping = {
@@ -221,88 +103,10 @@ def prepare_final_message(category_name, category_lines, update_date):
         f"✅ لیست پخش موبایل اهورا\n\n"
         f"⬅️ موجودی {category_title} ➡️\n\n"
     )
-    formatted_lines = []
-    current_product = None
-    product_variants = []
-    i = 0
-    while i < len(category_lines):
-        line = category_lines[i]
-        if line.startswith(("🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮")):
-            if current_product:
-                formatted_lines.append(current_product)
-                if product_variants:
-                    formatted_lines.extend(product_variants)
-                formatted_lines.append("")
-                product_variants = []
-            current_product = line.strip()
-            i += 1
-        else:
-            if i + 1 < len(category_lines):
-                color = line.strip()
-                price = category_lines[i + 1].strip()
-                product_variants.append(f"{color} | {price}")
-                i += 2
-            else:
-                product_variants.append(line.strip())
-                i += 1
-    if current_product:
-        formatted_lines.append(current_product)
-        if product_variants:
-            formatted_lines.extend(product_variants)
-    formatted_lines = [
-        line for line in formatted_lines
-        if not any(emoji in line for emoji in ["🔵", "🟡", "🍏", "🟣", "💻", "🟠", "🎮"]) or "|" not in line
-    ]
+    formatted_lines = category_lines
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
     return final_message
-
-def get_category_name(emoji):
-    mapping = {
-        "🔵": "سامسونگ",
-        "🟡": "شیائومی",
-        "🍏": "آیفون",
-        "💻": "لپ‌تاپ‌ها",
-        "🟠": "تبلت‌ها",
-        "🎮": "کنسول‌ بازی",
-        "🟣": "گوشیای متفرقه"
-    }
-    return mapping.get(emoji, "گوشیای متفرقه")
-
-def categorize_messages(lines):
-    categories = {"🔵": [], "🟡": [], "🍏": [], "🟣": [], "💻": [], "🟠": [], "🎮": []}
-    current_category = None
-    for line in lines:
-        if line.startswith("🔵"):
-            current_category = "🔵"
-        elif line.startswith("🟡"):
-            current_category = "🟡"
-        elif line.startswith("🍏"):
-            current_category = "🍏"
-        elif line.startswith("🟣"):
-            current_category = "🟣"
-        elif line.startswith("💻"):
-            current_category = "💻"
-        elif line.startswith("🟠"):
-            current_category = "🟠"
-        elif line.startswith("🎮"):
-            current_category = "🎮"
-        if current_category:
-            categories[current_category].append(line)
-    for category in categories:
-        categories[category] = sort_lines_together_by_price(categories[category])
-        categories[category] = remove_extra_blank_lines(categories[category])
-    return categories
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
 
 def get_credentials():
     encoded = os.getenv("GSHEET_CREDENTIALS_JSON")
@@ -497,13 +301,41 @@ def main():
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
             return
 
+        # نگاشت دسته‌بندی به ایموجی و عنوان
+        emoji_map = {
+            "گوشی سامسونگ": "🔵",
+            "گوشی شیائومی": "🟡",
+            "گوشی آیفون": "🍏",
+            "گوشی نوکیا": "🟣",
+            "گوشی وکال": "🟣",
+            "گوشی داریا": "🟣",
+            "گوشی تی سی ال": "🟣",
+            "گوشی رد تون": "🟣",
+            "گوشی ریلمی": "🟣",
+            "ناتینگ فون": "🟣",
+            "تبلت": "🟠",
+        }
+        category_titles = {
+            "🔵": "سامسونگ",
+            "🟡": "شیائومی",
+            "🍏": "آیفون",
+            "🟣": "گوشیای متفرقه",
+            "🟠": "تبلت",
+        }
+        categorized = {}
+        for p in products:
+            emoji = emoji_map.get(p["category"], "🟣")
+            line = f"{emoji} {p['product']} | {p['color']} | {p['price']} تومان"
+            categorized.setdefault(emoji, []).append(line)
+
         today = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
         should_send_final_message = False
         for emoji, lines in categorized.items():
             if not lines:
                 continue
-            message = prepare_final_message(emoji, lines, today)
+            category_title = category_titles.get(emoji, "گوشیای متفرقه")
+            message = prepare_final_message(category_title, lines, today)
             message_parts = split_message_by_emoji_group(message)
             current_time = get_current_time()
             for idx in range(1, len(message_parts)):
