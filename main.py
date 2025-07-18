@@ -29,6 +29,7 @@ SHEET_NAME = 'Sheet1'
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+
 # ==============================================================================
 # بخش ۲: توابع استخراج داده از منابع مختلف
 # ==============================================================================
@@ -60,7 +61,6 @@ def get_driver():
     return webdriver.Chrome(service=service, options=options)
 
 def fetch_from_hamrahtel_site():
-    """داده‌ها را با اسکرپینگ از سایت همراه‌تل دریافت می‌کند (نسخه بازنویسی شده برای ساختار جدید)."""
     logging.info("در حال دریافت اطلاعات از منبع دوم (سایت Hamrahtel)...")
     driver = get_driver()
     products = []
@@ -74,60 +74,41 @@ def fetch_from_hamrahtel_site():
             logging.info(f"درحال پردازش دسته {category} از سایت همراه‌تل...")
             driver.get(url)
             time.sleep(5)
-
-            # باز کردن تمام آکاردیون‌های اصلی (برندها) که بسته هستند
             brand_accordions = driver.find_elements(By.CSS_SELECTOR, 'button.mantine-Accordion-control[aria-expanded="false"]')
             for button in brand_accordions:
                 try:
                     driver.execute_script("arguments[0].click();", button)
                     time.sleep(0.3)
-                except Exception:
-                    pass
-            
-            # باز کردن تمام آکاردیون‌های داخلی (مدل‌ها) که بسته هستند
+                except Exception: pass
             model_accordions = driver.find_elements(By.CSS_SELECTOR, 'div.mantine-Accordion-item button.mantine-Accordion-control[aria-expanded="false"]')
             for button in model_accordions:
                 try:
-                    # اسکرول به المان و سپس کلیک
                     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
                     time.sleep(0.2)
                     driver.execute_script("arguments[0].click();", button)
                     time.sleep(0.3)
-                except Exception:
-                    pass
-
-            # حالا که همه چیز باز است، داده‌ها را استخراج می‌کنیم
+                except Exception: pass
             all_variants = driver.find_elements(By.CSS_SELECTOR, 'div.mantine-Accordion-content div.flex.justify-between.items-center')
-            
             for variant in all_variants:
                 try:
-                    # پیدا کردن نام اصلی محصول با حرکت به سمت بالا در ساختار HTML
                     product_base_name_element = variant.find_element(By.XPATH, './ancestor::div[contains(@class, "mantine-Accordion-item") and .//button[contains(@id, "control")]]//div[contains(@class, "mantine-9eurlv")]')
                     product_base_name = product_base_name_element.text.strip()
-
                     color_element = variant.find_element(By.CSS_SELECTOR, 'div.mantine-rj9ps7')
                     color = color_element.text.strip()
-                    
                     price_element = variant.find_element(By.CSS_SELECTOR, 'span.mantine-1erraa9')
                     price_str = price_element.text.replace(",", "").replace("٬", "").strip()
-                    
                     if product_base_name and color and price_str.isdigit():
                         full_name = f"{product_base_name} {color}"
                         price = int(price_str)
                         products.append({"name": full_name, "price": price})
-                except Exception:
-                    continue
-        
+                except Exception: continue
         unique_products = list({p['name']: p for p in products}.values())
         logging.info(f"✅ از منبع دوم {len(unique_products)} محصول دریافت شد.")
         return unique_products
-        
     except Exception as e:
         logging.warning(f"⚠️ هشدار: دریافت اطلاعات از منبع دوم ناموفق بود. دلیل: {e}", exc_info=True)
         return []
-    finally:
-        driver.quit()
-
+    finally: driver.quit()
 
 # ==============================================================================
 # بخش ۳: توابع پردازش داده، مقایسه و نهایی‌سازی
@@ -182,10 +163,8 @@ def escape_special_characters(text):
 def build_message_body(products):
     lines, product_groups = [], defaultdict(list)
     for p in products:
-        # پاکسازی نام محصول برای گروه بندی بهتر
         clean_name = p['name'].rsplit(' ', 1)[0] if p['name'].rsplit(' ', 1)[-1].isalpha() else p['name']
         product_groups[clean_name].append(p)
-    
     for base_name, variants in sorted(product_groups.items()):
         lines.append(base_name)
         for variant in sorted(variants, key=lambda x: x['price']):
@@ -249,14 +228,12 @@ def check_and_create_headers(sheet):
 def load_sheet_data(sheet):
     try:
         expected_headers = ["emoji", "date", "part", "message_id", "text"]
-        records = sheet.get_all_records(expected_headers=expected_headers, value_render_option='AS_IS')
+        records = sheet.get_all_records(expected_headers=expected_headers, value_render_option='UNFORMATTED_VALUE')
         data = defaultdict(list)
         for row in records:
             if all(k in row for k in expected_headers) and str(row.get("part")).isdigit():
                 data[(row["emoji"], str(row["date"]))].append({
-                    "part": int(row["part"]),
-                    "message_id": str(row.get("message_id", "")),
-                    "text": str(row.get("text", ""))
+                    "part": int(row["part"]), "message_id": str(row.get("message_id", "")), "text": str(row.get("text", ""))
                 })
         return data
     except Exception as e:
@@ -265,7 +242,7 @@ def load_sheet_data(sheet):
 
 def update_sheet_data(sheet, emoji, messages):
     today = JalaliDate.today().strftime("%Y-%m-%d")
-    all_values = sheet.get_all_values(value_render_option='AS_IS')
+    all_values = sheet.get_all_values(value_render_option='UNFORMATTED_VALUE')
     rows_to_delete_indices = [i + 1 for i, row in enumerate(all_values) if len(row) > 1 and row[0] == emoji and row[1] == today]
     if rows_to_delete_indices:
         for row_index in sorted(rows_to_delete_indices, reverse=True): sheet.delete_rows(row_index)
