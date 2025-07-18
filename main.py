@@ -51,6 +51,16 @@ def get_driver():
         logging.error(f"خطا در ایجاد WebDriver: {e}")
         return None
 
+def expand_all_categories(driver):
+    # همه دکمه‌های دسته‌بندی که باید باز بشن (مثلاً دکمه‌های با فلش یا عنوان دسته)
+    category_buttons = driver.find_elements(By.XPATH, '//div[contains(@class, "cursor-pointer") and contains(@class, "bg-lowOp-blue53")]')
+    for btn in category_buttons:
+        try:
+            btn.click()
+            time.sleep(1)  # صبر برای لود محصولات
+        except Exception:
+            continue
+            
 def scroll_page(driver, scroll_pause_time=2):
     last_height = driver.execute_script("return document.body.scrollHeight")
     while True:
@@ -63,13 +73,10 @@ def scroll_page(driver, scroll_pause_time=2):
 
 def extract_product_data(driver):
     products = []
-    # هر محصول یک div با این کلاس است
     product_divs = driver.find_elements(By.XPATH, '//div[contains(@class, "cursor-pointer") and contains(@class, "border-lowOp-blue53")]')
     for div in product_divs:
         try:
-            # نام محصول
             name = div.find_element(By.XPATH, './/h1').text.strip()
-            # هر رنگ و قیمت یک div با bg-gray-100 است
             color_price_divs = div.find_elements(By.XPATH, './/div[contains(@class, "bg-gray-100") and contains(@class, "items-center")]')
             for cp in color_price_divs:
                 try:
@@ -342,16 +349,16 @@ def main():
         categories_urls = {
             "all": "https://naminet.co/quick-commerce"
         }
-        brands, models = [], []
-        for name, url in categories_urls.items():
-            driver.get(url)
-            time.sleep(5)  # صبر برای لود کامل
-            scroll_page(driver)
-            products = extract_product_data(driver)
-            logging.info(f"تعداد محصولات پیدا شده: {len(products)}")
-            for prod_name, color, prod_price in products:
-                brands.append("")
-                models.append(f"{prod_name} | {color} | {prod_price}")
+for name, url in categories_urls.items():
+    driver.get(url)
+    time.sleep(5)
+    expand_all_categories(driver)
+    scroll_page(driver)
+    products = extract_product_data(driver)
+    logging.info(f"تعداد محصولات پیدا شده: {len(products)}")
+    for prod_name, color, prod_price in products:
+        brands.append("")
+        models.append(f"{prod_name} | {color} | {prod_price}")
         driver.quit()
         if not models:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
