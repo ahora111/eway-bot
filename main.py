@@ -19,8 +19,8 @@ SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SHEET_NAME = 'Sheet1'
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-# CRITICAL: Move API token to an environment variable
-NAMINET_API_TOKEN = os.getenv("NAMINET_API_TOKEN")
+# CRITICAL: API token is now read from an environment variable
+NAMINet_API_TOKEN = os.getenv("NAMINET_API_TOKEN")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -350,7 +350,7 @@ def main():
     """Main execution function."""
     # Check for essential environment variables first
     if not all([SPREADSHEET_ID, BOT_TOKEN, CHAT_ID, NAMINet_API_TOKEN]):
-        logging.error("❌ One or more required environment variables are missing. Exiting.")
+        logging.error("❌ One or more required environment variables are missing. Please check SPREADSHEET_ID, TELEGRAM_TOKEN, CHAT_ID, and NAMINet_API_TOKEN. Exiting.")
         return
 
     try:
