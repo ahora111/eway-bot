@@ -1,19 +1,13 @@
-import os
 import requests
-import logging
-import json
-from collections import defaultdict
+import urllib3
 
 # غیرفعال کردن هشدار SSL (برای سایت با گواهی منقضی)
-import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # اطلاعات ووکامرس سایت شما
 WC_API_URL = "https://pakhshemobile.ir/wp-json/wc/v3/products"
-WC_CONSUMER_KEY = "ck_b4666104bd0f31a9aeddde0f09f84081cb40b39a"  # کلید خودت را اینجا بگذار
-WC_CONSUMER_SECRET = "cs_0201b57511de7e4b146e67aac3d1c25465ebb26d"  # کلید خودت را اینجا بگذار
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+WC_CONSUMER_KEY = "ck_b4666104bd0f31a9aeddde0f09f84081cb40b39a"
+WC_CONSUMER_SECRET = "cs_0201b57511de7e4b146e67aac3d1c25465ebb26d"
 
 # گرفتن محصولات از API نامی‌نت
 def fetch_products_json():
@@ -83,8 +77,14 @@ def create_or_update_product(product_name, color, price, sku):
         "consumer_secret": WC_CONSUMER_SECRET,
         "sku": sku
     }
-    r = requests.get(WC_API_URL, params=params)
-    products = r.json()
+    r = requests.get(WC_API_URL, params=params, verify=False)
+    try:
+        products = r.json()
+    except Exception as e:
+        print("خطا در دریافت json:", e)
+        print("Status code:", r.status_code)
+        print("Response text:", r.text[:500])
+        products = []
     data = {
         "name": f"{product_name} - {color}",
         "regular_price": str(price).replace(",", ""),
@@ -96,11 +96,13 @@ def create_or_update_product(product_name, color, price, sku):
     if products and isinstance(products, list) and len(products) > 0:
         product_id = products[0]['id']
         url = f"{WC_API_URL}/{product_id}"
-        r = requests.put(url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data)
+        r = requests.put(url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
         print(f"آپدیت شد: {product_name} - {color}")
     else:
-        r = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data)
+        r = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
         print(f"ایجاد شد: {product_name} - {color}")
+        print("POST status:", r.status_code)
+        print("POST text:", r.text[:500])
 
 def main():
     data = fetch_products_json()
