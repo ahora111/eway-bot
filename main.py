@@ -10,6 +10,10 @@ from persiantools.jdatetime import JalaliDate
 from pytz import timezone
 from datetime import datetime
 
+# غیرفعال کردن هشدار SSL (برای سایت با گواهی منقضی)
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SHEET_NAME = 'Sheet1'
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -24,7 +28,7 @@ def fetch_products_json():
         "Accept": "application/json, text/plain, */*",
         "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
     }
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, verify=False)
     print("Status code:", response.status_code)
     print("Response text:", response.text[:500])
     data = response.json()
@@ -39,7 +43,7 @@ def extract_products(data):
                 product_name = item.get("ProductName", "")
                 color = item.get("Name", "")
                 price = item.get("final_price_value", 0)
-                price = f"{int(price):,}"  # تبدیل به رشته با کاما
+                price = f"{int(price):,}"
                 products.append({
                     "category": category_name,
                     "product": product_name,
@@ -314,8 +318,7 @@ def main():
         categorized = {}
         for p in products:
             emoji = emoji_map.get(p["category"], "🟣")
-            line = f"{p['product']} | {p['color']} | {p['price']} تومان"
-            line = f"{emoji} {line}"
+            line = f"{emoji} {p['product']} | {p['color']} | {p['price']} تومان"
             categorized.setdefault(emoji, []).append(line)
         today = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
