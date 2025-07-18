@@ -32,19 +32,20 @@ def fetch_products_json():
 
 def extract_products(data):
     products = []
-    for category in data.get("Data", []):
-        category_name = category.get("Name", "")
-        for item in category.get("Data", []):
-            product_name = item.get("ProductName", "")
-            color = item.get("Name", "")
-            price = item.get("final_price_value", 0)
-            price = f"{int(price):,}"  # تبدیل به رشته با کاما
-            products.append({
-                "category": category_name,
-                "product": product_name,
-                "color": color,
-                "price": price
-            })
+    for parent in data.get("ParentCategories", []):
+        for category in parent.get("Data", []):
+            category_name = category.get("Name", "")
+            for item in category.get("Data", []):
+                product_name = item.get("ProductName", "")
+                color = item.get("Name", "")
+                price = item.get("final_price_value", 0)
+                price = f"{int(price):,}"  # تبدیل به رشته با کاما
+                products.append({
+                    "category": category_name,
+                    "product": product_name,
+                    "color": color,
+                    "price": price
+                })
     return products
 
 def escape_special_characters(text):
