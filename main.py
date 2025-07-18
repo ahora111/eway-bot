@@ -10,6 +10,7 @@ from persiantools.jdatetime import JalaliDate
 from pytz import timezone
 from datetime import datetime
 
+# --- متغیرهای محیطی ---
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SHEET_NAME = 'Sheet1'
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -17,6 +18,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+# --- گرفتن داده محصولات از API نامی‌نت ---
 def fetch_products_json():
     url = "https://panel.naminet.co/api/catalog/productGroupsAttrNew?term="
     headers = {
@@ -25,11 +27,10 @@ def fetch_products_json():
         "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
     }
     response = requests.get(url, headers=headers)
-    print("Status code:", response.status_code)
-    print("Response text:", response.text[:500])
     data = response.json()
     return data
 
+# --- استخراج محصولات از JSON ---
 def extract_products(data):
     products = []
     for parent in data.get("ParentCategories", []):
@@ -39,7 +40,7 @@ def extract_products(data):
                 product_name = item.get("ProductName", "")
                 color = item.get("Name", "")
                 price = item.get("final_price_value", 0)
-                price = f"{int(price):,}"  # تبدیل به رشته با کاما
+                price = f"{int(price):,}"
                 products.append({
                     "category": category_name,
                     "product": product_name,
@@ -48,12 +49,14 @@ def extract_products(data):
                 })
     return products
 
+# --- فرار دادن کاراکترهای خاص برای MarkdownV2 تلگرام ---
 def escape_special_characters(text):
     escape_chars = ['\\', '(', ')', '[', ']', '~', '*', '_', '-', '+', '>', '#', '.', '!', '|']
     for char in escape_chars:
         text = text.replace(char, '\\' + char)
     return text
 
+# --- تقسیم پیام به پارت‌های تلگرام ---
 def split_message_by_emoji_group(message, max_length=4000):
     lines = message.split('\n')
     parts = []
@@ -75,12 +78,14 @@ def split_message_by_emoji_group(message, max_length=4000):
         parts.append(current.rstrip('\n'))
     return parts
 
+# --- گرفتن ساعت فعلی ایران ---
 def get_current_time():
     iran_tz = timezone('Asia/Tehran')
     iran_time = datetime.now(iran_tz)
     current_time = iran_time.strftime('%H:%M')
     return current_time
 
+# --- ساخت پیام نهایی هر دسته برای تلگرام ---
 def prepare_final_message(category_name, category_lines, update_date):
     update_date = JalaliDate.today().strftime("%Y/%m/%d")
     current_time = get_current_time()
@@ -99,13 +104,14 @@ def prepare_final_message(category_name, category_lines, update_date):
     header = (
         f"🗓 بروزرسانی {update_date_formatted} 🕓 ساعت: {current_time}\n"
         f"✅ لیست پخش موبایل اهورا\n\n"
-        f"⬅️ موجودی {category_title} ➡️\n\n"
+        f"⬅️ موجودی گوشیای متفرقه ➡️\n\n"
     )
     formatted_lines = category_lines
     footer = "\n\n☎️ شماره های تماس :\n📞 09371111558\n📞 02833991417"
     final_message = f"{header}" + "\n".join(formatted_lines) + f"{footer}"
     return final_message
 
+# --- اتصال به گوگل شیت ---
 def get_credentials():
     encoded = os.getenv("GSHEET_CREDENTIALS_JSON")
     if not encoded:
@@ -157,6 +163,7 @@ def update_sheet_data(sheet, emoji, messages):
     for part, (message_id, text) in enumerate(messages, 1):
         sheet.append_row([emoji, today, part, message_id, text])
 
+# --- ارسال و ویرایش پیام تلگرام ---
 def send_telegram_message(message, bot_token, chat_id):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     params = {
@@ -289,6 +296,7 @@ def send_or_edit_final_message(sheet, final_message, bot_token, chat_id, button_
         logging.error("❌ خطا در ارسال پیام نهایی: %s", response.text)
         return None
 
+# --- تابع اصلی برنامه ---
 def main():
     try:
         sheet = connect_to_sheet()
@@ -298,6 +306,7 @@ def main():
         if not products:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
             return
+        # نگاشت دسته‌بندی به ایموجی
         emoji_map = {
             "گوشی سامسونگ": "🔵",
             "گوشی شیائومی": "🟡",
@@ -311,15 +320,16 @@ def main():
             "ناتینگ فون": "🟣",
             "تبلت": "🟠",
         }
+        # دسته‌بندی محصولات بر اساس ایموجی
         categorized = {}
         for p in products:
             emoji = emoji_map.get(p["category"], "🟣")
-            line = f"{p['product']} | {p['color']} | {p['price']} تومان"
-            line = f"{emoji} {line}"
+            line = f"{emoji} {p['product']} | {p['color']} | {p['price']} تومان"
             categorized.setdefault(emoji, []).append(line)
         today = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
         should_send_final_message = False
+        # ارسال پیام هر دسته و ذخیره در شیت
         for emoji, lines in categorized.items():
             if not lines:
                 continue
@@ -332,6 +342,7 @@ def main():
             all_message_ids[emoji] = message_ids
             if changed:
                 should_send_final_message = True
+        # ساخت پیام نهایی و دکمه‌ها
         final_message = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد..\n\n"
             "✅اطلاعات واریز\n"
