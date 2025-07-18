@@ -74,13 +74,19 @@ def fetch_from_hamrahtel_site():
     driver = get_driver()
     products = []
     try:
-        urls = {"mobile": "https://hamrahtel.com/quick-checkout?category=mobile", "tablet": "https://hamrahtel.com/quick-checkout?category=tablet", "console": "https://hamrahtel.com/quick-checkout?category=game-console"}
+        urls = {
+            "mobile": "https://hamrahtel.com/quick-checkout?category=mobile",
+            "tablet": "https://hamrahtel.com/quick-checkout?category=tablet",
+            "console": "https://hamrahtel.com/quick-checkout?category=game-console"
+        }
         for category, url in urls.items():
             driver.get(url)
-            WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[class^="mantine-"] > .mantine-Text-root')))
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[class^="mantine-"] > .mantine-Text-root'))
+            )
             scroll_page(driver)
             elements = driver.find_elements(By.CSS_SELECTOR, 'div[class^="mantine-"] > .mantine-Text-root')
-            cleaned_elements = [el.text.strip() for el in elements if el.text.strip()][25:]
+            cleaned_elements = [el.text.strip() for el in elements if el.text.strip()]  # حذف [25:]
             i = 0
             while i < len(cleaned_elements) - 1:
                 name = cleaned_elements[i]
@@ -88,13 +94,15 @@ def fetch_from_hamrahtel_site():
                 if price_str.isdigit():
                     products.append({"name": name, "price": int(price_str)})
                     i += 2
-                else: i += 1
+                else:
+                    i += 1
         logging.info(f"✅ از منبع دوم {len(products)} محصول دریافت شد.")
         return products
     except Exception as e:
         logging.warning(f"⚠️ هشدار: دریافت اطلاعات از منبع دوم ناموفق بود. دلیل: {e}")
         return []
-    finally: driver.quit()
+    finally:
+        driver.quit()
 
 # ==============================================================================
 # بخش ۳: توابع پردازش داده، مقایسه و نهایی‌سازی
