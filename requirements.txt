@@ -13,3 +13,4 @@ pytz
 telethon
 oauth2client
 tenacity
+undetected-chromedriver
