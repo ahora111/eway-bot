@@ -18,31 +18,24 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# ==============================================================================
-# بخش ۱: تنظیمات و پیکربندی اولیه
-# ==============================================================================
-
-# غیرفعال کردن هشدار SSL
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# تنظیمات لاگ‌گیری
+# -------------------- تنظیمات اولیه --------------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-# خواندن متغیرهای محیطی
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SHEET_NAME = 'Sheet1'
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# فقط در بازه زمانی مجاز اجرا شود
+iran_tz = timezone('Asia/Tehran')
+now = datetime.now(iran_tz)
+start_time = dt_time(9, 30)
+end_time = dt_time(23, 30)
+if not (start_time <= now.time() <= end_time):
+    logging.info("🕒 خارج از بازه مجاز اجرا (۹:۳۰ تا ۲۳:۳۰). اسکریپت متوقف شد.")
+    sys.exit()
 
-
-# ==============================================================================
-# بخش ۲: توابع استخراج داده از منابع مختلف
-# ==============================================================================
-
+# -------------------- دریافت داده از API نامی‌نت --------------------
 def fetch_from_naminet_api():
-    logging.info("در حال دریافت اطلاعات از منبع اول (API Naminet)...")
     url = "https://panel.naminet.co/api/catalog/productGroupsAttrNew?term="
     headers = {
         "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
@@ -59,12 +52,12 @@ def fetch_from_naminet_api():
                     price = item.get("final_price_value", 0)
                     if full_name and price > 0:
                         products.append({"name": full_name, "price": int(price)})
-        logging.info(f"✅ از منبع اول {len(products)} محصول دریافت شد.")
         return products
     except Exception as e:
         logging.error(f"❌ خطا در دریافت اطلاعات از منبع اول: {e}")
         return []
 
+# -------------------- دریافت داده از سایت همراه‌تل با Selenium --------------------
 def get_driver():
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
@@ -84,7 +77,6 @@ def scroll_page(driver, pause_time=1):
         last_height = new_height
 
 def fetch_from_hamrahtel_site():
-    logging.info("در حال دریافت اطلاعات از منبع دوم (سایت Hamrahtel)...")
     driver = get_driver()
     products = []
     try:
@@ -108,7 +100,6 @@ def fetch_from_hamrahtel_site():
                     i += 2
                 else:
                     i += 1
-        logging.info(f"✅ از منبع دوم {len(products)} محصول دریافت شد.")
         return products
     except Exception as e:
         logging.error(f"❌ خطا در دریافت اطلاعات از منبع دوم: {e}")
@@ -116,10 +107,7 @@ def fetch_from_hamrahtel_site():
     finally:
         driver.quit()
 
-# ==============================================================================
-# بخش ۳: توابع پردازش داده و قیمت
-# ==============================================================================
-
+# -------------------- پردازش قیمت و نام --------------------
 def process_price(price):
     if price <= 1: return 0
     elif price <= 7000000: increase = price + 260000
@@ -130,38 +118,27 @@ def process_price(price):
     return round(increase, -5)
 
 def normalize_name(name):
-    # این تابع برای یکسان‌سازی نام‌ها برای مقایسه است
     return ' '.join(name.lower().strip().replace('ی', 'ي').replace('ک', 'ك').split())
 
+# -------------------- ساخت لیست نهایی محصولات با کمترین قیمت --------------------
 def get_final_product_list():
     naminet_products = fetch_from_naminet_api()
     hamrahtel_products = fetch_from_hamrahtel_site()
-    
     all_products_raw = defaultdict(list)
-    
-    # اضافه کردن محصولات با قیمت خام
     for p in naminet_products:
         all_products_raw[normalize_name(p['name'])].append(p['price'])
     for p in hamrahtel_products:
         all_products_raw[normalize_name(p['name'])].append(p['price'])
-        
     final_products = []
     for name, prices in all_products_raw.items():
-        # انتخاب کمترین قیمت خام
         best_raw_price = min(prices)
-        # پردازش قیمت نهایی بر اساس کمترین قیمت خام
         final_price = process_price(best_raw_price)
         if final_price > 0:
             final_products.append({"name": name.title(), "price": final_price})
-            
-    # مرتب‌سازی لیست نهایی بر اساس قیمت
     final_products.sort(key=lambda x: x['price'])
     return final_products
 
-# ==============================================================================
-# بخش ۴: توابع آماده‌سازی پیام برای تلگرام
-# ==============================================================================
-
+# -------------------- دسته‌بندی محصولات و ساخت پیام --------------------
 def categorize_products(products):
     categorized = defaultdict(list)
     emoji_map = {
@@ -175,17 +152,16 @@ def categorize_products(products):
         "watch": "⌚️",
         "laptop": "💻",
         "console": "🎮", "playstation": "🎮",
+        "vocal": "⚪️"
     }
-    
     for p in products:
         name_lower = p['name'].lower()
-        assigned_emoji = "🟣" # ایموجی پیش‌فرض برای متفرقه
+        assigned_emoji = "🟣"
         for keyword, emoji in emoji_map.items():
             if keyword in name_lower:
                 assigned_emoji = emoji
                 break
         categorized[assigned_emoji].append(p)
-        
     return categorized
 
 def escape_special_characters(text):
@@ -235,16 +211,7 @@ def split_message(message, max_length=4000):
     parts.append(message)
     return parts
 
-# ==============================================================================
-# بخش ۵: توابع تعامل با گوگل شیت و API تلگرام
-# ==============================================================================
-
-# ... توابع این بخش (get_credentials, connect_to_sheet, check_and_create_headers, 
-# load_sheet_data, update_sheet_data, send_telegram_message, edit_telegram_message, 
-# delete_telegram_message, process_category_messages, update_final_message_in_sheet, 
-# get_final_message_from_sheet, send_or_edit_final_message)
-# تقریباً بدون تغییر از کدهای قبلی کپی می‌شوند.
-
+# -------------------- تعامل با گوگل شیت و تلگرام --------------------
 def get_credentials():
     encoded = os.getenv("GSHEET_CREDENTIALS_JSON")
     if not encoded:
@@ -263,16 +230,8 @@ def connect_to_sheet():
     return client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
 
 def check_and_create_headers(sheet):
-    try:
-        if not sheet.get_all_values():
-            sheet.update(values=[["emoji", "date", "part", "message_id", "text"]], range_name="A1:E1")
-            logging.info("✅ هدرها به شیت اضافه شدند.")
-    except gspread.exceptions.APIError as e:
-        if "exceeds grid limits" in str(e): # Sheet is empty
-            sheet.update(values=[["emoji", "date", "part", "message_id", "text"]], range_name="A1:E1")
-            logging.info("✅ هدرها به شیت خالی اضافه شدند.")
-        else:
-            raise e
+    if not sheet.get_all_values():
+        sheet.update(values=[["emoji", "date", "part", "message_id", "text"]], range_name="A1:E1")
 
 def load_sheet_data(sheet):
     records = sheet.get_all_records()
@@ -292,7 +251,6 @@ def update_sheet_data(sheet, emoji, messages):
     rows_to_delete = [i + 2 for i, row in enumerate(records) if row.get("emoji") == emoji and row.get("date") == today]
     if rows_to_delete:
         sheet.delete_rows(min(rows_to_delete), max(rows_to_delete))
-
     rows_to_append = []
     for part, (message_id, text) in enumerate(messages, 1):
         rows_to_append.append([emoji, today, part, message_id, text])
@@ -328,23 +286,20 @@ def process_category_messages(emoji, messages, sheet, today):
     sheet_data = load_sheet_data(sheet)
     prev_msgs = sorted(sheet_data.get((emoji, today), []), key=lambda x: x["part"])
     new_msgs, changed = [], False
-
     for i, msg_text in enumerate(messages):
         if i < len(prev_msgs):
             msg_id = prev_msgs[i]["message_id"]
             if prev_msgs[i]["text"] != msg_text:
                 if not edit_telegram_message(msg_id, msg_text, BOT_TOKEN, CHAT_ID):
-                    msg_id = send_telegram_message(msg_text, BOT_TOKEN, CHAT_ID) # Fallback to send
+                    msg_id = send_telegram_message(msg_text, BOT_TOKEN, CHAT_ID)
                 changed = True
         else:
             msg_id = send_telegram_message(msg_text, BOT_TOKEN, CHAT_ID)
             changed = True
         if msg_id: new_msgs.append((msg_id, msg_text))
-
     for j in range(len(messages), len(prev_msgs)):
         delete_telegram_message(prev_msgs[j]["message_id"], BOT_TOKEN, CHAT_ID)
         changed = True
-
     if changed: update_sheet_data(sheet, emoji, new_msgs)
     return [msg_id for msg_id, _ in new_msgs], changed
 
@@ -353,66 +308,44 @@ def send_or_edit_final_message(sheet, final_message_text, button_markup, should_
     sheet_data = load_sheet_data(sheet)
     prev_msg_data = sheet_data.get(("FINAL", today))
     prev_msg_id = prev_msg_data[0]["message_id"] if prev_msg_data else None
-    
     if prev_msg_id and not should_force_send:
-        # فقط دکمه‌ها را ویرایش کن اگر متن یکسان است
         if edit_telegram_message(prev_msg_id, final_message_text, BOT_TOKEN, CHAT_ID, button_markup):
             logging.info("✅ پیام نهایی (فقط دکمه‌ها) ویرایش شد.")
             return
-    
-    # اگر نیاز به ارسال/ویرایش کامل است
     if prev_msg_id:
-        # تلاش برای حذف پیام قدیمی
         delete_telegram_message(prev_msg_id, BOT_TOKEN, CHAT_ID)
-
     new_msg_id = send_telegram_message(final_message_text, BOT_TOKEN, CHAT_ID, button_markup)
     if new_msg_id:
         update_sheet_data(sheet, "FINAL", [(new_msg_id, final_message_text)])
         logging.info("✅ پیام نهایی جدید ارسال شد.")
 
-# ==============================================================================
-# بخش ۶: تابع اصلی و اجرای برنامه
-# ==============================================================================
-
+# -------------------- تابع اصلی --------------------
 def main():
     try:
-        # ۱. اتصال به شیت و بررسی هدرها
         sheet = connect_to_sheet()
         check_and_create_headers(sheet)
-
-        # ۲. دریافت و پردازش لیست نهایی محصولات
         final_products = get_final_product_list()
         if not final_products:
             logging.warning("❌ هیچ محصولی برای پردازش یافت نشد. اسکریپت متوقف می‌شود.")
             return
-
-        # ۳. دسته‌بندی محصولات
         categorized_products = categorize_products(final_products)
-
-        # ۴. پردازش و ارسال پیام برای هر دسته
         today_str = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
         any_change_detected = False
-
         category_titles = {
             "🔵": "سامسونگ", "🟡": "شیائومی", "🍏": "آیفون", "🟢": "نوکیا",
             "⚫️": "ناتینگ فون", "🟠": "تبلت", "🔉": "اسپیکر", "⌚️": "ساعت هوشمند",
-            "💻": "لپ‌تاپ", "🎮": "کنسول بازی", "🟣": "متفرقه"
+            "💻": "لپ‌تاپ", "🎮": "کنسول بازی", "🟣": "متفرقه", "⚪️": "گوشی وکال"
         }
-
         for emoji, products in categorized_products.items():
             if not products: continue
-            
             category_title = category_titles.get(emoji, "سایر کالاها")
             message_body = build_message_body(products)
             full_message = prepare_final_message(category_title, message_body)
             message_parts = split_message(full_message)
-
             msg_ids, changed = process_category_messages(emoji, message_parts, sheet, today_str)
             if msg_ids: all_message_ids[emoji] = msg_ids
             if changed: any_change_detected = True
-        
-        # ۵. آماده‌سازی و ارسال پیام نهایی汇总
         final_message_text = (
             "✅ لیست گوشی و سایر کالاهای بالا بروز میباشد. ثبت خرید تا ساعت 10:30 شب انجام میشود و تحویل کالا ساعت 11:30 صبح روز بعد می باشد.\n\n"
             "✅اطلاعات واریز\n"
@@ -427,29 +360,22 @@ def main():
             "📞 09308529712\n"
             "📞 028-3399-1417"
         )
-
         button_labels = {
             "🔵": "📱 لیست سامسونگ", "🟡": "📱 لیست شیائومی", "🍏": "📱 لیست آیفون",
             "🟠": "📱 لیست تبلت", "💻": "💻 لیست لپ‌تاپ", "🎮": "🎮 کنسول بازی",
             "🟣": "📱 لیست متفرقه", "🟢": "📱 لیست نوکیا", "⚫️": "📱 لیست ناتینگ فون",
-            "🔉": "🔉 لیست اسپیکر", "⌚️": "⌚️ ساعت هوشمند"
+            "🔉": "🔉 لیست اسپیکر", "⌚️": "⌚️ ساعت هوشمند", "⚪️": "📱 گوشی وکال"
         }
-        
         button_markup = {"inline_keyboard": []}
-        # مرتب‌سازی دکمه‌ها بر اساس یک ترتیب دلخواه
-        sorted_emojis = sorted(all_message_ids.keys(), key=lambda e: "🔵🟡🍏🟠💻🎮🟣⚫️🟢🔉⌚️".find(e))
-
+        sorted_emojis = sorted(all_message_ids.keys(), key=lambda e: "🔵🟡🍏🟠💻🎮🟣⚫️🟢🔉⌚️⚪️".find(e))
         for emoji in sorted_emojis:
-            msg_id = all_message_ids[emoji][0] # لینک به اولین پیام هر دسته
+            msg_id = all_message_ids[emoji][0]
             label = button_labels.get(emoji, f"لیست {emoji}")
             url = f"https://t.me/c/{CHAT_ID.replace('-100', '')}/{msg_id}"
             button_markup["inline_keyboard"].append([{"text": label, "url": url}])
-
         send_or_edit_final_message(sheet, final_message_text, button_markup, any_change_detected)
-
     except Exception as e:
         logging.error(f"❌ خطای اصلی در برنامه: {e}", exc_info=True)
-        # در صورت بروز خطا، یک پیام به تلگرام ارسال کن
         error_message = f"ربات با خطای جدی مواجه شد:\n\n`{str(e)}`"
         send_telegram_message(error_message, BOT_TOKEN, CHAT_ID)
 
