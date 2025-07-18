@@ -3,20 +3,12 @@ import time
 import requests
 import logging
 import json
-import pytz
-import sys
 import base64
 import gspread
-from pytz import timezone
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
-from datetime import datetime, time as dt_time
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from persiantools.jdatetime import JalaliDate
+from pytz import timezone
+from datetime import datetime
 
 SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 SHEET_NAME = 'Sheet1'
@@ -25,69 +17,33 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-iran_tz = pytz.timezone('Asia/Tehran')
-now = datetime.now(iran_tz)
-current_time = now.time()
-start_time = dt_time(9, 30)
-end_time = dt_time(23, 30)
-if not (start_time <= current_time <= end_time):
-    print("🕒 خارج از بازه مجاز اجرا (۹:۳۰ تا ۲۳:۳۰). اسکریپت متوقف شد.")
-    sys.exit()
+def fetch_products_json():
+    url = "https://naminet.co/api/productGroupsAttNew?term=mobile"  # آدرس دقیق را جایگزین کن
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    response = requests.get(url, headers=headers)
+    data = response.json()
+    return data
 
-def get_driver():
-    try:
-        import undetected_chromedriver as uc
-        options = uc.ChromeOptions()
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        driver = uc.Chrome(options=options, headless=True)
-        return driver
-    except Exception as e:
-        logging.error(f"خطا در ایجاد WebDriver: {e}")
-        return None
-
-def scroll_page(driver, scroll_pause_time=2):
-    last_height = driver.execute_script("return document.body.scrollHeight")
-    for _ in range(10):  # چند بار اسکرول کن تا همه محصولات لود شوند
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(scroll_pause_time)
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height:
-            break
-        last_height = new_height
-
-def expand_all_categories(driver):
-    # همه دسته‌بندی‌ها را باز کن (روی همه دکمه‌های دسته کلیک کن)
-    category_buttons = driver.find_elements(By.XPATH, '//div[contains(@class, "cursor-pointer") and contains(@class, "bg-lowOp-blue53")]')
-    for btn in category_buttons:
-        try:
-            driver.execute_script("arguments[0].scrollIntoView();", btn)
-            btn.click()
-            time.sleep(1)
-        except Exception:
-            continue
-
-def extract_product_data(driver):
+def extract_products(data):
     products = []
-    product_divs = driver.find_elements(By.XPATH, '//div[contains(@class, "cursor-pointer") and contains(@class, "border-lowOp-blue53")]')
-    for div in product_divs:
-        try:
-            name = div.find_element(By.XPATH, './/h1').text.strip()
-            color_price_divs = div.find_elements(By.XPATH, './/div[contains(@class, "bg-gray-100") and contains(@class, "items-center")]')
-            for cp in color_price_divs:
-                try:
-                    color = cp.find_element(By.TAG_NAME, 'p').text.strip()
-                    price = cp.find_element(By.XPATH, './/span[contains(@class, "price")]').text.strip()
-                    price = price.replace("تومان", "").replace("از", "").replace("٬", "").replace(",", "").strip()
-                    if not price or not any(char.isdigit() for char in price):
-                        continue
-                    products.append((name, color, price))
-                except Exception:
-                    continue
-        except Exception:
-            continue
+    for parent in data.get("ParentCategories", []):
+        parent_name = parent.get("Name", "")
+        for category in parent.get("Data", []):
+            category_name = category.get("Name", "")
+            for item in category.get("Data", []):
+                product_name = item.get("ProductName", "")
+                color = item.get("Name", "")
+                price = item.get("final_price_value", 0)
+                price = f"{int(price):,}"  # تبدیل به رشته با کاما
+                products.append({
+                    "parent": parent_name,
+                    "category": category_name,
+                    "product": product_name,
+                    "color": color,
+                    "price": price
+                })
     return products
 
 def escape_special_characters(text):
@@ -116,9 +72,6 @@ def split_message_by_emoji_group(message, max_length=4000):
     if current.strip():
         parts.append(current.rstrip('\n'))
     return parts
-
-def decorate_line(line):
-    return f"🟣 {line}"
 
 def get_current_time():
     iran_tz = timezone('Asia/Tehran')
@@ -338,30 +291,31 @@ def main():
     try:
         sheet = connect_to_sheet()
         check_and_create_headers(sheet)
-        driver = get_driver()
-        if not driver:
-            logging.error("❌ نمی‌توان WebDriver را ایجاد کرد.")
-            return
-        categories_urls = {
-            "all": "https://naminet.co/quick-commerce"
-        }
-        brands, models = [], []
-        for name, url in categories_urls.items():
-            driver.get(url)
-            time.sleep(5)
-            expand_all_categories(driver)
-            scroll_page(driver)
-            products = extract_product_data(driver)
-            logging.info(f"تعداد محصولات پیدا شده: {len(products)}")
-            for prod_name, color, prod_price in products:
-                brands.append("")
-                models.append(f"{prod_name} | {color} | {prod_price}")
-        driver.quit()
-        if not models:
+        data = fetch_products_json()
+        products = extract_products(data)
+        if not products:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
             return
-        message_lines = [decorate_line(row) for row in models]
-        categorized = {"🟣": message_lines}
+        # دسته‌بندی بر اساس برند (مثلاً سامسونگ، شیائومی و ...)
+        emoji_map = {
+            "گوشی سامسونگ": "🔵",
+            "گوشی شیائومی": "🟡",
+            "گوشی آیفون": "🍏",
+            "گوشی نوکیا": "🟣",
+            "گوشی وکال": "🟣",
+            "گوشی داریا": "🟣",
+            "گوشی تی سی ال": "🟣",
+            "گوشی رد تون": "🟣",
+            "گوشی ریلمی": "🟣",
+            "ناتینگ فون": "🟣",
+            "تبلت": "🟠",
+        }
+        categorized = {}
+        for p in products:
+            emoji = emoji_map.get(p["category"], "🟣")
+            line = f"{p['product']} | {p['color']} | {p['price']} تومان"
+            line = f"{emoji} {line}"
+            categorized.setdefault(emoji, []).append(line)
         today = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
         should_send_final_message = False
@@ -393,7 +347,11 @@ def main():
         )
         button_markup = {"inline_keyboard": []}
         emoji_labels = {
-            "🟣": "📱 لیست گوشیای متفرقه"
+            "🔵": "📱 لیست سامسونگ",
+            "🟡": "📱 لیست شیائومی",
+            "🍏": "📱 لیست آیفون",
+            "🟣": "📱 لیست گوشیای متفرقه",
+            "🟠": "📱 لیست تبلت"
         }
         for emoji, msg_ids in all_message_ids.items():
             for msg_id in msg_ids:
