@@ -18,32 +18,34 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def fetch_products_json():
-    url = "https://panel.naminet.co/api/catalog/productGroupsAttrNew?term="  # آدرس دقیق را جایگزین کن
+    url = "https://panel.naminet.co/api/catalog/productGroupsAttrNew?term="
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        # اگر نیاز به توکن داری این خط را فعال کن و توکن را جایگزین کن:
+        # "Authorization": "Bearer <YOUR_TOKEN_HERE>"
     }
     response = requests.get(url, headers=headers)
+    print("Status code:", response.status_code)
+    print("Response text:", response.text[:500])
     data = response.json()
     return data
 
 def extract_products(data):
     products = []
-    for parent in data.get("ParentCategories", []):
-        parent_name = parent.get("Name", "")
-        for category in parent.get("Data", []):
-            category_name = category.get("Name", "")
-            for item in category.get("Data", []):
-                product_name = item.get("ProductName", "")
-                color = item.get("Name", "")
-                price = item.get("final_price_value", 0)
-                price = f"{int(price):,}"  # تبدیل به رشته با کاما
-                products.append({
-                    "parent": parent_name,
-                    "category": category_name,
-                    "product": product_name,
-                    "color": color,
-                    "price": price
-                })
+    for category in data.get("Data", []):
+        category_name = category.get("Name", "")
+        for item in category.get("Data", []):
+            product_name = item.get("ProductName", "")
+            color = item.get("Name", "")
+            price = item.get("final_price_value", 0)
+            price = f"{int(price):,}"  # تبدیل به رشته با کاما
+            products.append({
+                "category": category_name,
+                "product": product_name,
+                "color": color,
+                "price": price
+            })
     return products
 
 def escape_special_characters(text):
@@ -296,7 +298,6 @@ def main():
         if not products:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
             return
-        # دسته‌بندی بر اساس برند (مثلاً سامسونگ، شیائومی و ...)
         emoji_map = {
             "گوشی سامسونگ": "🔵",
             "گوشی شیائومی": "🟡",
