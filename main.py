@@ -60,14 +60,25 @@ def scroll_page(driver, scroll_pause_time=2):
 
 def extract_product_data(driver):
     products = []
-    name_els = driver.find_elements(By.XPATH, '//h1[contains(@class, "text-left") and contains(@class, "text-sm")]')
-    logging.info(f"تعداد h1 محصولات: {len(name_els)}")
-    for name_el in name_els:
+    # هر محصول یک div با این کلاس است
+    product_divs = driver.find_elements(By.XPATH, '//div[contains(@class, "cursor-pointer") and contains(@class, "border-lowOp-blue53")]')
+    for div in product_divs:
         try:
-            name = name_el.text.strip()
-            logging.info(f"نام محصول: {name}")
-        except Exception as e:
-            logging.warning(f"خطا در استخراج نام محصول: {e}")
+            # نام محصول
+            name = div.find_element(By.XPATH, './/h1').text.strip()
+            # هر رنگ و قیمت یک div با bg-gray-100 است
+            color_price_divs = div.find_elements(By.XPATH, './/div[contains(@class, "bg-gray-100") and contains(@class, "items-center")]')
+            for cp in color_price_divs:
+                try:
+                    color = cp.find_element(By.TAG_NAME, 'p').text.strip()
+                    price = cp.find_element(By.XPATH, './/span[contains(@class, "price")]').text.strip()
+                    price = price.replace("تومان", "").replace("از", "").replace("٬", "").replace(",", "").strip()
+                    if not price or not any(char.isdigit() for char in price):
+                        continue
+                    products.append((name, color, price))
+                except Exception:
+                    continue
+        except Exception:
             continue
     return products
 
@@ -328,12 +339,16 @@ def main():
         categories_urls = {
             "all": "https://naminet.co/quick-commerce"
         }
+        brands, models = [], []
         for name, url in categories_urls.items():
             driver.get(url)
-            time.sleep(5)
+            time.sleep(5)  # صبر برای لود کامل
             scroll_page(driver)
             products = extract_product_data(driver)
             logging.info(f"تعداد محصولات پیدا شده: {len(products)}")
+            for prod_name, color, prod_price in products:
+                brands.append("")
+                models.append(f"{prod_name} | {color} | {prod_price}")
         driver.quit()
         if not models:
             logging.warning("❌ داده‌ای برای ارسال وجود ندارد!")
