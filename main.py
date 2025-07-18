@@ -9,6 +9,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from persiantools.jdatetime import JalaliDate
 from pytz import timezone
 from datetime import datetime
+from collections import defaultdict
 
 # غیرفعال کردن هشدار SSL (برای سایت با گواهی منقضی)
 import urllib3
@@ -56,6 +57,18 @@ def escape_special_characters(text):
         text = text.replace(char, '\\' + char)
     return text
 
+def build_category_message(emoji, products):
+    model_map = defaultdict(list)
+    for p in products:
+        model_map[p['product']].append((p['color'], p['price']))
+    lines = []
+    for model, color_prices in model_map.items():
+        lines.append(f"{emoji} {model}")
+        for color, price in color_prices:
+            lines.append(f"{color} | {price}")
+        lines.append("")
+    return lines
+    
 def split_message_by_emoji_group(message, max_length=4000):
     lines = message.split('\n')
     parts = []
@@ -354,16 +367,16 @@ def main():
         categorized = {}
         for p in products:
             emoji = emoji_map.get(p["category"], "🟣")
-            line = f"{emoji} {p['product']} | {p['color']} | {p['price']} تومان"
-            categorized.setdefault(emoji, []).append(line)
+            categorized.setdefault(emoji, []).append(p)
 
         today = JalaliDate.today().strftime("%Y-%m-%d")
         all_message_ids = {}
         should_send_final_message = False
-        for emoji, lines in categorized.items():
-            if not lines:
+        for emoji, prod_list in categorized.items():
+            if not prod_list:
                 continue
             category_title = category_titles.get(emoji, "گوشیای متفرقه")
+            lines = build_category_message(emoji, prod_list)
             message = prepare_final_message(category_title, lines, today)
             message_parts = split_message_by_emoji_group(message)
             current_time = get_current_time()
