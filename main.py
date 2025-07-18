@@ -18,7 +18,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# ... (بخش ۱, ۲, ۳ بدون تغییر) ...
 # ==============================================================================
 # بخش ۱: تنظیمات و پیکربندی اولیه
 # ==============================================================================
@@ -60,16 +59,8 @@ def get_driver():
     service = Service()
     return webdriver.Chrome(service=service, options=options)
 
-def scroll_page(driver, pause_time=1):
-    last_height = driver.execute_script("return document.body.scrollHeight")
-    while True:
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(pause_time)
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height: break
-        last_height = new_height
-
 def fetch_from_hamrahtel_site():
+    """داده‌ها را با اسکرپینگ از سایت همراه‌تل دریافت می‌کند (نسخه بازنویسی شده برای ساختار جدید)."""
     logging.info("در حال دریافت اطلاعات از منبع دوم (سایت Hamrahtel)...")
     driver = get_driver()
     products = []
@@ -80,29 +71,63 @@ def fetch_from_hamrahtel_site():
             "console": "https://hamrahtel.com/quick-checkout?category=game-console"
         }
         for category, url in urls.items():
+            logging.info(f"درحال پردازش دسته {category} از سایت همراه‌تل...")
             driver.get(url)
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[class^="mantine-"] > .mantine-Text-root'))
-            )
-            scroll_page(driver)
-            elements = driver.find_elements(By.CSS_SELECTOR, 'div[class^="mantine-"] > .mantine-Text-root')
-            cleaned_elements = [el.text.strip() for el in elements if el.text.strip()]  # حذف [25:]
-            i = 0
-            while i < len(cleaned_elements) - 1:
-                name = cleaned_elements[i]
-                price_str = cleaned_elements[i+1].replace("تومان", "").replace(",", "").replace("٬", "").strip()
-                if price_str.isdigit():
-                    products.append({"name": name, "price": int(price_str)})
-                    i += 2
-                else:
-                    i += 1
-        logging.info(f"✅ از منبع دوم {len(products)} محصول دریافت شد.")
-        return products
+            time.sleep(5)
+
+            # باز کردن تمام آکاردیون‌های اصلی (برندها) که بسته هستند
+            brand_accordions = driver.find_elements(By.CSS_SELECTOR, 'button.mantine-Accordion-control[aria-expanded="false"]')
+            for button in brand_accordions:
+                try:
+                    driver.execute_script("arguments[0].click();", button)
+                    time.sleep(0.3)
+                except Exception:
+                    pass
+            
+            # باز کردن تمام آکاردیون‌های داخلی (مدل‌ها) که بسته هستند
+            model_accordions = driver.find_elements(By.CSS_SELECTOR, 'div.mantine-Accordion-item button.mantine-Accordion-control[aria-expanded="false"]')
+            for button in model_accordions:
+                try:
+                    # اسکرول به المان و سپس کلیک
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                    time.sleep(0.2)
+                    driver.execute_script("arguments[0].click();", button)
+                    time.sleep(0.3)
+                except Exception:
+                    pass
+
+            # حالا که همه چیز باز است، داده‌ها را استخراج می‌کنیم
+            all_variants = driver.find_elements(By.CSS_SELECTOR, 'div.mantine-Accordion-content div.flex.justify-between.items-center')
+            
+            for variant in all_variants:
+                try:
+                    # پیدا کردن نام اصلی محصول با حرکت به سمت بالا در ساختار HTML
+                    product_base_name_element = variant.find_element(By.XPATH, './ancestor::div[contains(@class, "mantine-Accordion-item") and .//button[contains(@id, "control")]]//div[contains(@class, "mantine-9eurlv")]')
+                    product_base_name = product_base_name_element.text.strip()
+
+                    color_element = variant.find_element(By.CSS_SELECTOR, 'div.mantine-rj9ps7')
+                    color = color_element.text.strip()
+                    
+                    price_element = variant.find_element(By.CSS_SELECTOR, 'span.mantine-1erraa9')
+                    price_str = price_element.text.replace(",", "").replace("٬", "").strip()
+                    
+                    if product_base_name and color and price_str.isdigit():
+                        full_name = f"{product_base_name} {color}"
+                        price = int(price_str)
+                        products.append({"name": full_name, "price": price})
+                except Exception:
+                    continue
+        
+        unique_products = list({p['name']: p for p in products}.values())
+        logging.info(f"✅ از منبع دوم {len(unique_products)} محصول دریافت شد.")
+        return unique_products
+        
     except Exception as e:
-        logging.warning(f"⚠️ هشدار: دریافت اطلاعات از منبع دوم ناموفق بود. دلیل: {e}")
+        logging.warning(f"⚠️ هشدار: دریافت اطلاعات از منبع دوم ناموفق بود. دلیل: {e}", exc_info=True)
         return []
     finally:
         driver.quit()
+
 
 # ==============================================================================
 # بخش ۳: توابع پردازش داده، مقایسه و نهایی‌سازی
@@ -157,11 +182,13 @@ def escape_special_characters(text):
 def build_message_body(products):
     lines, product_groups = [], defaultdict(list)
     for p in products:
-        parts = p['name'].split(); base_name = ' '.join(parts[:-1]) if len(parts) > 1 else p['name']
-        product_groups[base_name].append(p)
-    for base_name, variants in product_groups.items():
+        # پاکسازی نام محصول برای گروه بندی بهتر
+        clean_name = p['name'].rsplit(' ', 1)[0] if p['name'].rsplit(' ', 1)[-1].isalpha() else p['name']
+        product_groups[clean_name].append(p)
+    
+    for base_name, variants in sorted(product_groups.items()):
         lines.append(base_name)
-        for variant in variants:
+        for variant in sorted(variants, key=lambda x: x['price']):
             color = variant['name'].replace(base_name, '').strip()
             lines.append(f"{color if color else ' '} | {variant['price']:,}")
         lines.append("")
@@ -220,13 +247,11 @@ def check_and_create_headers(sheet):
         logging.info("شیت خالی بود، هدرها ایجاد شدند.")
 
 def load_sheet_data(sheet):
-    """تابع اصلاح شده: داده‌ها را با بررسی اعتبار آن‌ها می‌خواند."""
     try:
         expected_headers = ["emoji", "date", "part", "message_id", "text"]
-        records = sheet.get_all_records(expected_headers=expected_headers)
+        records = sheet.get_all_records(expected_headers=expected_headers, value_render_option='AS_IS')
         data = defaultdict(list)
         for row in records:
-            # فقط ردیف‌هایی را پردازش کن که part آنها عدد معتبر است
             if all(k in row for k in expected_headers) and str(row.get("part")).isdigit():
                 data[(row["emoji"], str(row["date"]))].append({
                     "part": int(row["part"]),
@@ -240,7 +265,7 @@ def load_sheet_data(sheet):
 
 def update_sheet_data(sheet, emoji, messages):
     today = JalaliDate.today().strftime("%Y-%m-%d")
-    all_values = sheet.get_all_values()
+    all_values = sheet.get_all_values(value_render_option='AS_IS')
     rows_to_delete_indices = [i + 1 for i, row in enumerate(all_values) if len(row) > 1 and row[0] == emoji and row[1] == today]
     if rows_to_delete_indices:
         for row_index in sorted(rows_to_delete_indices, reverse=True): sheet.delete_rows(row_index)
@@ -251,7 +276,7 @@ def send_telegram_message(text, bot_token, chat_id, reply_markup=None):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     params = {"chat_id": chat_id, "text": escape_special_characters(text), "parse_mode": "MarkdownV2"}
     if reply_markup: params["reply_markup"] = json.dumps(reply_markup)
-    response = requests.post(url, json=params, timeout=10)
+    response = requests.post(url, json=params, timeout=20)
     if response.ok: return response.json()["result"]["message_id"]
     logging.error(f"خطا در ارسال پیام: {response.text}")
     return None
@@ -260,13 +285,13 @@ def edit_telegram_message(msg_id, text, bot_token, chat_id, reply_markup=None):
     url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
     params = {"chat_id": chat_id, "message_id": msg_id, "text": escape_special_characters(text), "parse_mode": "MarkdownV2"}
     if reply_markup: params["reply_markup"] = json.dumps(reply_markup)
-    response = requests.post(url, json=params, timeout=10)
+    response = requests.post(url, json=params, timeout=20)
     return response.ok
 
 def delete_telegram_message(msg_id, bot_token, chat_id):
     url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
     params = {"chat_id": chat_id, "message_id": msg_id}
-    response = requests.post(url, json=params, timeout=10)
+    response = requests.post(url, json=params, timeout=20)
     return response.ok
 
 def process_category_messages(emoji, messages, sheet, today):
