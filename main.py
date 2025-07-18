@@ -18,7 +18,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def fetch_products_json():
-    url = "https://naminet.co/api/productGroupsAttNew?term=mobile"  # آدرس دقیق را جایگزین کن
+    url = "https://naminet.co/quick-commerce"  # آدرس دقیق را جایگزین کن
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
