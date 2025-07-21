@@ -50,7 +50,7 @@ def fetch_samsung_products():
     soup = BeautifulSoup(response.text, "html.parser")
     products = []
 
-    # هر محصول یک div با کلاس cursor-pointer و border-lowOp-blue53 است
+    # هر محصول یک div با کلاس cursor-pointer است
     for box in soup.find_all("div", class_="cursor-pointer"):
         try:
             # نام مدل
