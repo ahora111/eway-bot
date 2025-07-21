@@ -1,44 +1,14 @@
 import requests
+from bs4 import BeautifulSoup
 import urllib3
 
-# غیرفعال کردن هشدار SSL (برای سایت با گواهی منقضی)
+# غیرفعال کردن هشدار SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # اطلاعات ووکامرس سایت شما
 WC_API_URL = "https://pakhshemobile.ir/wp-json/wc/v3/products"
 WC_CONSUMER_KEY = "ck_251fa0545dc395c3d01788a5d9be814aab7575c8"
 WC_CONSUMER_SECRET = "cs_b2b0dca5807d49e8e10ef2a9edcc00bd08c82af3"
-
-# گرفتن محصولات از API نامی‌نت
-def fetch_products_json():
-    url = "https://panel.naminet.co/api/catalog/productGroupsAttrNew?term="
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
-    }
-    response = requests.get(url, headers=headers, verify=False)
-    data = response.json()
-    return data
-
-# استخراج محصولات از JSON
-def extract_products(data):
-    products = []
-    for parent in data.get("ParentCategories", []):
-        for category in parent.get("Data", []):
-            category_name = category.get("Name", "")
-            for item in category.get("Data", []):
-                product_name = item.get("ProductName", "")
-                color = item.get("Name", "")
-                price = item.get("final_price_value", 0)
-                price = f"{int(price):,}"
-                products.append({
-                    "category": category_name,
-                    "product": product_name,
-                    "color": color,
-                    "price": price
-                })
-    return products
 
 # منطق افزایش قیمت
 def is_number(model_str):
@@ -70,8 +40,51 @@ def process_model(model_str):
         return f"{model_value_with_increase:,.0f}"
     return model_str
 
+# اسکرپ محصولات سامسونگ از HTML
+def fetch_samsung_products():
+    url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+    }
+    response = requests.get(url, headers=headers)
+    soup = BeautifulSoup(response.text, "html.parser")
+    products = []
+
+    # هر محصول یک div با کلاس cursor-pointer و border-lowOp-blue53 است
+    for box in soup.find_all("div", class_="cursor-pointer"):
+        try:
+            # نام مدل
+            name_tag = box.find("h1")
+            if not name_tag:
+                continue
+            product_name = name_tag.text.strip()
+            # تصویر
+            img_tag = box.find("img")
+            image_url = img_tag["src"] if img_tag else ""
+            # رنگ و قیمت‌ها
+            color_price_divs = box.find_all("div", class_="bg-gray-100")
+            for cp in color_price_divs:
+                try:
+                    color = cp.find("p").text.strip()
+                    price_tag = cp.find("span", class_="price")
+                    price = price_tag.text.strip() if price_tag else ""
+                    price = price.replace("تومان", "").replace("از", "").replace("٬", "").replace(",", "").strip()
+                    if not price or not is_number(price):
+                        continue
+                    products.append({
+                        "product": product_name,
+                        "color": color,
+                        "price": price,
+                        "image": image_url
+                    })
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return products
+
 # ارسال یا آپدیت محصول در ووکامرس
-def create_or_update_product(product_name, color, price, sku):
+def create_or_update_product(product_name, color, price, sku, image_url):
     params = {
         "consumer_key": WC_CONSUMER_KEY,
         "consumer_secret": WC_CONSUMER_SECRET,
@@ -92,6 +105,10 @@ def create_or_update_product(product_name, color, price, sku):
         "manage_stock": False,
         "stock_status": "instock",
         "description": f"رنگ: {color}",
+        "images": [{"src": image_url}] if image_url else [],
+        "attributes": [
+            {"name": "رنگ", "option": color}
+        ]
     }
     if products and isinstance(products, list) and len(products) > 0:
         product_id = products[0]['id']
@@ -105,17 +122,14 @@ def create_or_update_product(product_name, color, price, sku):
         print("POST text:", r.text[:500])
 
 def main():
-    data = fetch_products_json()
-    products = extract_products(data)
+    products = fetch_samsung_products()
     if not products:
         print("❌ داده‌ای برای ارسال وجود ندارد!")
         return
     for p in products:
-        if p['category'] != "گوشی سامسونگ":
-            continue  # فقط گوشی سامسونگ
         sku = f"{p['product']}-{p['color']}".replace(" ", "-")
         price = process_model(p['price'])
-        create_or_update_product(p['product'], p['color'], price, sku)
+        create_or_update_product(p['product'], p['color'], price, sku, p['image'])
 
 if __name__ == "__main__":
     main()
