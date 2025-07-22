@@ -2,10 +2,9 @@ import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 import time
 import urllib3
+import shutil
 
 # غیرفعال کردن هشدار SSL (برای ارتباط با ووکامرس)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -16,7 +15,7 @@ WC_CONSUMER_KEY = "ck_251fa0545dc395c3d01788a5d9be814aab7575c8"
 WC_CONSUMER_SECRET = "cs_b2b0dca5807d49e8e10ef2a9edcc00bd08c82af3"
 # ---------------------------------
 
-# --- توابع محاسباتی و کمکی (بدون تغییر) ---
+# --- توابع محاسباتی و کمکی ---
 def is_number(s):
     try:
         float(s.replace(",", "").replace("٬", ""))
@@ -56,14 +55,19 @@ def get_product_links(category_url):
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    # استفاده از webdriver-manager برای مدیریت خودکار درایور کروم
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    
-    driver.get(category_url)
-    time.sleep(5)  # صبر می‌کنیم تا همه محصولات با جاوااسکریپت لود شوند
+    # برای محیط‌های اجرایی مانند GitHub Actions، مسیر باینری کروم را مشخص می‌کنیم
+    if shutil.which("google-chrome"):
+         options.binary_location = shutil.which("google-chrome")
 
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    driver.quit()
+    # استفاده از مدیریت درایور داخلی سلنیوم (بدون نیاز به webdriver-manager)
+    driver = webdriver.Chrome(options=options)
+    
+    try:
+        driver.get(category_url)
+        time.sleep(5)  # صبر می‌کنیم تا همه محصولات با جاوااسکریپت لود شوند
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+    finally:
+        driver.quit()
 
     links = []
     # پیدا کردن تگ a داخل هر باکس محصول
@@ -87,7 +91,11 @@ def scrape_product_details(product_url):
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    if shutil.which("google-chrome"):
+         options.binary_location = shutil.which("google-chrome")
+
+    # استفاده از مدیریت درایور داخلی سلنیوم
+    driver = webdriver.Chrome(options=options)
     
     try:
         driver.get(product_url)
@@ -96,7 +104,7 @@ def scrape_product_details(product_url):
     finally:
         driver.quit()
 
-    # --- استخراج اطلاعات با استفاده از کدهای خودت ---
+    # --- استخراج اطلاعات ---
     
     # الف) نام محصول
     product_name_tag = soup.find("h1", class_="font-bold")
@@ -104,13 +112,11 @@ def scrape_product_details(product_url):
 
     # ب) تصاویر
     images = []
-    # این کلاس برای تصاویر اصلی محصول در گالری استفاده میشه
     gallery_div = soup.find("div", class_="flex flex-row-reverse gap-4")
     if gallery_div:
         for img in gallery_div.find_all("img"):
             img_url = img.get("src", "")
             if img_url and img_url not in images:
-                # تبدیل لینک تصویر به لینک با کیفیت بالاتر
                 img_url = img_url.replace("/128/", "/1024/")
                 images.append(img_url)
 
@@ -121,12 +127,11 @@ def scrape_product_details(product_url):
         price_p = price_tag.find("p")
         if price_p:
             price = price_p.text.strip()
-    if not is_number(price): # اگر قیمت در حالت اول پیدا نشد یا عدد نبود
+    if not is_number(price):
         price_p = soup.find("p", class_="text-left text-bold")
         if price_p:
             price = price_p.text.strip()
     
-    # حذف کاراکترهای اضافی از قیمت
     price = price.replace("تومان", "").replace("از", "").strip()
     if not is_number(price):
         print(f"⚠️ قیمت برای محصول {product_name} یافت نشد. از این محصول صرف نظر می‌شود.")
@@ -134,18 +139,15 @@ def scrape_product_details(product_url):
 
     # د) رنگ
     color = "نامشخص"
-    # دنبال دیوی می‌گردیم که کلمه "رنگ" در آن باشد
     for div in soup.find_all("div", class_="flex flex-row gap-2 font-semibold"):
         if "رنگ" in div.text:
-            # دومین تگ p معمولا مقدار رنگ است
             color_tags = div.find_all("p")
             if len(color_tags) > 1:
                 color = color_tags[1].text.strip()
-                break # بعد از پیدا کردن رنگ، از حلقه خارج شو
+                break
 
     # ه) ویژگی‌های فنی (Attributes)
     attributes = []
-    # این کلاس برای باکس‌های ویژگی‌ها صحیح است
     attr_container = soup.find("div", class_="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2")
     if attr_container:
         for attr_box in attr_container.find_all("div", class_="rounded-lg"):
@@ -155,7 +157,6 @@ def scrape_product_details(product_url):
                 attr_value = attr_ps[1].text.strip()
                 attributes.append({"name": attr_name, "visible": True, "variation": False, "options": [attr_value]})
 
-    # افزودن رنگ به لیست ویژگی‌ها برای نمایش در ووکامرس
     attributes.append({"name": "رنگ", "visible": True, "variation": False, "options": [color]})
 
     return {
@@ -171,10 +172,7 @@ def create_or_update_product(product_data):
     """
     این تابع اطلاعات محصول را به ووکامرس ارسال می‌کند (ایجاد یا آپدیت).
     """
-    # ساخت یک SKU منحصر به فرد بر اساس نام و رنگ محصول
     sku = f"NAMIN-{product_data['name'].replace(' ', '-')}-{product_data['color'].replace(' ', '-')}"
-    
-    # پردازش قیمت نهایی
     final_price = process_price(product_data['price'])
     if final_price == "0":
         print(f"قیمت نهایی برای {product_data['name']} صفر است. ارسال نمی‌شود.")
@@ -182,20 +180,18 @@ def create_or_update_product(product_data):
 
     print(f"در حال بررسی محصول با SKU: {sku} در ووکامرس...")
     
-    # بررسی وجود محصول با SKU
     check_url = f"{WC_API_URL}?sku={sku}"
     try:
         r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
-        r.raise_for_status() # اگر خطایی مثل 401 یا 500 بود، استثنا ایجاد می‌کند
+        r.raise_for_status()
         existing_products = r.json()
     except requests.exceptions.RequestException as e:
         print(f"❌ خطا در ارتباط با API ووکامرس: {e}")
         return
-    except ValueError: # خطا در خواندن JSON
+    except ValueError:
         print(f"❌ پاسخ دریافتی از ووکامرس معتبر نیست. Status: {r.status_code}, Response: {r.text[:200]}")
         return
 
-    # آماده‌سازی دیتا برای ارسال
     data = {
         "name": f"{product_data['name']} - {product_data['color']}",
         "sku": sku,
@@ -204,13 +200,12 @@ def create_or_update_product(product_data):
         "description": f"رنگ: {product_data['color']}",
         "short_description": "",
         "manage_stock": False,
-        "stock_status": "instock", # موجود در انبار
+        "stock_status": "instock",
         "images": product_data['images'],
         "attributes": product_data['attributes']
     }
 
     if existing_products and isinstance(existing_products, list) and len(existing_products) > 0:
-        # --- آپدیت محصول ---
         product_id = existing_products[0]['id']
         update_url = f"{WC_API_URL}/{product_id}"
         print(f"محصول موجود است. در حال آپدیت محصول با ID: {product_id} ...")
@@ -220,7 +215,6 @@ def create_or_update_product(product_data):
         else:
             print(f"❌ خطا در آپدیت محصول. Status: {r.status_code}, Response: {r.text}")
     else:
-        # --- ایجاد محصول جدید ---
         print(f"محصول جدید است. در حال ایجاد محصول '{data['name']}' ...")
         r = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
         if r.status_code == 201:
@@ -232,23 +226,28 @@ def main():
     """
     تابع اصلی برای اجرای کل فرآیند.
     """
+    # بررسی نصب بودن مرورگر کروم قبل از شروع
+    if not shutil.which("google-chrome") and not shutil.which("chromium-browser") and not shutil.which("chrome"):
+        print("❌ مرورگر گوگل کروم نصب نیست. برای اجرای سلنیوم در حالت headless، نصب آن ضروری است.")
+        print("در سیستم‌های دبیان/اوبونتو از دستور زیر استفاده کنید:")
+        print("sudo apt-get update && sudo apt-get install -y google-chrome-stable")
+        return
+
     category_url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
     
-    # 1. گرفتن تمام لینک‌های محصول
     product_links = get_product_links(category_url)
     
     if not product_links:
         print("هیچ لینکی برای پردازش یافت نشد. برنامه خاتمه می‌یابد.")
         return
 
-    # 2. حلقه روی هر لینک، استخراج اطلاعات و ارسال به ووکامرس
     for link in product_links:
         try:
             product_details = scrape_product_details(link)
             if product_details:
                 create_or_update_product(product_details)
                 print("-" * 30)
-                time.sleep(1) # یک ثانیه وقفه بین هر درخواست برای جلوگیری از فشار به سرور
+                time.sleep(1)
         except Exception as e:
             print(f"خطای غیرمنتظره هنگام پردازش لینک {link}: {e}")
             continue
