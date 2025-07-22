@@ -2,6 +2,9 @@ import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 import time
 import urllib3
 import shutil
@@ -40,46 +43,71 @@ def process_price(price_str):
         else: # بالای 30 میلیون
             new_price = price_value * 1.015
         
-        # رند کردن به نزدیکترین ۱۰ هزار تومان
         return str(int(round(new_price / 10000) * 10000))
-    return "0" # اگر ورودی عدد نبود
+    return "0"
 
 # --- توابع اصلی اسکریپت ---
 
 def get_product_links(category_url):
     """
     این تابع به صفحه دسته‌بندی محصولات میره و لینک تمام محصولات رو استخراج می‌کنه.
+    (نسخه بهبود یافته با انتظار هوشمند و اسکرول)
     """
     print("در حال دریافت لینک محصولات از صفحه دسته‌بندی...")
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    # برای محیط‌های اجرایی مانند GitHub Actions، مسیر باینری کروم را مشخص می‌کنیم
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
     if shutil.which("google-chrome"):
          options.binary_location = shutil.which("google-chrome")
 
-    # استفاده از مدیریت درایور داخلی سلنیوم (بدون نیاز به webdriver-manager)
     driver = webdriver.Chrome(options=options)
     
+    links = []
     try:
         driver.get(category_url)
-        time.sleep(5)  # صبر می‌کنیم تا همه محصولات با جاوااسکریپت لود شوند
+        print("در انتظار بارگذاری کامل محصولات...")
+        wait = WebDriverWait(driver, 20)
+        # منتظر می‌مانیم تا اولین باکس محصول با id شروع شونده با 'NAMI-' لود شود
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
+        print("محصولات اولیه بارگذاری شدند. در حال اسکرول برای بارگذاری همه محصولات...")
+
+        # اسکرول کردن به پایین صفحه برای اطمینان از لود شدن همه محصولات (Lazy Loading)
+        last_height = driver.execute_script("return document.body.scrollHeight")
+        while True:
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(2) # صبر برای لود شدن محتوای جدید
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                print("اسکرول به پایان رسید.")
+                break
+            last_height = new_height
+        
+        print("در حال استخراج لینک‌ها از سورس نهایی صفحه...")
         soup = BeautifulSoup(driver.page_source, "html.parser")
+
+        for product_box in soup.find_all("div", id=lambda x: x and x.startswith("NAMI-")):
+            link_tag = product_box.find("a", href=True)
+            if link_tag:
+                full_link = "https://naminet.co" + link_tag['href']
+                if full_link not in links:
+                    links.append(full_link)
+
+    except Exception as e:
+        print(f"❌ خطایی هنگام دریافت لینک‌ها رخ داد: {e}")
+        # برای دیباگ، سورس صفحه‌ای که سلنیوم دیده را ذخیره می‌کنیم
+        with open("debug_page.html", "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
+        print("سورس صفحه در فایل debug_page.html ذخیره شد تا بررسی کنید چرا محصولی پیدا نشده.")
     finally:
         driver.quit()
 
-    links = []
-    # پیدا کردن تگ a داخل هر باکس محصول
-    for product_box in soup.find_all("div", id=lambda x: x and x.startswith("NAMI-")):
-        link_tag = product_box.find("a", href=True)
-        if link_tag:
-            # ساخت لینک کامل
-            full_link = "https://naminet.co" + link_tag['href']
-            if full_link not in links:
-                links.append(full_link)
+    if not links:
+        print("❌ هیچ لینکی در صفحه پیدا نشد. ممکن است ساختار سایت تغییر کرده یا سایت در برابر ربات‌ها مقاوم باشد.")
+    else:
+        print(f"✅ تعداد {len(links)} لینک محصول پیدا شد.")
     
-    print(f"✅ تعداد {len(links)} لینک محصول پیدا شد.")
     return links
 
 def scrape_product_details(product_url):
@@ -94,23 +122,19 @@ def scrape_product_details(product_url):
     if shutil.which("google-chrome"):
          options.binary_location = shutil.which("google-chrome")
 
-    # استفاده از مدیریت درایور داخلی سلنیوم
     driver = webdriver.Chrome(options=options)
     
     try:
         driver.get(product_url)
-        time.sleep(3) # صبر برای لود کامل صفحه محصول
+        # انتظار هوشمند برای لود شدن نام محصول
+        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'h1')))
         soup = BeautifulSoup(driver.page_source, "html.parser")
     finally:
         driver.quit()
 
-    # --- استخراج اطلاعات ---
-    
-    # الف) نام محصول
     product_name_tag = soup.find("h1", class_="font-bold")
     product_name = product_name_tag.text.strip() if product_name_tag else "نامشخص"
 
-    # ب) تصاویر
     images = []
     gallery_div = soup.find("div", class_="flex flex-row-reverse gap-4")
     if gallery_div:
@@ -120,13 +144,10 @@ def scrape_product_details(product_url):
                 img_url = img_url.replace("/128/", "/1024/")
                 images.append(img_url)
 
-    # ج) قیمت
     price = "0"
     price_tag = soup.find("span", class_="price actual-price")
-    if price_tag:
-        price_p = price_tag.find("p")
-        if price_p:
-            price = price_p.text.strip()
+    if price_tag and price_tag.find("p"):
+        price = price_tag.find("p").text.strip()
     if not is_number(price):
         price_p = soup.find("p", class_="text-left text-bold")
         if price_p:
@@ -137,7 +158,6 @@ def scrape_product_details(product_url):
         print(f"⚠️ قیمت برای محصول {product_name} یافت نشد. از این محصول صرف نظر می‌شود.")
         return None
 
-    # د) رنگ
     color = "نامشخص"
     for div in soup.find_all("div", class_="flex flex-row gap-2 font-semibold"):
         if "رنگ" in div.text:
@@ -146,7 +166,6 @@ def scrape_product_details(product_url):
                 color = color_tags[1].text.strip()
                 break
 
-    # ه) ویژگی‌های فنی (Attributes)
     attributes = []
     attr_container = soup.find("div", class_="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2")
     if attr_container:
@@ -166,7 +185,6 @@ def scrape_product_details(product_url):
         "images": [{"src": img} for img in images],
         "attributes": attributes
     }
-
 
 def create_or_update_product(product_data):
     """
@@ -198,7 +216,6 @@ def create_or_update_product(product_data):
         "type": "simple",
         "regular_price": final_price,
         "description": f"رنگ: {product_data['color']}",
-        "short_description": "",
         "manage_stock": False,
         "stock_status": "instock",
         "images": product_data['images'],
@@ -223,14 +240,8 @@ def create_or_update_product(product_data):
             print(f"❌ خطا در ایجاد محصول. Status: {r.status_code}, Response: {r.text}")
 
 def main():
-    """
-    تابع اصلی برای اجرای کل فرآیند.
-    """
-    # بررسی نصب بودن مرورگر کروم قبل از شروع
     if not shutil.which("google-chrome") and not shutil.which("chromium-browser") and not shutil.which("chrome"):
         print("❌ مرورگر گوگل کروم نصب نیست. برای اجرای سلنیوم در حالت headless، نصب آن ضروری است.")
-        print("در سیستم‌های دبیان/اوبونتو از دستور زیر استفاده کنید:")
-        print("sudo apt-get update && sudo apt-get install -y google-chrome-stable")
         return
 
     category_url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
@@ -238,18 +249,19 @@ def main():
     product_links = get_product_links(category_url)
     
     if not product_links:
-        print("هیچ لینکی برای پردازش یافت نشد. برنامه خاتمه می‌یابد.")
+        print("برنامه خاتمه یافت.")
         return
 
+    print("\n--- شروع فرآیند استخراج و ارسال محصولات ---\n")
     for link in product_links:
         try:
             product_details = scrape_product_details(link)
             if product_details:
                 create_or_update_product(product_details)
-                print("-" * 30)
+                print("-" * 40)
                 time.sleep(1)
         except Exception as e:
-            print(f"خطای غیرمنتظره هنگام پردازش لینک {link}: {e}")
+            print(f"خطای کلی هنگام پردازش لینک {link}: {e}")
             continue
 
 if __name__ == "__main__":
