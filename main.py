@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 import urllib3
+import time
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -37,15 +38,34 @@ def process_model(model_str):
         return f"{model_value_with_increase:,.0f}"
     return model_str
 
+# مرحله ۱: گرفتن لینک همه محصولات از صفحه لیست
+def fetch_product_links():
+    url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
+    headers = {
+        "User-Agent": "Mozilla/5.0 ..."
+    }
+    response = requests.get(url, headers=headers)
+    soup = BeautifulSoup(response.text, "html.parser")
+    links = []
+    for box in soup.find_all("div", id=lambda x: x and x.startswith("NAMI-")):
+        a_tag = box.find("a", href=True)
+        if a_tag:
+            link = a_tag["href"]
+            if not link.startswith("http"):
+                link = "https://naminet.co" + link
+            links.append(link)
+    return links
+
+# مرحله ۲: اسکرپ اطلاعات کامل از صفحه داخلی هر محصول
 def fetch_product_details(product_url):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 ..."
     }
     response = requests.get(product_url, headers=headers)
     soup = BeautifulSoup(response.text, "html.parser")
 
     # عنوان مدل
-    name_tag = soup.find("h1", class_="text-md font-base font-semibold mr-2")
+    name_tag = soup.find("h1")
     product_name = name_tag.text.strip() if name_tag else ""
 
     # تصاویر گالری
@@ -82,6 +102,7 @@ def fetch_product_details(product_url):
         "attributes": attributes
     }
 
+# مرحله ۳: ارسال یا آپدیت محصول در ووکامرس
 def create_or_update_product(product):
     sku = f"{product['product']}-{product['color']}".replace(" ", "-")
     price = process_model(product['price'])
@@ -120,13 +141,16 @@ def create_or_update_product(product):
         print("POST text:", r.text[:500])
 
 def main():
-    # آدرس صفحه محصول را اینجا بگذار (مثلاً یکی از محصولات سامسونگ)
-    product_url = "https://naminet.co/product/llp-13-1/%DA%AF%D9%88%D8%B4%DB%8C-%D9%85%D9%88%D8%A8%D8%A7%DB%8C%D9%84-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF-%D9%85%D8%AF%D9%84-galaxy-a06-4g-%D8%B8%D8%B1%D9%81%DB%8C%D8%AA-128-%DA%AF%DB%8C%DA%AF%D8%A7%D8%A8%D8%A7%DB%8C%D8%AA-%D8%B1%D9%85-4-%DA%AF%DB%8C%DA%AF%D8%A7%D8%A8%D8%A7%DB%8C%D8%AA"
-    product = fetch_product_details(product_url)
-    if not product or not product['product']:
-        print("❌ داده‌ای برای ارسال وجود ندارد!")
-        return
-    create_or_update_product(product)
+    product_links = fetch_product_links()
+    print(f"تعداد محصولات پیدا شده: {len(product_links)}")
+    for url in product_links:
+        print("در حال اسکرپ:", url)
+        product = fetch_product_details(url)
+        if not product or not product['product']:
+            print("❌ داده‌ای برای ارسال وجود ندارد!")
+            continue
+        create_or_update_product(product)
+        time.sleep(2)  # برای جلوگیری از بلاک شدن توسط سایت مقصد
 
 if __name__ == "__main__":
     main()
