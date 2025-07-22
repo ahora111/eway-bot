@@ -40,37 +40,17 @@ def process_model(model_str):
         return f"{model_value_with_increase:,.0f}"
     return model_str
 
-def fetch_product_links():
-    url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
+def fetch_product_details(product_url):
     options = Options()
-    options.add_argument("--headless")
+    # options.add_argument("--headless")  # این خط را کامنت کن تا مرورگر باز شود
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     driver = webdriver.Chrome(options=options)
-    driver.get(url)
-    time.sleep(5)
+    driver.get(product_url)
+    time.sleep(10)  # صبر برای لود کامل جاوااسکریپت
+
     soup = BeautifulSoup(driver.page_source, "html.parser")
     driver.quit()
-    links = []
-    for a_tag in soup.find_all("a", href=True):
-        href = a_tag["href"]
-        if href.startswith("/product/"):
-            link = "https://naminet.co" + href
-            links.append(link)
-    links = list(set(links))  # حذف لینک‌های تکراری
-    print("تعداد لینک محصولات پیدا شده:", len(links))
-    return links
-
-def fetch_product_details(product_url):
-    headers = {
-        "User-Agent": "Mozilla/5.0 ..."
-    }
-    try:
-        response = requests.get(product_url, headers=headers)
-        soup = BeautifulSoup(response.text, "html.parser")
-    except Exception as e:
-        print(f"خطا در دریافت صفحه محصول {product_url}: {e}")
-        return None
 
     # عنوان مدل
     name_tag = soup.find("h1")
@@ -164,16 +144,13 @@ def create_or_update_product(product):
         print("POST text:", r.text[:500])
 
 def main():
-    product_links = fetch_product_links()
-    print(f"تعداد محصولات پیدا شده: {len(product_links)}")
-    for url in product_links:
-        print("در حال اسکرپ:", url)
-        product = fetch_product_details(url)
-        if not product or not product['product']:
-            print("❌ داده‌ای برای ارسال وجود ندارد!")
-            continue
-        create_or_update_product(product)
-        time.sleep(2)  # برای جلوگیری از بلاک شدن توسط سایت مقصد
+    # آدرس صفحه محصول را اینجا بگذار (مثلاً یکی از محصولات سامسونگ)
+    product_url = "https://naminet.co/product/lpd-39/galaxy-a06-128gb-ram-4gb/"
+    product = fetch_product_details(product_url)
+    if not product or not product['product']:
+        print("❌ داده‌ای برای ارسال وجود ندارد!")
+        return
+    create_or_update_product(product)
 
 if __name__ == "__main__":
     main()
