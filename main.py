@@ -21,16 +21,11 @@ def fetch_product_links():
     links = []
     divs = soup.find_all("div", id=lambda x: x and x.startswith("NAMI-"))
     print("تعداد div با id که با NAMI- شروع می‌شود:", len(divs))
-    for idx, box in enumerate(divs):
-        print(f"\n--- محصول شماره {idx+1} ---")
-        for a_tag in box.find_all("a"):
-            print("a:", a_tag)
-            print("href:", a_tag.get("href"))
-            href = a_tag.get("href")
-            if href and "/product/" in href:
-                if not href.startswith("http"):
-                    href = "https://naminet.co" + href
-                links.append(href)
+    for box in divs:
+        a_tag = box.find("a", href=True)
+        if a_tag and a_tag["href"].startswith("/product/"):
+            link = "https://naminet.co" + a_tag["href"]
+            links.append(link)
     print("تعداد لینک محصولات پیدا شده:", len(links))
     return links
 
