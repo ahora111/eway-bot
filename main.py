@@ -1,5 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import time
 import urllib3
 
 # غیرفعال کردن هشدار SSL
@@ -41,11 +44,16 @@ def process_model(model_str):
 
 def fetch_samsung_products():
     url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
-    }
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.text, "html.parser")
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(options=options)
+    driver.get(url)
+    time.sleep(5)  # صبر برای لود کامل محصولات
+
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+    driver.quit()
     products = []
 
     for box in soup.find_all("div", id=lambda x: x and x.startswith("NAMI-")):
