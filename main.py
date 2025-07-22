@@ -1,11 +1,7 @@
-import requests
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from bs4 import BeautifulSoup
 import time
-import urllib3
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def fetch_product_links():
     url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
@@ -21,11 +17,15 @@ def fetch_product_links():
     links = []
     divs = soup.find_all("div", id=lambda x: x and x.startswith("NAMI-"))
     print("تعداد div با id که با NAMI- شروع می‌شود:", len(divs))
-    for box in divs:
-        a_tag = box.find("a", href=True)
-        if a_tag and a_tag["href"].startswith("/product/"):
-            link = "https://naminet.co" + a_tag["href"]
-            links.append(link)
+    for idx, box in enumerate(divs):
+        print(f"\n--- محصول شماره {idx+1} ---")
+        for a_tag in box.find_all("a"):
+            print("a:", a_tag)
+            print("href:", a_tag.get("href"))
+            href = a_tag.get("href")
+            if href and href.startswith("/product/"):
+                link = "https://naminet.co" + href
+                links.append(link)
     print("تعداد لینک محصولات پیدا شده:", len(links))
     return links
 
