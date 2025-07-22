@@ -43,8 +43,7 @@ def process_model(model_str):
 def fetch_product_links():
     url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
     options = Options()
-    # بدون user-data-dir و بدون headless برای رفع خطا
-    # options.add_argument("--headless")  # اگر خواستی headless باشه این خط رو فعال کن
+    options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     driver = webdriver.Chrome(options=options)
@@ -53,27 +52,57 @@ def fetch_product_links():
     soup = BeautifulSoup(driver.page_source, "html.parser")
     driver.quit()
     links = []
-    for a_tag in soup.find_all("a", href=True):
-        href = a_tag["href"]
-        if href.startswith("/product/"):
-            link = "https://naminet.co" + href
+    # پرینت تعداد divهای محصول
+    divs = soup.find_all("div", id=lambda x: x and x.startswith("NAMI-"))
+    print("تعداد div با id که با NAMI- شروع می‌شود:", len(divs))
+    for box in divs:
+        a_tag = box.find("a", href=True)
+        if a_tag:
+            link = a_tag["href"]
+            if not link.startswith("http"):
+                link = "https://naminet.co" + link
             links.append(link)
-    links = list(set(links))  # حذف لینک‌های تکراری
     print("تعداد لینک محصولات پیدا شده:", len(links))
     return links
 
-def fetch_product_details(product_url):
+def fetch_product_links():
+    url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
     options = Options()
-    # بدون headless برای رفع مشکل لود جاوااسکریپت
-    # options.add_argument("--headless")
+    options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     driver = webdriver.Chrome(options=options)
-    driver.get(product_url)
-    time.sleep(10)  # صبر برای لود کامل جاوااسکریپت
-
+    driver.get(url)
+    time.sleep(5)
     soup = BeautifulSoup(driver.page_source, "html.parser")
     driver.quit()
+    links = []
+    divs = soup.find_all("div", id=lambda x: x and x.startswith("NAMI-"))
+    print("تعداد div با id که با NAMI- شروع می‌شود:", len(divs))
+    for box in divs:
+        # پیدا کردن اولین <a> که title دارد
+        a_tag = box.find("a", title=True)
+        if a_tag:
+            # ساخت لینک بر اساس عنوان (slug)
+            title = a_tag["title"]
+            # تبدیل عنوان به اسلاگ (برای سایت نامی‌نت)
+            slug = title.replace(" ", "-").replace("ـ", "-").replace(":", "").replace("/", "-")
+            slug = slug.replace("(", "").replace(")", "").replace("،", "").replace(":", "")
+            slug = slug.replace("‌", "-").replace("–", "-").replace("--", "-")
+            slug = slug.replace("?", "").replace("؟", "")
+            slug = slug.replace("‌", "-").replace("–", "-").replace("--", "-")
+            slug = slug.replace("'", "").replace('"', "")
+            slug = slug.replace("‌", "-").replace("–", "-").replace("--", "-")
+            slug = slug.replace(":", "").replace("؛", "")
+            slug = slug.replace("‌", "-").replace("–", "-").replace("--", "-")
+            slug = slug.replace(" ", "-")
+            slug = slug.replace("--", "-")
+            slug = slug.strip("-")
+            # ساخت لینک نهایی
+            link = f"https://naminet.co/product/llp-13-1/{slug}"
+            links.append(link)
+    print("تعداد لینک محصولات پیدا شده:", len(links))
+    return links
 
     # عنوان مدل
     name_tag = soup.find("h1")
