@@ -65,16 +65,44 @@ def fetch_product_links():
     print("تعداد لینک محصولات پیدا شده:", len(links))
     return links
 
-def fetch_product_details(product_url):
-    headers = {
-        "User-Agent": "Mozilla/5.0 ..."
-    }
-    try:
-        response = requests.get(product_url, headers=headers)
-        soup = BeautifulSoup(response.text, "html.parser")
-    except Exception as e:
-        print(f"خطا در دریافت صفحه محصول {product_url}: {e}")
-        return None
+def fetch_product_links():
+    url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(options=options)
+    driver.get(url)
+    time.sleep(5)
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+    driver.quit()
+    links = []
+    divs = soup.find_all("div", id=lambda x: x and x.startswith("NAMI-"))
+    print("تعداد div با id که با NAMI- شروع می‌شود:", len(divs))
+    for box in divs:
+        # پیدا کردن اولین <a> که title دارد
+        a_tag = box.find("a", title=True)
+        if a_tag:
+            # ساخت لینک بر اساس عنوان (slug)
+            title = a_tag["title"]
+            # تبدیل عنوان به اسلاگ (برای سایت نامی‌نت)
+            slug = title.replace(" ", "-").replace("ـ", "-").replace(":", "").replace("/", "-")
+            slug = slug.replace("(", "").replace(")", "").replace("،", "").replace(":", "")
+            slug = slug.replace("‌", "-").replace("–", "-").replace("--", "-")
+            slug = slug.replace("?", "").replace("؟", "")
+            slug = slug.replace("‌", "-").replace("–", "-").replace("--", "-")
+            slug = slug.replace("'", "").replace('"', "")
+            slug = slug.replace("‌", "-").replace("–", "-").replace("--", "-")
+            slug = slug.replace(":", "").replace("؛", "")
+            slug = slug.replace("‌", "-").replace("–", "-").replace("--", "-")
+            slug = slug.replace(" ", "-")
+            slug = slug.replace("--", "-")
+            slug = slug.strip("-")
+            # ساخت لینک نهایی
+            link = f"https://naminet.co/product/llp-13-1/{slug}"
+            links.append(link)
+    print("تعداد لینک محصولات پیدا شده:", len(links))
+    return links
 
     # عنوان مدل
     name_tag = soup.find("h1")
