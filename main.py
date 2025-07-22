@@ -10,7 +10,6 @@ WC_API_URL = "https://pakhshemobile.ir/wp-json/wc/v3/products"
 WC_CONSUMER_KEY = "ck_251fa0545dc395c3d01788a5d9be814aab7575c8"
 WC_CONSUMER_SECRET = "cs_b2b0dca5807d49e8e10ef2a9edcc00bd08c82af3"
 
-# منطق افزایش قیمت
 def is_number(model_str):
     try:
         float(model_str.replace(",", ""))
@@ -40,7 +39,6 @@ def process_model(model_str):
         return f"{model_value_with_increase:,.0f}"
     return model_str
 
-# اسکرپ محصولات سامسونگ از HTML
 def fetch_samsung_products():
     url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
     headers = {
@@ -50,40 +48,36 @@ def fetch_samsung_products():
     soup = BeautifulSoup(response.text, "html.parser")
     products = []
 
-    # هر محصول یک div با کلاس cursor-pointer است
-    for box in soup.find_all("div", class_="cursor-pointer"):
+    for box in soup.find_all("div", id=lambda x: x and x.startswith("NAMI-")):
         try:
-            # نام مدل
-            name_tag = box.find("h1")
-            if not name_tag:
-                continue
-            product_name = name_tag.text.strip()
+            # عنوان مدل
+            name_tag = box.find("h2")
+            product_name = name_tag.text.strip() if name_tag else ""
             # تصویر
             img_tag = box.find("img")
             image_url = img_tag["src"] if img_tag else ""
-            # رنگ و قیمت‌ها
-            color_price_divs = box.find_all("div", class_="bg-gray-100")
-            for cp in color_price_divs:
-                try:
-                    color = cp.find("p").text.strip()
-                    price_tag = cp.find("span", class_="price")
-                    price = price_tag.text.strip() if price_tag else ""
-                    price = price.replace("تومان", "").replace("از", "").replace("٬", "").replace(",", "").strip()
-                    if not price or not is_number(price):
-                        continue
-                    products.append({
-                        "product": product_name,
-                        "color": color,
-                        "price": price,
-                        "image": image_url
-                    })
-                except Exception:
-                    continue
-        except Exception:
+            # قیمت
+            price_tag = box.find("span", class_="price")
+            if not price_tag:
+                price_tag = box.find("span", class_="price actual-price")
+            price_p = price_tag.find("p") if price_tag else None
+            price = price_p.text.strip() if price_p else ""
+            price = price.replace("تومان", "").replace("از", "").replace("٬", "").replace(",", "").strip()
+            if not price or not is_number(price):
+                continue
+            # رنگ (در این ساختار رنگ جدا نیست، پس فقط یک محصول با رنگ پیش‌فرض)
+            color = "نامشخص"
+            products.append({
+                "product": product_name,
+                "color": color,
+                "price": price,
+                "image": image_url
+            })
+        except Exception as e:
+            print("خطا:", e)
             continue
     return products
 
-# ارسال یا آپدیت محصول در ووکامرس
 def create_or_update_product(product_name, color, price, sku, image_url):
     params = {
         "consumer_key": WC_CONSUMER_KEY,
