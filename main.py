@@ -61,7 +61,7 @@ def fetch_product_details(product_url):
     price = price_p.text.strip() if price_p else ""
     price = price.replace("تومان", "").replace("از", "").replace("٬", "").replace(",", "").strip()
 
-    # رنگ‌ها
+    # رنگ
     color = "نامشخص"
     color_section = soup.find("div", string=lambda t: t and "رنگ" in t)
     if color_section:
@@ -121,7 +121,7 @@ def create_or_update_product(product):
 
 def main():
     # آدرس صفحه محصول را اینجا بگذار (مثلاً یکی از محصولات سامسونگ)
-    product_url = "https://naminet.co/product/lpd-39/galaxy-a06-128gb-ram-4gb"
+    product_url = "https://naminet.co/product/llp-13-1/%DA%AF%D9%88%D8%B4%DB%8C-%D9%85%D9%88%D8%A8%D8%A7%DB%8C%D9%84-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF-%D9%85%D8%AF%D9%84-galaxy-a06-4g-%D8%B8%D8%B1%D9%81%DB%8C%D8%AA-128-%DA%AF%DB%8C%DA%AF%D8%A7%D8%A8%D8%A7%DB%8C%D8%AA-%D8%B1%D9%85-4-%DA%AF%DB%8C%DA%AF%D8%A7%D8%A8%D8%A7%DB%8C%D8%AA"
     product = fetch_product_details(product_url)
     if not product or not product['product']:
         print("❌ داده‌ای برای ارسال وجود ندارد!")
