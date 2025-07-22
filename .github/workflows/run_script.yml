@@ -1,34 +1,41 @@
-name: Run Bot Daily
+name: Run Python Scraper
 
 on:
+  workflow_dispatch: # این بخش به شما اجازه می‌دهد اسکریپت را دستی اجرا کنید
   schedule:
-    - cron: "*/5 * * * *"
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+    - cron: '0 */6 * * *' # برای مثال: هر ۶ ساعت یک بار اجرا شود
 
 jobs:
-  run-bot:
+  scrape_and_update:
     runs-on: ubuntu-latest
 
-    env:
-      GSHEET_CREDENTIALS_JSON: ${{ secrets.GSHEET_CREDENTIALS_JSON }}
-      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-
     steps:
-      - uses: actions/checkout@v3
+      # 1. کد شما را از ریپازیتوری دریافت می‌کند
+      - name: Check out repository
+        uses: actions/checkout@v3
 
+      # --- این بخش را حتما اضافه کنید ---
+      # 2. مرورگر گوگل کروم را نصب می‌کند
+      - name: Set up Google Chrome
+        uses: browser-actions/setup-chrome@v1
+      # ---------------------------------
+
+      # 3. پایتون را آماده می‌کند
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.8' # یا هر نسخه‌ای که نیاز دارید
 
+      # 4. کتابخانه‌های پایتون را نصب می‌کند
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install selenium beautifulsoup4 requests
 
-      - name: Run bot
+      # 5. اسکریپت شما را اجرا می‌کند
+      - name: Run scraper script
+        env:
+          # اینجا متغیرهای محرمانه خود را قرار دهید
+          WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
+          WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
         run: python main.py
