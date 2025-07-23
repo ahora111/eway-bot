@@ -31,6 +31,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install selenium beautifulsoup4 requests selenium-stealth
 
+      - name: Install undetected-chromedriver
+        run: pip install undetected-chromedriver
+  
       - name: Run scraper script
         env:
           WC_API_URL: ${{ secrets.WC_API_URL }}
