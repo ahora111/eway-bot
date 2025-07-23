@@ -25,7 +25,7 @@ if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
     exit(1)
 # ---------------------------------
 
-# --- توابع محاسباتی و کمکی (بدون تغییر) ---
+# --- توابع محاسباتی و کمکی ---
 def is_number(s):
     try:
         float(s.replace(",", "").replace("٬", ""))
@@ -80,18 +80,12 @@ def get_all_product_urls(category_url):
             if new_height == last_height: break
             last_height = new_height
 
-        # ترفند جاوا اسکریپت برای خواندن لینک از دل تگ‌های a بدون href
         product_links = driver.execute_script("""
             var links = [];
-            var elements = document.querySelectorAll('div[id^="NAMI-"] a');
+            var elements = document.querySelectorAll('div[id^="NAMI-"]');
             elements.forEach(function(el) {
-                // با شبیه‌سازی یک کلیک، می‌توانیم به لینک مقصد برسیم
-                // اما راه ساده‌تر، خواندن مستقیم از داده‌های خود المنت است اگر موجود باشد
-                // در این حالت، چون لینک‌ها با JS ساخته می‌شوند، بهترین راه پیدا کردن تگ a و گرفتن href آن است
-                // از آنجایی که href وجود ندارد، باید به دنبال شناسه محصول باشیم
-                var parentDiv = el.closest('div[id^="NAMI-"]');
-                if (parentDiv) {
-                    var id = parentDiv.id.replace('NAMI-', '');
+                var id = el.id.replace('NAMI-', '');
+                if (id) {
                     var url = 'https://naminet.co/p/' + id;
                     if (!links.includes(url)) {
                         links.push(url);
@@ -117,4 +111,126 @@ def scrape_and_process_product(product_url):
     """
     فاز ۲: اطلاعات یک محصول را از URL داده شده استخراج و به ووکامرس ارسال می‌کند.
     """
-    print("\n" + "="*20 + f" فاز ۲: استخراج از {product_url} 
+    print("\n" + "="*20 + f" فاز ۲: استخراج از {product_url} " + "="*20)
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    if shutil.which("google-chrome"):
+        options.binary_location = shutil.which("google-chrome")
+
+    driver = None
+    try:
+        driver = webdriver.Chrome(options=options)
+        stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
+        
+        driver.get(product_url)
+        
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'h1')))
+        time.sleep(2)
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        
+        product_name_tag = soup.find("h1", class_="font-bold")
+        product_name = product_name_tag.text.strip() if product_name_tag else "نامشخص"
+        images = []
+        gallery_div = soup.find("div", class_="flex flex-row-reverse gap-4")
+        if gallery_div:
+            for img in gallery_div.find_all("img"):
+                img_url = img.get("src", "")
+                if img_url and img_url not in images:
+                    img_url = img_url.replace("/128/", "/1024/")
+                    images.append(img_url)
+        price = "0"
+        price_tag = soup.find("span", class_="price actual-price")
+        if price_tag and price_tag.find("p"): price = price_tag.find("p").text.strip()
+        if not is_number(price):
+            price_p = soup.find("p", class_="text-left text-bold")
+            if price_p: price = price_p.text.strip()
+        price = price.replace("تومان", "").replace("از", "").strip()
+        if not is_number(price):
+            print(f"⚠️ قیمت برای محصول '{product_name}' یافت نشد.")
+            return
+        color = "نامشخص"
+        for div in soup.find_all("div", class_="flex flex-row gap-2 font-semibold"):
+            if "رنگ" in div.text:
+                color_tags = div.find_all("p")
+                if len(color_tags) > 1:
+                    color = color_tags[1].text.strip()
+                    break
+        attributes = []
+        attr_container = soup.find("div", class_="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2")
+        if attr_container:
+            for attr_box in attr_container.find_all("div", class_="rounded-lg"):
+                attr_ps = attr_box.find_all("p")
+                if len(attr_ps) >= 2:
+                    attr_name, attr_value = attr_ps[0].text.strip(), attr_ps[1].text.strip()
+                    attributes.append({"name": attr_name, "visible": True, "variation": False, "options": [attr_value]})
+        attributes.append({"name": "رنگ", "visible": True, "variation": False, "options": [color]})
+        product_data = {"name": product_name, "price": price, "color": color, "images": [{"src": img} for img in images], "attributes": attributes}
+        
+        create_or_update_product(product_data)
+
+    except Exception as e:
+        print(f"❌ خطایی در استخراج محصول رخ داد: {e}")
+    finally:
+        if driver:
+            driver.quit()
+
+
+def create_or_update_product(product_data):
+    sku = f"NAMIN-{product_data['name'].replace(' ', '-')}-{product_data['color'].replace(' ', '-')}"
+    final_price = process_price(product_data['price'])
+    if final_price == "0":
+        print(f"قیمت نهایی برای محصول '{product_data['name']}' صفر است. ارسال نمی‌شود.")
+        return
+    print(f"در حال بررسی محصول با SKU: {sku} در ووکامرس...")
+    check_url = f"{WC_API_URL}?sku={sku}"
+    try:
+        r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
+        r.raise_for_status()
+        existing_products = r.json()
+    except requests.exceptions.RequestException as e:
+        print(f"❌ خطا در ارتباط با API ووکامرس: {e}")
+        return
+    except ValueError:
+        print(f"❌ پاسخ از ووکامرس معتبر نیست. Status: {r.status_code}, Response: {r.text[:200]}")
+        return
+    data = {
+        "name": f"{product_data['name']} - {product_data['color']}",
+        "sku": sku, "type": "simple", "regular_price": final_price,
+        "description": f"رنگ: {product_data['color']}", "manage_stock": False,
+        "stock_status": "instock", "images": product_data['images'],
+        "attributes": product_data['attributes']
+    }
+    if existing_products and isinstance(existing_products, list) and len(existing_products) > 0:
+        product_id = existing_products[0]['id']
+        update_url = f"{WC_API_URL}/{product_id}"
+        print(f"محصول موجود است. آپدیت محصول با ID: {product_id} ...")
+        r = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
+        if r.status_code == 200: print(f"✅ محصول '{data['name']}' آپدیت شد.")
+        else: print(f"❌ خطا در آپدیت. Status: {r.status_code}, Response: {r.text}")
+    else:
+        print(f"محصول جدید است. ایجاد محصول '{data['name']}' ...")
+        r = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
+        if r.status_code == 201: print(f"✅ محصول '{data['name']}' ایجاد شد.")
+        else: print(f"❌ خطا در ایجاد. Status: {r.status_code}, Response: {r.text}")
+
+
+def main():
+    category_url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
+    
+    product_urls = get_all_product_urls(category_url)
+    
+    if not product_urls:
+        print("هیچ URLی برای پردازش جمع‌آوری نشد. برنامه خاتمه می‌یابد.")
+        return
+        
+    for url in product_urls:
+        scrape_and_process_product(url)
+        time.sleep(2)
+
+    print("\nتمام محصولات پردازش شدند. فرآیند به پایان رسید.")
+
+
+if __name__ == "__main__":
+    main()
