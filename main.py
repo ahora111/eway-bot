@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -51,6 +51,7 @@ def process_price(price_str):
 def scrape_details_from_driver(driver):
     print("در حال استخراج جزئیات از صفحه فعلی...")
     try:
+        # --- اصلاح کلیدی: منتظر لود شدن نام محصول در صفحه جدید می‌مانیم ---
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'h1')))
         soup = BeautifulSoup(driver.page_source, "html.parser")
     except TimeoutException:
@@ -61,7 +62,6 @@ def scrape_details_from_driver(driver):
         print(f"خطا در انتظار برای صفحه محصول: {e}")
         return None
 
-    # بقیه تابع استخراج بدون تغییر
     product_name_tag = soup.find("h1", class_="font-bold")
     product_name = product_name_tag.text.strip() if product_name_tag else "نامشخص"
     images = []
@@ -99,7 +99,6 @@ def scrape_details_from_driver(driver):
                 attributes.append({"name": attr_name, "visible": True, "variation": False, "options": [attr_value]})
     attributes.append({"name": "رنگ", "visible": True, "variation": False, "options": [color]})
     return {"name": product_name, "price": price, "color": color, "images": [{"src": img} for img in images], "attributes": attributes}
-
 
 def create_or_update_product(product_data):
     # این تابع بدون تغییر باقی می‌ماند
@@ -179,7 +178,6 @@ def main():
             print("\n" + "="*50)
             print(f"پردازش محصول شماره {i+1} از {product_count}")
             try:
-                # این مهمترین بخش برای مقابله با StaleElementReferenceException است
                 all_products = driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"]')
                 
                 if i >= len(all_products):
@@ -193,24 +191,21 @@ def main():
                 time.sleep(1)
                 driver.execute_script("arguments[0].click();", product_to_click)
                 
-                # استخراج اطلاعات از صفحه محصول
                 product_details = scrape_details_from_driver(driver)
                 
                 if product_details:
                     create_or_update_product(product_details)
                 
-                # بازگشت به صفحه لیست برای محصول بعدی
                 print("بازگشت به صفحه لیست محصولات...")
                 driver.back()
                 
-                # منتظر می‌مانیم تا صفحه لیست دوباره آماده شود
-                wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
+                # --- اصلاح کلیدی: منتظر می‌مانیم تا صفحه لیست دوباره قابل کلیک شود ---
+                wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
                 time.sleep(3)
                 
             except Exception as e:
                 print(f"خطای غیرمنتظره در حلقه برای محصول {i+1}: {e}")
-                print("ادامه با محصول بعدی...")
-                # در صورت بروز خطای جدی، صفحه را مجددا بارگذاری می‌کنیم
+                print("تلاش برای بازیابی با بارگذاری مجدد صفحه...")
                 driver.get(category_url)
                 wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
                 continue
