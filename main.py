@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException, ElementNotInteractableException, NoSuchElementException, WebDriverException
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -12,8 +12,10 @@ import urllib3
 import shutil
 import os
 
+# غیرفعال کردن هشدار SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# --- اطلاعات ووکامرس (خوانده شده از Secrets گیت‌هاب) ---
 WC_API_URL = os.environ.get("WC_API_URL")
 WC_CONSUMER_KEY = os.environ.get("WC_CONSUMER_KEY")
 WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET")
@@ -21,7 +23,9 @@ WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET")
 if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
     print("❌ متغیرهای محیطی ووکامرس به درستی تنظیم نشده‌اند. برنامه متوقف می‌شود.")
     exit(1)
+# ---------------------------------
 
+# --- توابع محاسباتی و کمکی ---
 def is_number(s):
     try:
         float(s.replace(",", "").replace("٬", ""))
@@ -42,92 +46,161 @@ def process_price(price_str):
         return str(int(round(new_price / 10000) * 10000))
     return "0"
 
-def scrape_details_from_driver(driver, product_index):
-    print("در حال استخراج جزئیات از صفحه فعلی...")
+# --- توابع اصلی اسکریپت ---
+
+def get_all_product_urls(category_url):
+    """
+    فاز ۱: فقط URL تمام محصولات را جمع‌آوری می‌کند.
+    """
+    print("="*20 + " فاز ۱: شروع جمع‌آوری URL ها " + "="*20)
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+    if shutil.which("google-chrome"):
+        options.binary_location = shutil.which("google-chrome")
+
+    driver = None
+    urls = []
     try:
+        driver = webdriver.Chrome(options=options)
+        stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
+        
+        print("باز کردن صفحه دسته‌بندی برای شمارش...")
+        driver.get(category_url)
+        wait = WebDriverWait(driver, 20)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
+        time.sleep(5)
+        
+        last_height = driver.execute_script("return document.body.scrollHeight")
+        for _ in range(7):
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(3)
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height: break
+            last_height = new_height
+
+        product_count = len(driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"]'))
+        if product_count == 0:
+            print("هیچ محصولی برای جمع‌آوری URL پیدا نشد.")
+            return []
+
+        print(f"تعداد {product_count} محصول برای جمع‌آوری URL پیدا شد.")
+        
+        for i in range(product_count):
+            print(f"--- جمع‌آوری URL محصول {i+1}/{product_count} ---")
+            try:
+                all_products = driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"]')
+                product_to_click = all_products[i]
+                
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", product_to_click)
+                time.sleep(1)
+                driver.execute_script("arguments[0].click();", product_to_click)
+                
+                wait.until(EC.url_changes(category_url))
+                current_url = driver.current_url
+                if current_url not in urls:
+                    print(f"URL پیدا شد: {current_url}")
+                    urls.append(current_url)
+                
+                driver.back()
+                wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
+                time.sleep(2)
+            except Exception as e:
+                print(f"خطا در جمع‌آوری URL محصول {i+1}: {e}. تلاش برای بازیابی...")
+                driver.get(category_url)
+                wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
+                continue
+    except Exception as e:
+        print(f"❌ خطای اصلی در فاز جمع‌آوری URL رخ داد: {e}")
+    finally:
+        if driver:
+            driver.quit()
+    
+    print(f"✅ فاز ۱ کامل شد. تعداد {len(urls)} URL منحصر به فرد جمع‌آوری شد.")
+    return urls
+
+
+def scrape_single_product_page(product_url):
+    """
+    فاز ۲: اطلاعات یک محصول را از URL داده شده استخراج می‌کند.
+    """
+    print("="*20 + f" فاز ۲: استخراج از {product_url} " + "="*20)
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    if shutil.which("google-chrome"):
+        options.binary_location = shutil.which("google-chrome")
+
+    driver = None
+    try:
+        driver = webdriver.Chrome(options=options)
+        stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
+        
+        driver.get(product_url)
+        
+        # منتظر لود شدن نام محصول می‌مانیم
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'h1')))
         soup = BeautifulSoup(driver.page_source, "html.parser")
-    except TimeoutException:
-        print("❌ صفحه محصول در زمان مقرر لود نشد. از این محصول صرف نظر می‌شود.")
-        driver.save_screenshot(f"product_page_timeout_{product_index}.png")
-        with open(f"product_page_timeout_{product_index}.html", "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
-        return None
+        
+        # بقیه کد استخراج بدون تغییر
+        product_name_tag = soup.find("h1", class_="font-bold")
+        product_name = product_name_tag.text.strip() if product_name_tag else "نامشخص"
+        images = []
+        gallery_div = soup.find("div", class_="flex flex-row-reverse gap-4")
+        if gallery_div:
+            for img in gallery_div.find_all("img"):
+                img_url = img.get("src", "")
+                if img_url and img_url not in images:
+                    img_url = img_url.replace("/128/", "/1024/")
+                    images.append(img_url)
+        price = "0"
+        price_tag = soup.find("span", class_="price actual-price")
+        if price_tag and price_tag.find("p"): price = price_tag.find("p").text.strip()
+        if not is_number(price):
+            price_p = soup.find("p", class_="text-left text-bold")
+            if price_p: price = price_p.text.strip()
+        price = price.replace("تومان", "").replace("از", "").strip()
+        if not is_number(price):
+            print(f"⚠️ قیمت برای محصول '{product_name}' یافت نشد.")
+            return None
+        color = "نامشخص"
+        for div in soup.find_all("div", class_="flex flex-row gap-2 font-semibold"):
+            if "رنگ" in div.text:
+                color_tags = div.find_all("p")
+                if len(color_tags) > 1:
+                    color = color_tags[1].text.strip()
+                    break
+        attributes = []
+        attr_container = soup.find("div", class_="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2")
+        if attr_container:
+            for attr_box in attr_container.find_all("div", class_="rounded-lg"):
+                attr_ps = attr_box.find_all("p")
+                if len(attr_ps) >= 2:
+                    attr_name, attr_value = attr_ps[0].text.strip(), attr_ps[1].text.strip()
+                    attributes.append({"name": attr_name, "visible": True, "variation": False, "options": [attr_value]})
+        attributes.append({"name": "رنگ", "visible": True, "variation": False, "options": [color]})
+        return {"name": product_name, "price": price, "color": color, "images": [{"src": img} for img in images], "attributes": attributes}
+
     except Exception as e:
-        print(f"خطا در انتظار برای صفحه محصول: {e}")
-        driver.save_screenshot(f"product_page_error_{product_index}.png")
-        with open(f"product_page_error_{product_index}.html", "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
+        print(f"❌ خطایی در استخراج محصول رخ داد: {e}")
         return None
+    finally:
+        if driver:
+            driver.quit()
 
-    driver.save_screenshot(f"product_{product_index}.png")
-    with open(f"product_{product_index}.html", "w", encoding="utf-8") as f:
-        f.write(driver.page_source)
-
-    product_name_tag = soup.find("h1", class_="font-bold")
-    if not product_name_tag:
-        print("❌ تگ نام محصول پیدا نشد.")
-    product_name = product_name_tag.text.strip() if product_name_tag else "نامشخص"
-
-    images = []
-    gallery_div = soup.find("div", class_="flex flex-row-reverse gap-4")
-    if not gallery_div:
-        print("❌ گالری تصاویر پیدا نشد.")
-    if gallery_div:
-        for img in gallery_div.find_all("img"):
-            img_url = img.get("src", "")
-            if img_url and img_url not in images:
-                img_url = img_url.replace("/128/", "/1024/")
-                images.append(img_url)
-
-    price = "0"
-    price_tag = soup.find("span", class_="price actual-price")
-    if not price_tag:
-        print("❌ تگ قیمت پیدا نشد.")
-    if price_tag and price_tag.find("p"):
-        price = price_tag.find("p").text.strip()
-    if not is_number(price):
-        price_p = soup.find("p", class_="text-left text-bold")
-        if price_p:
-            price = price_p.text.strip()
-    price = price.replace("تومان", "").replace("از", "").strip()
-    if not is_number(price):
-        print(f"⚠️ قیمت برای محصول {product_name} یافت نشد.")
-        return None
-
-    color = "نامشخص"
-    for div in soup.find_all("div", class_="flex flex-row gap-2 font-semibold"):
-        if "رنگ" in div.text:
-            color_tags = div.find_all("p")
-            if len(color_tags) > 1:
-                color = color_tags[1].text.strip()
-                break
-
-    attributes = []
-    attr_container = soup.find("div", class_="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2")
-    if attr_container:
-        for attr_box in attr_container.find_all("div", class_="rounded-lg"):
-            attr_ps = attr_box.find_all("p")
-            if len(attr_ps) >= 2:
-                attr_name, attr_value = attr_ps[0].text.strip(), attr_ps[1].text.strip()
-                attributes.append({"name": attr_name, "visible": True, "variation": False, "options": [attr_value]})
-    attributes.append({"name": "رنگ", "visible": True, "variation": False, "options": [color]})
-
-    return {
-        "name": product_name,
-        "price": price,
-        "color": color,
-        "images": [{"src": img} for img in images],
-        "attributes": attributes
-    }
 
 def create_or_update_product(product_data):
+    # این تابع بدون تغییر باقی می‌ماند
     sku = f"NAMIN-{product_data['name'].replace(' ', '-')}-{product_data['color'].replace(' ', '-')}"
     final_price = process_price(product_data['price'])
     if final_price == "0":
-        print(f"قیمت نهایی برای {product_data['name']} صفر است. ارسال نمی‌شود.")
+        print(f"قیمت نهایی برای محصول '{product_data['name']}' صفر است. ارسال نمی‌شود.")
         return
     print(f"در حال بررسی محصول با SKU: {sku} در ووکامرس...")
+    # ... بقیه کد بدون تغییر ...
     check_url = f"{WC_API_URL}?sku={sku}"
     try:
         r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
@@ -159,99 +232,26 @@ def create_or_update_product(product_data):
         if r.status_code == 201: print(f"✅ محصول '{data['name']}' ایجاد شد.")
         else: print(f"❌ خطا در ایجاد. Status: {r.status_code}, Response: {r.text}")
 
+
 def main():
     category_url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
-    if shutil.which("google-chrome"):
-         options.binary_location = shutil.which("google-chrome")
-    driver = None
-    try:
-        driver = webdriver.Chrome(options=options)
-        stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
+    
+    # فاز ۱: جمع آوری تمام URL ها
+    product_urls = get_all_product_urls(category_url)
+    
+    if not product_urls:
+        print("هیچ URLی برای پردازش جمع‌آوری نشد. برنامه خاتمه می‌یابد.")
+        return
         
-        print("شروع فاز ۱: شمارش محصولات...")
-        driver.get(category_url)
-        wait = WebDriverWait(driver, 20)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
-        time.sleep(5)
-        
-        # اسکرول تا لود کامل محصولات
-        last_height = driver.execute_script("return document.body.scrollHeight")
-        for _ in range(7):
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(3)
-            new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height: break
-            last_height = new_height
+    # فاز ۲: پردازش تک تک URL ها
+    for url in product_urls:
+        product_details = scrape_single_product_page(url)
+        if product_details:
+            create_or_update_product(product_details)
+        time.sleep(2) # وقفه بین هر محصول
 
-        all_products = driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"]')
-        product_count = len(all_products)
-        print(f"فاز شمارش کامل شد. تعداد {product_count} محصول پیدا شد.")
-        print("شروع فاز ۲: پردازش محصولات...")
+    print("\nتمام محصولات پردازش شدند. فرآیند به پایان رسید.")
 
-        for i in range(product_count):
-            print("="*50)
-            print(f"پردازش محصول شماره {i+1}")
-            try:
-                print("باز کردن صفحه دسته‌بندی...")
-                driver.get(category_url)
-                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
-                time.sleep(3)
-                all_products = driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"]')
-                if i >= len(all_products):
-                    print("تعداد محصولات کمتر از انتظار بود. حلقه متوقف می‌شود.")
-                    break
-                product_to_click = all_products[i]
-                wait.until(EC.visibility_of(product_to_click))
-                clicked = False
-                try:
-                    link = product_to_click.find_element(By.TAG_NAME, "a")
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link)
-                    time.sleep(1)
-                    link.click()
-                    clicked = True
-                    print("کلیک روی لینک داخلی موفق بود.")
-                except Exception as e:
-                    print(f"کلیک روی لینک داخلی نشد: {e}")
-                if not clicked:
-                    try:
-                        print("در حال تلاش برای کلیک روی div...")
-                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", product_to_click)
-                        time.sleep(1)
-                        product_to_click.click()
-                        clicked = True
-                        print("کلیک روی div موفق بود.")
-                    except Exception as e:
-                        print(f"کلیک روی div هم نشد: {e}")
-                        driver.save_screenshot(f"click_error_{i+1}.png")
-                        with open(f"click_error_{i+1}.html", "w", encoding="utf-8") as f:
-                            f.write(driver.page_source)
-                        continue
-                time.sleep(3)
-                print("در حال استخراج اطلاعات محصول...")
-                product_details = scrape_details_from_driver(driver, i+1)
-                if product_details:
-                    print("در حال ارسال به ووکامرس...")
-                    create_or_update_product(product_details)
-                print("بازگشت به صفحه لیست محصولات...")
-                driver.back()
-                wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
-                time.sleep(3)
-            except Exception as e:
-                print(f"❌ خطایی در پردازش محصول {i+1} رخ داد: {e}")
-                driver.save_screenshot(f"error_{i+1}.png")
-                with open(f"error_{i+1}.html", "w", encoding="utf-8") as f:
-                    f.write(driver.page_source)
-                print(f"درایور برای محصول {i+1} بسته نشد، فقط صفحه رفرش می‌شود.")
-                continue
-    finally:
-        if driver:
-            driver.quit()
-        print("\nفرآیند به پایان رسید.")
 
 if __name__ == "__main__":
     main()
