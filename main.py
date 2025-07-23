@@ -1,38 +1,17 @@
 import requests
 import os
-import re
+import json
 import time
 
-# --- اطلاعات ووکامرس ---
-WC_API_URL = os.environ.get("WC_API_URL")
-WC_CONSUMER_KEY = os.environ.get("WC_CONSUMER_KEY")
-WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET")
-
-if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
-    print("❌ متغیرهای محیطی ووکامرس به درستی تنظیم نشده‌اند.")
-    exit(1)
-
-# --- اطلاعات API سایت هدف ---
-API_BASE_URL = "https://panel.naminet.co/api"
-SAMSUNG_CATEGORY_API_URL = f"{API_BASE_URL}/categories/13/products/"
-AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
-REFERER_URL = "https://naminet.co/"
-
-def make_api_request(url):
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0',
-            'Authorization': AUTH_TOKEN,
-            'Referer': REFERER_URL
-        }
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        print(f"   ❌ خطا در درخواست API به {url}: {e}")
-        return None
+WC_API_URL = os.environ.get("WC_API_URL", "https://your-woocommerce-site.com/wp-json/wc/v3/products")
+WC_CONSUMER_KEY = os.environ.get("WC_CONSUMER_KEY", "ck_xxx")
+WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET", "cs_xxx")
 
 def process_price(price_value):
+    try:
+        price_value = float(price_value)
+    except:
+        return "0"
     if price_value <= 1: return "0"
     elif price_value <= 7000000: new_price = price_value + 260000
     elif price_value <= 10000000: new_price = price_value * 1.035
@@ -42,9 +21,9 @@ def process_price(price_value):
     return str(int(round(new_price / 10000) * 10000))
 
 def extract_attributes(short_description):
+    import re
     attrs = []
     if short_description:
-        # ویژگی‌های مهم را جدا کن و به صورت attribute بفرست
         desc_attrs = re.findall(r"(.+?)\s*:\s*(.+)", short_description)
         for name, value in desc_attrs:
             attrs.append({
@@ -77,7 +56,6 @@ def create_or_update_product(wc_data, variations=None):
             else:
                 print(f"   ❌ خطا در ایجاد محصول. Status: {res.status_code}, Response: {res.text}")
                 return
-        # اگر متغیر دارد، وارییشن‌ها را ثبت کن
         if product_id and variations:
             print(f"   ثبت {len(variations)} وارییشن ...")
             variations_url = f"{WC_API_URL}/{product_id}/variations/batch"
@@ -96,11 +74,6 @@ def process_product(product):
     product_id = product.get('id', product.get('sku', ''))
     print(f"پردازش محصول: {product_name} (ID: {product_id})")
 
-    # فقط محصولات موجود را منتقل کن (پیشنهاد 2)
-    if not product.get('in_stock', True):
-        print("   محصول ناموجود است. رد شد.")
-        return
-
     # اگر ویژگی رنگ و attribute_values دارد، محصول متغیر است
     is_variable = False
     variations = []
@@ -113,8 +86,8 @@ def process_product(product):
                     color_options.append(v["name"])
                     variations.append({
                         "sku": f"NAMIN-{product_id}-{v['id']}",
-                        "regular_price": process_price(v["price"]),
-                        "stock_status": "instock" if v["in_stock"] else "outofstock",
+                        "regular_price": process_price(v.get("price", 0)),
+                        "stock_status": "instock" if v.get("in_stock", True) else "outofstock",
                         "attributes": [{"name": "رنگ", "option": v["name"]}]
                     })
 
@@ -140,9 +113,6 @@ def process_product(product):
         # محصول ساده
         price = product.get('price') or product.get('final_price_value') or 0
         in_stock = product.get('in_stock', True)
-        if not price or price <= 0:
-            print("   محصول قیمت ندارد یا ناموجود است. رد شد.")
-            return
         wc_data = {
             "name": product_name,
             "type": "simple",
@@ -158,7 +128,6 @@ def process_product(product):
 
 def main():
     # خواندن محصولات از فایل جیسون
-    import json
     with open("products.json", "r", encoding="utf-8") as f:
         data = json.load(f)
     products = data["products"] if "products" in data else data
