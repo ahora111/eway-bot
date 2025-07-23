@@ -24,7 +24,7 @@ if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
     exit(1)
 # ---------------------------------
 
-# --- توابع محاسباتی و کمکی (بدون تغییر) ---
+# --- توابع محاسباتی و کمکی ---
 def is_number(s):
     try:
         float(s.replace(",", "").replace("٬", ""))
@@ -49,15 +49,14 @@ def process_price(price_str):
 
 def get_product_links(category_url):
     """
-    نسخه نهایی با انتظار هوشمند برای محتوای واقعی و تنظیم اندازه پنجره.
+    نسخه جدید با رویکرد ساده‌تر: انتظار برای کانتینر اصلی + وقفه ثابت.
     """
     print("در حال دریافت لینک محصولات از صفحه دسته‌بندی...")
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    # --- تغییرات کلیدی ---
-    options.add_argument("--window-size=1920,1080") # 1. تنظیم اندازه پنجره
+    options.add_argument("--window-size=1920,1080")
     options.add_argument("start-maximized")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
@@ -65,50 +64,62 @@ def get_product_links(category_url):
     if shutil.which("google-chrome"):
          options.binary_location = shutil.which("google-chrome")
 
-    driver = webdriver.Chrome(options=options)
-    stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
-    
-    links = []
+    driver = None # تعریف اولیه برای استفاده در finally
     try:
+        driver = webdriver.Chrome(options=options)
+        stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
+        
         print("در حال باز کردن صفحه با هویت مخفی...")
         driver.get(category_url)
         
-        print("در انتظار بارگذاری محتوای واقعی محصولات...")
-        wait = WebDriverWait(driver, 30) # افزایش زمان انتظار به 30 ثانیه
+        print("در انتظار بارگذاری کانتینر محصولات...")
+        wait = WebDriverWait(driver, 20)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
+        print("کانتینر محصولات بارگذاری شد.")
         
-        # --- تغییر کلیدی ---
-        # 2. انتظار برای عنصری که لینک واقعی داشته باشد
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"] a[href^="/p/"]')))
+        print("دادن وقفه 7 ثانیه‌ای برای اطمینان از رندر شدن محتوا...")
+        time.sleep(7)
         
-        print("محتوای واقعی بارگذاری شد. در حال اسکرول...")
-        time.sleep(2) # یک وقفه کوتاه بعد از لود اولیه
-
+        print("در حال اسکرول صفحه...")
         last_height = driver.execute_script("return document.body.scrollHeight")
-        for _ in range(3):
+        for i in range(3):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            print(f"اسکرول شماره {i+1}")
             time.sleep(3)
             new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height: break
+            if new_height == last_height:
+                break
             last_height = new_height
         
-        print("اسکرول تمام شد. در حال استخراج لینک‌ها...")
-        soup = BeautifulSoup(driver.page_source, "html.parser")
+        print("اسکرول تمام شد. در حال استخراج لینک‌ها از سورس نهایی...")
+        page_source = driver.page_source
+        soup = BeautifulSoup(page_source, "html.parser")
 
+        links = []
         product_elements = soup.select('div[id^="NAMI-"] a[href^="/p/"]')
+        if not product_elements:
+            print("سلکتور دقیق لینکی پیدا نکرد. در حال تلاش با سلکتور عمومی‌تر...")
+            product_elements = soup.select('div[id^="NAMI-"] a')
+
         for link_tag in product_elements:
             href = link_tag.get('href')
-            if href:
+            if href and href.startswith('/p/'):
                 full_link = "https://naminet.co" + href
                 if full_link not in links:
                     links.append(full_link)
 
     except Exception as e:
         print(f"❌ خطایی هنگام دریافت لینک‌ها رخ داد: {e}")
-        with open("debug_page.html", "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
-        print("سورس صفحه در فایل debug_page.html ذخیره شد. لطفاً این فایل را از Artifacts دانلود و بررسی کنید.")
+        if driver:
+            with open("debug_page.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
+            driver.save_screenshot("debug_screenshot.png")
+            print("سورس صفحه و اسکرین‌شات برای دیباگ ذخیره شدند.")
+        links = [] # در صورت خطا، لیست خالی برگردانده شود
+
     finally:
-        driver.quit()
+        if driver:
+            driver.quit()
 
     if not links:
         print("❌ هیچ لینکی پیدا نشد.")
@@ -117,8 +128,6 @@ def get_product_links(category_url):
     
     return links
 
-# بقیه توابع (scrape_product_details, create_or_update_product, main) بدون تغییر باقی می‌مانند
-# ... (کد این توابع را از پاسخ‌های قبلی کپی کنید)
 def scrape_product_details(product_url):
     print(f"در حال استخراج اطلاعات از: {product_url}")
     options = Options()
