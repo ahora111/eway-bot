@@ -1,155 +1,63 @@
+import json
 import requests
-import urllib3
 import os
-import re
-import time
 
-# غیرفعال کردن هشدار SSL
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# اگر از .env استفاده می‌کنی:
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
-# --- اطلاعات ووکامرس (خوانده شده از Secrets گیت‌هاب) ---
-WC_API_URL = os.environ.get("WC_API_URL")
-WC_CONSUMER_KEY = os.environ.get("WC_CONSUMER_KEY")
-WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET")
+# --- اطلاعات ووکامرس (از محیط یا مستقیم) ---
+WC_API_URL = os.environ.get("WC_API_URL", "https://your-woocommerce-site.com/wp-json/wc/v3/products")
+WC_CONSUMER_KEY = os.environ.get("WC_CONSUMER_KEY", "ck_xxx")
+WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET", "cs_xxx")
 
-if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
-    print("❌ متغیرهای محیطی ووکامرس به درستی تنظیم نشده‌اند. برنامه متوقف می‌شود.")
-    exit(1)
-# ---------------------------------
+# --- خواندن فایل JSON محصولات ---
+with open("products.json", "r", encoding="utf-8") as f:
+    data = json.load(f)
 
-# --- اطلاعات API سایت هدف (شاه‌کلید) ---
-API_URL = "https://panel.naminet.co/api/categories/13/products/"
-AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
-REFERER_URL = "https://naminet.co/"
-# ---------------------------------------------
+products = data["products"] if "products" in data else data
 
-# --- توابع کمکی ---
-def parse_attributes_from_description(description):
-    attributes = []
-    if not description:
-        return attributes
-    lines = description.split('\r\n')
-    for line in lines:
-        if ':' in line:
-            parts = line.split(':', 1)
-            attr_name = parts[0].strip()
-            attr_value = parts[1].strip()
-            if attr_name and attr_value:
-                attributes.append({
-                    "name": attr_name,
-                    "visible": True,
-                    "variation": False,
-                    "options": [attr_value]
-                })
-    return attributes
-
-def process_price(price_value):
-    if price_value <= 1: return "0"
-    elif price_value <= 7000000: new_price = price_value + 260000
-    elif price_value <= 10000000: new_price = price_value * 1.035
-    elif price_value <= 20000000: new_price = price_value * 1.025
-    elif price_value <= 30000000: new_price = price_value * 1.02
-    else: new_price = price_value * 1.015
-    return str(int(round(new_price / 10000) * 10000))
-
-# --- توابع اصلی ---
-
-def fetch_products_from_api(api_url, token, referer):
-    print(f"در حال ارسال درخواست به API: {api_url}")
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36',
-            'Authorization': token,
-            'Referer': referer
-        }
-        response = requests.get(api_url, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        
-        # در این ساختار، پاسخ یک دیکشنری است که کلید 'products' لیست را دارد
-        products_list = data.get('products', [])
-        print(f"✅ تعداد {len(products_list)} محصول از API دریافت شد.")
-        return data # کل دیکشنری را برمی‌گردانیم
-    except requests.exceptions.RequestException as e:
-        print(f"❌ خطا در ارتباط با API سایت هدف: {e}")
-        return None
-    except ValueError:
-        print(f"❌ پاسخ دریافتی از API سایت هدف، JSON معتبر نیست. پاسخ: {response.text[:200]}")
-        return None
-
-def create_or_update_product(product_data):
-    sku = f"NAMIN-{product_data.get('sku', product_data.get('id'))}"
-    
-    if product_data.get('price', 0) == 0 or not product_data.get('in_stock', True):
-        print(f"   محصول '{product_data['name']}' قیمت ندارد یا ناموجود است. نادیده گرفته شد.")
-        return
-
-    final_price = process_price(product_data['price'])
-
-    data_to_send = {
-        "name": product_data['name'],
-        "sku": sku,
+def product_to_woocommerce(p):
+    images = [{"src": img["src"]} for img in p.get("images", [])]
+    categories = [{"id": cid} for cid in p.get("category_ids", [])]
+    data = {
+        "name": p.get("name", ""),
+        "sku": p.get("sku", ""),
         "type": "simple",
-        "regular_price": final_price,
-        "description": product_data.get('short_description', ''),
-        "manage_stock": False,
-        "stock_status": "instock" if product_data.get('in_stock', True) else "outofstock",
-        "images": [{"src": img['src']} for img in product_data.get('images', [])],
-        "attributes": parse_attributes_from_description(product_data.get('short_description', ''))
+        "regular_price": str(p.get("final_price_value", "")),
+        "description": p.get("short_description", ""),
+        "manage_stock": True,
+        "stock_quantity": 10 if p.get("in_stock", False) else 0,
+        "stock_status": "instock" if p.get("in_stock", False) else "outofstock",
+        "images": images,
+        "categories": categories,
     }
-    
-    print(f"   در حال بررسی محصول با SKU: {sku} ...")
-    check_url = f"{WC_API_URL}?sku={sku}"
-    try:
-        r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
-        r.raise_for_status()
-        existing_products = r.json()
-        
-        if existing_products and isinstance(existing_products, list) and len(existing_products) > 0:
-            product_id = existing_products[0]['id']
-            update_url = f"{WC_API_URL}/{product_id}"
-            print(f"   محصول موجود است. آپدیت محصول با ID: {product_id} ...")
-            res = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data_to_send, verify=False)
-            if res.status_code == 200: print(f"   ✅ محصول '{data_to_send['name']}' آپدیت شد.")
-            else: print(f"   ❌ خطا در آپدیت. Status: {res.status_code}, Response: {res.text}")
+    return data
+
+def create_or_update_product(wc_data):
+    check_url = f"{WC_API_URL}?sku={wc_data['sku']}"
+    r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET))
+    if r.status_code == 200 and isinstance(r.json(), list) and len(r.json()) > 0:
+        product_id = r.json()[0]['id']
+        update_url = f"{WC_API_URL}/{product_id}"
+        r2 = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=wc_data)
+        if r2.status_code == 200:
+            print(f"✅ محصول '{wc_data['name']}' آپدیت شد.")
         else:
-            print(f"   محصول جدید است. ایجاد محصول '{data_to_send['name']}' ...")
-            res = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data_to_send, verify=False)
-            if res.status_code == 201: print(f"   ✅ محصول '{data_to_send['name']}' ایجاد شد.")
-            else: print(f"   ❌ خطا در ایجاد. Status: {res.status_code}, Response: {res.text}")
-            
-    except requests.exceptions.RequestException as e:
-        print(f"   ❌ خطا در ارتباط با API ووکامرس: {e}")
-    except ValueError:
-        print(f"   ❌ پاسخ از ووکامرس معتبر نیست. Status: {r.status_code}, Response: {r.text[:200]}")
-
-def main():
-    print("شروع فرآیند با استراتژی نهایی (API مستقیم)...")
-    
-    api_data = fetch_products_from_api(API_URL, AUTH_TOKEN, REFERER_URL)
-    
-    if not api_data:
-        print("هیچ داده‌ای از API دریافت نشد. برنامه خاتمه می‌یابد.")
-        return
-
-    products_list = api_data.get('products', [])
-    
-    if not products_list:
-        # ممکن است ساختار پاسخ متفاوت باشد. یک بار دیگر با فرمت دیگر چک می‌کنیم
-        if isinstance(api_data, list):
-            products_list = api_data
+            print(f"❌ خطا در آپدیت '{wc_data['name']}':", r2.text)
+    else:
+        r2 = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=wc_data)
+        if r2.status_code in [200, 201]:
+            print(f"✅ محصول '{wc_data['name']}' ایجاد شد.")
         else:
-            print("هیچ محصولی در پاسخ API یافت نشد. برنامه خاتمه می‌یابد.")
-            return
-        
-    for product in products_list:
-        print("\n" + "="*50)
-        print(f"پردازش محصول: {product.get('name', 'بدون نام')}")
-        create_or_update_product(product)
-        time.sleep(1)
+            print(f"❌ خطا در ایجاد '{wc_data['name']}':", r2.text)
 
-    print("\nتمام محصولات پردازش شدند. فرآیند به پایان رسید.")
-
-
-if __name__ == "__main__":
-    main()
+for p in products:
+    if not p.get("in_stock", False):
+        print(f"⏩ محصول '{p.get('name', '')}' ناموجود است، رد شد.")
+        continue
+    wc_data = product_to_woocommerce(p)
+    create_or_update_product(wc_data)
