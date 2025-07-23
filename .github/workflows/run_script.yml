@@ -1,46 +1,48 @@
 name: Run Python Scraper
 
 on:
-  workflow_dispatch: # این بخش به شما اجازه می‌دهد اسکریپت را دستی اجرا کنید
+  # 1. اجرای دستی از طریق صفحه Actions در گیت‌هاب
+  workflow_dispatch:
+
+  # 2. اجرای زمان‌بندی شده (مثلاً هر 6 ساعت)
   schedule:
-    - cron: '0 */6 * * *' # برای مثال: هر ۶ ساعت یک بار اجرا شود
+    - cron: '0 */6 * * *'
+
+  # 3. اجرای خودکار هنگام پوش کردن تغییرات در فایل main.py (بخش جدید)
+  # <<< این بخش جدید و کلیدی است >>>
+  push:
+    branches:
+      - main  # یا 'master' اگر نام شاخه اصلی شما این است
+    paths:
+      - 'main.py'
+  # <<< پایان بخش جدید >>>
 
 jobs:
   scrape_and_update:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. کد شما را از ریپازیتوری دریافت می‌کند
       - name: Check out repository
         uses: actions/checkout@v3
 
-      # --- این بخش را حتما اضافه کنید ---
-      # 2. مرورگر گوگل کروم را نصب می‌کند
       - name: Set up Google Chrome
         uses: browser-actions/setup-chrome@v1
-      # ---------------------------------
 
-      # 3. پایتون را آماده می‌کند
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8' # یا هر نسخه‌ای که نیاز دارید
+          python-version: '3.8'
 
-      # 4. کتابخانه‌های پایتون را نصب می‌کند
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install selenium beautifulsoup4 requests
-
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install selenium beautifulsoup4 requests selenium-stealth
 
-      # 5. اسکریپت شما را اجرا می‌کند
       - name: Run scraper script
         env:
-          # اینجا متغیرهای محرمانه خود را قرار دهید
+          # این کلیدها از بخش Secrets ریپازیتوری شما خوانده می‌شوند
+          # مطمئن شوید که WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET را در Secrets تعریف کرده‌اید
+          WC_API_URL: ${{ secrets.WC_API_URL }}
           WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
           WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
         run: python main.py
