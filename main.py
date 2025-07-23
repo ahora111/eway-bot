@@ -178,6 +178,7 @@ def main():
             print("\n" + "="*50)
             print(f"پردازش محصول شماره {i+1} از {product_count}")
             try:
+                # --- اصلاح کلیدی: همیشه لیست محصولات را تازه می‌کنیم ---
                 all_products = driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"]')
                 
                 if i >= len(all_products):
@@ -201,14 +202,18 @@ def main():
                 
                 # --- اصلاح کلیدی: منتظر می‌مانیم تا صفحه لیست دوباره قابل کلیک شود ---
                 wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
-                time.sleep(3)
+                time.sleep(3) # وقفه اضافی برای پایداری بیشتر
                 
             except Exception as e:
                 print(f"خطای غیرمنتظره در حلقه برای محصول {i+1}: {e}")
                 print("تلاش برای بازیابی با بارگذاری مجدد صفحه...")
-                driver.get(category_url)
-                wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
-                continue
+                try:
+                    driver.get(category_url)
+                    wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
+                    continue
+                except Exception as recovery_error:
+                    print(f"بازیابی ناموفق بود: {recovery_error}. برنامه متوقف می‌شود.")
+                    raise recovery_error # خطا را دوباره ایجاد کن تا برنامه متوقف شود
     
     except Exception as e:
         print(f"❌ خطای اصلی در اجرای برنامه رخ داد: {e}")
