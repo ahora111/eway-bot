@@ -18,9 +18,8 @@ if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
 # ---------------------------------
 
 # --- اطلاعات API سایت هدف ---
-API_BASE_URL = "https://panel.naminet.co/api"
-CATEGORY_ID = 13 # شناسه دسته‌بندی گوشی‌های سامسونگ
-AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zYhmebWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
+API_URL = "https://panel.naminet.co/api/categories/13/products/"
+AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
 REFERER_URL = "https://naminet.co/"
 # ---------------------------------------------
 
@@ -71,8 +70,7 @@ def extract_attributes(short_description):
                     })
     return attrs
 
-def _send_to_woocommerce(sku, data, is_variable=False):
-    """ تابع داخلی برای ارسال داده به ووکامرس و مدیریت ایجاد/آپدیت """
+def _send_to_woocommerce(sku, data):
     check_url = f"{WC_API_URL}?sku={sku}"
     try:
         r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
@@ -104,14 +102,12 @@ def _send_to_woocommerce(sku, data, is_variable=False):
         return None
 
 def create_or_update_variations(product_id, variations):
-    """ متغیرهای یک محصول را ایجاد یا آپدیت می‌کند. """
     if not product_id or not variations:
         return
         
     print(f"   در حال ثبت {len(variations)} متغیر برای محصول ID: {product_id}...")
     variations_url = f"{WC_API_URL}/{product_id}/variations/batch"
     
-    # برای سادگی، ابتدا همه متغیرهای قبلی را پاک می‌کنیم
     existing_vars_resp = requests.get(f"{WC_API_URL}/{product_id}/variations", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
     if existing_vars_resp.status_code == 200 and existing_vars_resp.json():
         delete_ids = [v['id'] for v in existing_vars_resp.json()]
@@ -119,7 +115,6 @@ def create_or_update_variations(product_id, variations):
             print(f"   در حال پاک کردن {len(delete_ids)} متغیر قدیمی...")
             requests.post(variations_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json={"delete": delete_ids}, verify=False)
     
-    # سپس متغیرهای جدید را در دسته‌های کوچک ایجاد می‌کنیم
     for i in range(0, len(variations), 10):
         batch = variations[i:i + 10]
         batch_data = {"create": batch}
@@ -162,7 +157,7 @@ def process_product(product):
             "type": "variable",
             "sku": f"NAMIN-{product.get('sku', product_id)}",
             "description": product.get('short_description', ''),
-            "categories": [{"id": 13}], # شناسه دسته‌بندی سامسونگ
+            "categories": [{"id": 13}],
             "images": [{"src": img.get("src", "")} for img in product.get("images", [])],
             "attributes": [
                 {
@@ -174,7 +169,7 @@ def process_product(product):
             ] + other_attrs,
             "default_attributes": [{"name": "رنگ", "option": sorted(list(color_options))[0]}] if color_options else []
         }
-        product_wc_id = _send_to_woocommerce(wc_data['sku'], wc_data, is_variable=True)
+        product_wc_id = _send_to_woocommerce(wc_data['sku'], wc_data)
         create_or_update_variations(product_wc_id, variations)
     else:
         price = product.get('price') or product.get('final_price_value') or 0
@@ -194,31 +189,20 @@ def process_product(product):
         else:
             print("   محصول ساده قیمت ندارد یا ناموجود است. نادیده گرفته شد.")
 
-def get_all_products():
-    all_products = []
-    page = 1
-    while True:
-        # API آدرس اصلی که لیست گروهی محصولات را می‌دهد
-        url = f"{API_BASE_URL}/categories/{CATEGORY_ID}/products/?page={page}&pageSize=50"
-        data = make_api_request(url)
-        if not data: break
-        
-        products_in_page = data.get("products", [])
-        if not products_in_page: break
-        
-        all_products.extend(products_in_page)
-        print(f"صفحه {page} دریافت شد. تعداد محصولات این صفحه: {len(products_in_page)}")
-        
-        # اگر تعداد محصولات کمتر از اندازه صفحه بود، یعنی صفحه آخر است
-        if len(products_in_page) < 50: break
-        page += 1
-        time.sleep(1) # وقفه بین درخواست صفحات
-        
-    print(f"\nدریافت اطلاعات از API کامل شد. کل محصولات دریافت شده: {len(all_products)}")
-    return all_products
-
 def main():
-    products = get_all_products()
+    # --- اصلاح کلیدی: حذف کامل Paging ---
+    print("شروع فرآیند با استراتژی نهایی (API مستقیم)...")
+    api_response = make_api_request(API_URL)
+    
+    if not api_response:
+        print("هیچ داده‌ای از API دریافت نشد. برنامه خاتمه می‌یابد.")
+        return
+        
+    products = api_response.get("products", [])
+    if not products:
+        print("هیچ محصولی در پاسخ API یافت نشد. برنامه خاتمه می‌یابد.")
+        return
+        
     total = len(products)
     available = sum(1 for p in products if p.get('in_stock', True) and p.get('price', 0) > 0)
     
@@ -227,15 +211,10 @@ def main():
     
     for product in products:
         try:
-            # فقط محصولات موجود و با قیمت را پردازش می‌کنیم
-            if product.get('in_stock', True) and product.get('price', 0) > 0:
-                process_product(product)
-            else:
-                print("\n" + "="*50)
-                print(f"نادیده گرفتن گروه محصول ناموجود/بدون قیمت: {product.get('name')}")
+            process_product(product)
         except Exception as e:
-            print(f"   ❌ خطای بسیار جدی در پردازش محصول: {e}")
-        time.sleep(2)
+            print(f"   ❌ خطا در پردازش محصول: {e}")
+        time.sleep(1)
         
     print("\nتمام محصولات پردازش شدند. فرآیند به پایان رسید.")
 
