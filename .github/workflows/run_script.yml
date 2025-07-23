@@ -1,21 +1,14 @@
 name: Run Python Scraper
 
 on:
-  # 1. اجرای دستی از طریق صفحه Actions در گیت‌هاب
   workflow_dispatch:
-
-  # 2. اجرای زمان‌بندی شده (مثلاً هر 6 ساعت)
   schedule:
     - cron: '0 */6 * * *'
-
-  # 3. اجرای خودکار هنگام پوش کردن تغییرات در فایل main.py (بخش جدید)
-  # <<< این بخش جدید و کلیدی است >>>
   push:
     branches:
-      - main  # یا 'master' اگر نام شاخه اصلی شما این است
+      - main
     paths:
       - 'main.py'
-  # <<< پایان بخش جدید >>>
 
 jobs:
   scrape_and_update:
@@ -40,9 +33,17 @@ jobs:
 
       - name: Run scraper script
         env:
-          # این کلیدها از بخش Secrets ریپازیتوری شما خوانده می‌شوند
-          # مطمئن شوید که WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET را در Secrets تعریف کرده‌اید
           WC_API_URL: ${{ secrets.WC_API_URL }}
           WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
           WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
         run: python main.py
+
+      # این مرحله فایل‌های دیباگ را در صورت شکست، آپلود می‌کند
+      - name: Upload debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: debug-files
+          path: |
+            debug_page.html
+            debug_screenshot.png
