@@ -25,13 +25,9 @@ REFERER_URL = "https://naminet.co/"
 
 # --- توابع کمکی ---
 def parse_attributes_from_description(description):
-    """
-    توضیحات کوتاه را به لیستی از ویژگی‌های ووکامرس تبدیل می‌کند.
-    """
     attributes = []
     if not description:
         return attributes
-    # توضیحات با \r\n از هم جدا شده‌اند
     lines = description.split('\r\n')
     for line in lines:
         if ':' in line:
@@ -48,7 +44,6 @@ def parse_attributes_from_description(description):
     return attributes
 
 def process_price(price_value):
-    """ تابع محاسبه قیمت نهایی شما """
     if price_value <= 1: return "0"
     elif price_value <= 7000000: new_price = price_value + 260000
     elif price_value <= 10000000: new_price = price_value * 1.035
@@ -60,9 +55,6 @@ def process_price(price_value):
 # --- توابع اصلی ---
 
 def fetch_products_from_api(api_url, token, referer):
-    """
-    محصولات را مستقیماً از API سایت هدف با استفاده از توکن دریافت می‌کند.
-    """
     print(f"در حال ارسال درخواست به API: {api_url}")
     try:
         headers = {
@@ -72,23 +64,20 @@ def fetch_products_from_api(api_url, token, referer):
         }
         response = requests.get(api_url, headers=headers, timeout=30)
         response.raise_for_status()
+        data = response.json()
         
-        # پاسخ این API مستقیماً یک لیست از محصولات است
-        products = response.json()
-        
-        print(f"✅ تعداد {len(products)} محصول از API دریافت شد.")
-        return products
+        # در این ساختار، پاسخ یک دیکشنری است که کلید 'products' لیست را دارد
+        products_list = data.get('products', [])
+        print(f"✅ تعداد {len(products_list)} محصول از API دریافت شد.")
+        return data # کل دیکشنری را برمی‌گردانیم
     except requests.exceptions.RequestException as e:
         print(f"❌ خطا در ارتباط با API سایت هدف: {e}")
-        return []
+        return None
     except ValueError:
         print(f"❌ پاسخ دریافتی از API سایت هدف، JSON معتبر نیست. پاسخ: {response.text[:200]}")
-        return []
+        return None
 
 def create_or_update_product(product_data):
-    """
-    محصول را در ووکامرس ایجاد یا به‌روزرسانی می‌کند.
-    """
     sku = f"NAMIN-{product_data.get('sku', product_data.get('id'))}"
     
     if product_data.get('price', 0) == 0 or not product_data.get('in_stock', True):
@@ -137,13 +126,23 @@ def create_or_update_product(product_data):
 def main():
     print("شروع فرآیند با استراتژی نهایی (API مستقیم)...")
     
-    products = fetch_products_from_api(API_URL, AUTH_TOKEN, REFERER_URL)
+    api_data = fetch_products_from_api(API_URL, AUTH_TOKEN, REFERER_URL)
     
-    if not products:
-        print("هیچ محصولی برای پردازش دریافت نشد. برنامه خاتمه می‌یابد.")
+    if not api_data:
+        print("هیچ داده‌ای از API دریافت نشد. برنامه خاتمه می‌یابد.")
         return
+
+    products_list = api_data.get('products', [])
+    
+    if not products_list:
+        # ممکن است ساختار پاسخ متفاوت باشد. یک بار دیگر با فرمت دیگر چک می‌کنیم
+        if isinstance(api_data, list):
+            products_list = api_data
+        else:
+            print("هیچ محصولی در پاسخ API یافت نشد. برنامه خاتمه می‌یابد.")
+            return
         
-    for product in products:
+    for product in products_list:
         print("\n" + "="*50)
         print(f"پردازش محصول: {product.get('name', 'بدون نام')}")
         create_or_update_product(product)
