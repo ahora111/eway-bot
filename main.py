@@ -24,7 +24,7 @@ if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
     exit(1)
 # ---------------------------------
 
-# --- توابع محاسباتی و کمکی ---
+# --- توابع محاسباتی و کمکی (بدون تغییر) ---
 def is_number(s):
     try:
         float(s.replace(",", "").replace("٬", ""))
@@ -49,7 +49,7 @@ def process_price(price_str):
 
 def get_product_links(category_url):
     """
-    نسخه جدید با رویکرد ساده‌تر: انتظار برای کانتینر اصلی + وقفه ثابت.
+    نسخه نهایی با استخراج مستقیم لینک‌ها توسط سلنیوم برای دور زدن Shadow DOM یا دستکاری JS.
     """
     print("در حال دریافت لینک محصولات از صفحه دسته‌بندی...")
     options = Options()
@@ -64,7 +64,7 @@ def get_product_links(category_url):
     if shutil.which("google-chrome"):
          options.binary_location = shutil.which("google-chrome")
 
-    driver = None # تعریف اولیه برای استفاده در finally
+    driver = None
     try:
         driver = webdriver.Chrome(options=options)
         stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
@@ -77,36 +77,39 @@ def get_product_links(category_url):
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
         print("کانتینر محصولات بارگذاری شد.")
         
-        print("دادن وقفه 7 ثانیه‌ای برای اطمینان از رندر شدن محتوا...")
-        time.sleep(7)
+        print("دادن وقفه 5 ثانیه‌ای و انجام اسکرول...")
+        time.sleep(5)
         
-        print("در حال اسکرول صفحه...")
         last_height = driver.execute_script("return document.body.scrollHeight")
         for i in range(3):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            print(f"اسکرول شماره {i+1}")
             time.sleep(3)
             new_height = driver.execute_script("return document.body.scrollHeight")
             if new_height == last_height:
+                print(f"اسکرول پس از {i+1} بار متوقف شد.")
                 break
             last_height = new_height
         
-        print("اسکرول تمام شد. در حال استخراج لینک‌ها از سورس نهایی...")
-        page_source = driver.page_source
-        soup = BeautifulSoup(page_source, "html.parser")
-
+        # --- تغییر کلیدی: استخراج مستقیم با سلنیوم به جای BeautifulSoup ---
+        print("اسکرول تمام شد. استخراج لینک‌ها مستقیماً با سلنیوم...")
+        
+        # پیدا کردن همه تگ‌های a که داخل باکس محصول قرار دارند
+        product_elements = driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"] a')
+        
+        print(f"سلنیوم تعداد {len(product_elements)} عنصر لینک پیدا کرد.")
+        
         links = []
-        product_elements = soup.select('div[id^="NAMI-"] a[href^="/p/"]')
-        if not product_elements:
-            print("سلکتور دقیق لینکی پیدا نکرد. در حال تلاش با سلکتور عمومی‌تر...")
-            product_elements = soup.select('div[id^="NAMI-"] a')
-
-        for link_tag in product_elements:
-            href = link_tag.get('href')
-            if href and href.startswith('/p/'):
-                full_link = "https://naminet.co" + href
-                if full_link not in links:
-                    links.append(full_link)
+        for element in product_elements:
+            try:
+                href = element.get_attribute('href')
+                # لینک‌ها معمولا به صورت کامل (absolute) توسط get_attribute برگردانده می‌شوند
+                if href and '/p/' in href:
+                    if href not in links:
+                        links.append(href)
+            except Exception as e:
+                # ممکن است عنصر در حین کار ناپدید شود (StaleElementReferenceException)
+                print(f"خطای جزئی در خواندن یک لینک: {e}")
+                continue
 
     except Exception as e:
         print(f"❌ خطایی هنگام دریافت لینک‌ها رخ داد: {e}")
@@ -115,7 +118,7 @@ def get_product_links(category_url):
                 f.write(driver.page_source)
             driver.save_screenshot("debug_screenshot.png")
             print("سورس صفحه و اسکرین‌شات برای دیباگ ذخیره شدند.")
-        links = [] # در صورت خطا، لیست خالی برگردانده شود
+        links = []
 
     finally:
         if driver:
