@@ -1,0 +1,54 @@
+{
+  "products": [
+    {
+      "name": "گوشی موبایل سامسونگ مدل Galaxy A06 4G ظرفیت 128 گیگابایت رم 4 گیگابایت",
+      "sku": "1000039",
+      "final_price_value": 8119000,
+      "short_description": "نوع پردازنده - CPU : MediaTek Helio G85 (12 نانومتر)\nحافظه داخلی : 128 گیگابایت\nحافظه RAM : 4 گیگابایت\nسایز صفحه نمایش : 6.7 اینچ\nدوربین پشت : دو گانه 50 مگاپیکسل + 2 مگاپیکسل\nظرفیت باتری : 5000 میلی آمپر ساعت",
+      "in_stock": true,
+      "category_ids": [13, 1],
+      "images": [
+        {"src": "https://panel.naminet.co/images/thumbs/0000022_galaxy-a06-128gb-ram-4gb.jpeg"},
+        {"src": "https://panel.naminet.co/images/thumbs/0000020_galaxy-a06-128gb-ram-4gb.jpeg"},
+        {"src": "https://panel.naminet.co/images/thumbs/0000021_galaxy-a06-128gb-ram-4gb.jpeg"}
+      ]
+    },
+    {
+      "name": "گوشی موبایل سامسونگ مدل Galaxy A05s ظرفیت 128 گیگابایت رم 6 گیگابایت",
+      "sku": "1000004",
+      "final_price_value": 7549000,
+      "short_description": "نوع پردازنده - CPU : Qualcomm SM6225 Snapdragon 680 4G (6 nm)\nحافظه داخلی : 128 گیگابایت\nحافظه RAM : 6 گیگابایت\nسایز صفحه نمایش : 6.7 اینچ\nدوربین پشت : سه گانه 50 مگاپیکسل + 2 مگاپیکسل + 2 مگاپیکسل\nظرفیت باتری : 5000 میلی آمپر ساعت",
+      "in_stock": false,
+      "category_ids": [13, 1],
+      "images": [
+        {"src": "https://panel.naminet.co/images/thumbs/0000024_galaxy-a05s-64gb-ram-4gb.jpeg"},
+        {"src": "https://panel.naminet.co/images/thumbs/0000023_galaxy-a05s-64gb-ram-4gb.jpeg"},
+        {"src": "https://panel.naminet.co/images/thumbs/0000025_galaxy-a05s-64gb-ram-4gb.jpeg"}
+      ]
+    },
+    {
+      "name": "گوشی موبایل سامسونگ مدل Galaxy S24 Ultra 5G ظرفیت 256 گیگابایت رم 12 گیگابایت ویتنام",
+      "sku": "1000164",
+      "final_price_value": 0,
+      "short_description": "نوع پردازنده - CPU : Qualcomm SM8650-AC Snapdragon 8 Gen 3 (4 نانومتری)\nحافظه داخلی : 256 گیگابایت\nحافظه RAM : 12 گیگابایت\nسایز صفحه نمایش : 6.8 اینچ\nدوربین پشت : چهار گانه 200 مگاپیکسل + 50 مگاپیکسل + 10 مگاپیکسل + 12 مگاپیکسل\nظرفیت باتری : 5000 میلی آمپر ساعت",
+      "in_stock": false,
+      "category_ids": [13, 1],
+      "images": [
+        {"src": "https://panel.naminet.co/images/thumbs/0000262_galaxy-s24-ultra-5g-256gb-ram-12gb-vietnam.jpeg"},
+        {"src": "https://panel.naminet.co/images/thumbs/0000263_galaxy-s24-ultra-5g-256gb-ram-12gb-vietnam.jpeg"}
+      ]
+    },
+    {
+      "name": "گوشی موبایل سامسونگ مدل Galaxy A16 4G ظرفیت 256 گیگابایت رم 8 گیگابایت - ویتنام",
+      "sku": "1000603",
+      "final_price_value": 15849000,
+      "short_description": "نوع پردازنده - CPU : MediaTek Helio G99\nحافظه داخلی : 256 گیگابایت\nحافظه RAM : 8 گیگابایت\nسایز صفحه نمایش : 6.7 اینچ\nدوربین پشت : سه گانه 50 مگاپیکسل + 5 مگاپیکسل + 2 مگاپیکسل\nظرفیت باتری : 5000 میلی آمپر ساعت",
+      "in_stock": true,
+      "category_ids": [13, 1],
+      "images": [
+        {"src": "https://panel.naminet.co/images/thumbs/0000912_galaxy-a16-256gb-ram-8gb-vietnam.jpeg"},
+        {"src": "https://panel.naminet.co/images/thumbs/0001394_galaxy-a16-256gb-ram-8gb-vietnam.jpeg"}
+      ]
+    }
+  ]
+}
