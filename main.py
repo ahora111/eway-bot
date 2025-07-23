@@ -5,6 +5,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium_stealth import stealth
 import time
 import urllib3
 import shutil
@@ -51,60 +52,74 @@ def process_price(price_str):
 def get_product_links(category_url):
     """
     این تابع به صفحه دسته‌بندی محصولات میره و لینک تمام محصولات رو استخراج می‌کنه.
-    (نسخه بهبود یافته با انتظار هوشمند و اسکرول)
+    (نسخه بهبود یافته با selenium-stealth برای دور زدن مکانیزم‌های ضد-ربات)
     """
     print("در حال دریافت لینک محصولات از صفحه دسته‌بندی...")
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
+    options.add_argument("start-maximized")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    
     if shutil.which("google-chrome"):
          options.binary_location = shutil.which("google-chrome")
 
     driver = webdriver.Chrome(options=options)
+
+    # --- استفاده از selenium-stealth برای پنهان‌سازی ---
+    stealth(driver,
+            languages=["en-US", "en"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+            )
+    # --------------------------------------------------
     
     links = []
     try:
+        print("در حال باز کردن صفحه با هویت مخفی...")
         driver.get(category_url)
+        
         print("در انتظار بارگذاری کامل محصولات...")
         wait = WebDriverWait(driver, 20)
-        # منتظر می‌مانیم تا اولین باکس محصول با id شروع شونده با 'NAMI-' لود شود
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
-        print("محصولات اولیه بارگذاری شدند. در حال اسکرول برای بارگذاری همه محصولات...")
+        print("محصولات اولیه بارگذاری شدند. در حال اسکرول...")
 
-        # اسکرول کردن به پایین صفحه برای اطمینان از لود شدن همه محصولات (Lazy Loading)
         last_height = driver.execute_script("return document.body.scrollHeight")
-        while True:
+        for _ in range(3): # حداکثر 3 بار اسکرول می‌کنیم
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2) # صبر برای لود شدن محتوای جدید
+            time.sleep(3) 
             new_height = driver.execute_script("return document.body.scrollHeight")
             if new_height == last_height:
-                print("اسکرول به پایان رسید.")
                 break
             last_height = new_height
         
-        print("در حال استخراج لینک‌ها از سورس نهایی صفحه...")
+        print("اسکرول تمام شد. در حال استخراج لینک‌ها...")
         soup = BeautifulSoup(driver.page_source, "html.parser")
 
-        for product_box in soup.find_all("div", id=lambda x: x and x.startswith("NAMI-")):
-            link_tag = product_box.find("a", href=True)
-            if link_tag:
-                full_link = "https://naminet.co" + link_tag['href']
-                if full_link not in links:
-                    links.append(full_link)
+        product_elements = soup.select('div[id^="NAMI-"] a')
+        for link_tag in product_elements:
+            if link_tag and 'href' in link_tag.attrs:
+                href = link_tag['href']
+                if href.startswith('/p/'): # اطمینان از اینکه لینک محصول است
+                    full_link = "https://naminet.co" + href
+                    if full_link not in links:
+                        links.append(full_link)
 
     except Exception as e:
         print(f"❌ خطایی هنگام دریافت لینک‌ها رخ داد: {e}")
-        # برای دیباگ، سورس صفحه‌ای که سلنیوم دیده را ذخیره می‌کنیم
         with open("debug_page.html", "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-        print("سورس صفحه در فایل debug_page.html ذخیره شد تا بررسی کنید چرا محصولی پیدا نشده.")
+        print("سورس صفحه در فایل debug_page.html ذخیره شد.")
     finally:
         driver.quit()
 
     if not links:
-        print("❌ هیچ لینکی در صفحه پیدا نشد. ممکن است ساختار سایت تغییر کرده یا سایت در برابر ربات‌ها مقاوم باشد.")
+        print("❌ هیچ لینکی پیدا نشد. ممکن است ساختار سایت تغییر کرده یا مکانیزم ضد ربات بسیار قوی است.")
     else:
         print(f"✅ تعداد {len(links)} لینک محصول پیدا شد.")
     
@@ -124,9 +139,11 @@ def scrape_product_details(product_url):
 
     driver = webdriver.Chrome(options=options)
     
+    # برای این تابع هم می‌توان stealth را اضافه کرد تا محکم‌کاری شود
+    stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
+    
     try:
         driver.get(product_url)
-        # انتظار هوشمند برای لود شدن نام محصول
         WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'h1')))
         soup = BeautifulSoup(driver.page_source, "html.parser")
     finally:
@@ -187,9 +204,6 @@ def scrape_product_details(product_url):
     }
 
 def create_or_update_product(product_data):
-    """
-    این تابع اطلاعات محصول را به ووکامرس ارسال می‌کند (ایجاد یا آپدیت).
-    """
     sku = f"NAMIN-{product_data['name'].replace(' ', '-')}-{product_data['color'].replace(' ', '-')}"
     final_price = process_price(product_data['price'])
     if final_price == "0":
@@ -240,10 +254,6 @@ def create_or_update_product(product_data):
             print(f"❌ خطا در ایجاد محصول. Status: {r.status_code}, Response: {r.text}")
 
 def main():
-    if not shutil.which("google-chrome") and not shutil.which("chromium-browser") and not shutil.which("chrome"):
-        print("❌ مرورگر گوگل کروم نصب نیست. برای اجرای سلنیوم در حالت headless، نصب آن ضروری است.")
-        return
-
     category_url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
     
     product_links = get_product_links(category_url)
