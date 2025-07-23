@@ -97,6 +97,7 @@ def process_product(product):
     is_variable = False
     variations = []
     color_options = []
+    # استخراج ویژگی رنگ و وارییشن‌ها
     if "attributes" in product and product["attributes"]:
         for attr in product["attributes"]:
             if attr.get("product_attribute_name") == "رنگ" and attr.get("attribute_values"):
@@ -110,6 +111,9 @@ def process_product(product):
                         "attributes": [{"name": "رنگ", "option": v.get("name", "")}]
                     })
 
+    # استخراج سایر ویژگی‌ها از توضیحات کوتاه
+    other_attrs = extract_attributes(product.get('short_description', ''))
+
     if is_variable and variations:
         wc_data = {
             "name": product_name,
@@ -118,13 +122,15 @@ def process_product(product):
             "description": product.get('short_description', ''),
             "categories": [{"id": cid} for cid in product.get("category_ids", []) if cid],
             "images": [{"src": img.get("src", "")} for img in product.get("images", []) if img.get("src")],
-            "attributes": [{
-                "name": "رنگ",
-                "slug": "color",
-                "visible": True,
-                "variation": True,
-                "options": color_options
-            }] + extract_attributes(product.get('short_description', ''))
+            "attributes": [
+                {
+                    "name": "رنگ",
+                    "slug": "color",
+                    "visible": True,
+                    "variation": True,
+                    "options": color_options
+                }
+            ] + other_attrs
         }
         create_or_update_product(wc_data, variations)
     else:
@@ -139,7 +145,7 @@ def process_product(product):
             "categories": [{"id": cid} for cid in product.get("category_ids", []) if cid],
             "images": [{"src": img.get("src", "")} for img in product.get("images", []) if img.get("src")],
             "stock_status": "instock" if in_stock else "outofstock",
-            "attributes": extract_attributes(product.get('short_description', ''))
+            "attributes": other_attrs
         }
         create_or_update_product(wc_data)
 
