@@ -38,10 +38,10 @@ jobs:
           WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
         run: python main.py
 
-      # این مرحله فایل‌های دیباگ را در صورت شکست، آپلود می‌کند
+      # این مرحله فایل‌های دیباگ را با استفاده از نسخه جدید، در صورت شکست آپلود می‌کند
       - name: Upload debug artifacts
         if: failure()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4 # <<< اصلاحیه در این خط اعمال شد
         with:
           name: debug-files
           path: |
