@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -25,7 +25,7 @@ if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
     exit(1)
 # ---------------------------------
 
-# --- توابع محاسباتی و کمکی ---
+# --- توابع محاسباتی و کمکی (بدون تغییر) ---
 def is_number(s):
     try:
         float(s.replace(",", "").replace("٬", ""))
@@ -51,7 +51,6 @@ def process_price(price_str):
 def scrape_details_from_driver(driver):
     print("در حال استخراج جزئیات از صفحه فعلی...")
     try:
-        # منتظر می‌مانیم تا نام محصول (تگ h1) در صفحه محصول لود شود
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'h1')))
         soup = BeautifulSoup(driver.page_source, "html.parser")
     except TimeoutException:
@@ -62,6 +61,7 @@ def scrape_details_from_driver(driver):
         print(f"خطا در انتظار برای صفحه محصول: {e}")
         return None
 
+    # بقیه تابع استخراج بدون تغییر
     product_name_tag = soup.find("h1", class_="font-bold")
     product_name = product_name_tag.text.strip() if product_name_tag else "نامشخص"
     images = []
@@ -99,6 +99,7 @@ def scrape_details_from_driver(driver):
                 attributes.append({"name": attr_name, "visible": True, "variation": False, "options": [attr_value]})
     attributes.append({"name": "رنگ", "visible": True, "variation": False, "options": [color]})
     return {"name": product_name, "price": price, "color": color, "images": [{"src": img} for img in images], "attributes": attributes}
+
 
 def create_or_update_product(product_data):
     # این تابع بدون تغییر باقی می‌ماند
@@ -139,88 +140,110 @@ def create_or_update_product(product_data):
         if r.status_code == 201: print(f"✅ محصول '{data['name']}' ایجاد شد.")
         else: print(f"❌ خطا در ایجاد. Status: {r.status_code}, Response: {r.text}")
 
-def main():
-    category_url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
+
+def process_single_product(product_index, category_url):
+    """
+    این تابع مسئولیت کامل پردازش یک محصول را بر عهده دارد:
+    ایجاد درایور، رفتن به صفحه، کلیک، استخراج، و بستن درایور.
+    """
+    print("\n" + "="*50)
+    print(f"پردازش محصول شماره {product_index + 1}")
+    
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     if shutil.which("google-chrome"):
-         options.binary_location = shutil.which("google-chrome")
+        options.binary_location = shutil.which("google-chrome")
+
     driver = None
     try:
         driver = webdriver.Chrome(options=options)
         stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
         
-        # فقط یک بار تعداد محصولات را می‌شماریم
-        print("باز کردن صفحه دسته‌بندی برای شمارش محصولات...")
+        print("باز کردن صفحه دسته‌بندی...")
         driver.get(category_url)
-        wait = WebDriverWait(driver, 20)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
-        time.sleep(5)
         
-        last_height = driver.execute_script("return document.body.scrollHeight")
-        for _ in range(5):
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(3)
-            new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height: break
-            last_height = new_height
-
-        product_count = len(driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"]'))
-        if product_count == 0:
-            print("هیچ محصولی برای پردازش پیدا نشد.")
+        wait = WebDriverWait(driver, 20)
+        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
+        time.sleep(3)
+        
+        all_products = driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"]')
+        if product_index >= len(all_products):
+            print("ایندکس محصول خارج از محدوده است. این اتفاق نباید بیفتد.")
             return
 
-        print(f"تعداد {product_count} محصول برای پردازش پیدا شد. شروع حلقه...")
+        product_to_click = all_products[product_index]
         
-        for i in range(product_count):
-            print("\n" + "="*50)
-            print(f"پردازش محصول شماره {i+1} از {product_count}")
-            
-            # --- منطق جدید و پایدار ---
-            # 1. همیشه صفحه دسته‌بندی را از اول باز کن تا حالت تمیزی داشته باشیم
-            print("بارگذاری مجدد صفحه دسته‌بندی برای اطمینان از پایداری...")
-            driver.get(category_url)
-            wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
-            time.sleep(3) # وقفه برای اطمینان
-            
-            # 2. لیست محصولات را دوباره پیدا کن
-            all_products = driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"]')
-            if i >= len(all_products):
-                print("تعداد محصولات کمتر از انتظار بود. حلقه متوقف می‌شود.")
-                break
-                
-            product_to_click = all_products[i]
-            
-            try:
-                # 3. به سمت محصول اسکرول و با جاوااسکریپت کلیک کن
-                print("اسکرول و کلیک روی محصول...")
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", product_to_click)
-                time.sleep(1)
-                driver.execute_script("arguments[0].click();", product_to_click)
-                
-                # 4. استخراج اطلاعات از صفحه محصول (این تابع حالا خودش منتظر لود شدن می‌ماند)
-                product_details = scrape_details_from_driver(driver)
-                
-                if product_details:
-                    create_or_update_product(product_details)
-                
-            except Exception as e:
-                print(f"خطای غیرمنتظره در حلقه برای محصول {i+1}: {e}")
-                print("ادامه با محصول بعدی...")
-                continue
-    
+        print("اسکرول و کلیک روی محصول...")
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", product_to_click)
+        time.sleep(1)
+        driver.execute_script("arguments[0].click();", product_to_click)
+        
+        product_details = scrape_details_from_driver(driver)
+        if product_details:
+            create_or_update_product(product_details)
+
     except Exception as e:
-        print(f"❌ خطای اصلی در اجرای برنامه رخ داد: {e}")
+        print(f"❌ خطایی در پردازش محصول {product_index + 1} رخ داد: {e}")
         if driver:
-            driver.save_screenshot("main_error.png")
-            print("اسکرین‌شات خطا ذخیره شد.")
+            driver.save_screenshot(f"error_product_{product_index + 1}.png")
     finally:
         if driver:
             driver.quit()
-        print("\nفرآیند به پایان رسید.")
+            print(f"درایور برای محصول {product_index + 1} بسته شد.")
+
+
+def main():
+    category_url = "https://naminet.co/list/llp-13/%DA%AF%D9%88%D8%B4%DB%8C-%D8%B3%D8%A7%D9%85%D8%B3%D9%88%D9%86%DA%AF"
+    product_count = 0
+    
+    # مرحله 1: شمارش تعداد کل محصولات
+    print("شروع فاز ۱: شمارش محصولات...")
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    if shutil.which("google-chrome"):
+        options.binary_location = shutil.which("google-chrome")
+    
+    temp_driver = None
+    try:
+        temp_driver = webdriver.Chrome(options=options)
+        stealth(temp_driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", fix_hairline=True)
+        temp_driver.get(category_url)
+        WebDriverWait(temp_driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
+        time.sleep(5)
+        # اسکرول کامل برای اطمینان از لود شدن همه محصولات
+        last_height = temp_driver.execute_script("return document.body.scrollHeight")
+        for _ in range(7):
+            temp_driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(3)
+            new_height = temp_driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height: break
+            last_height = new_height
+        
+        product_count = len(temp_driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"]'))
+    except Exception as e:
+        print(f"خطا در فاز شمارش محصولات: {e}")
+    finally:
+        if temp_driver:
+            temp_driver.quit()
+    
+    if product_count == 0:
+        print("هیچ محصولی برای پردازش پیدا نشد. برنامه خاتمه می‌یابد.")
+        return
+        
+    print(f"فاز شمارش کامل شد. تعداد {product_count} محصول پیدا شد.")
+    
+    # مرحله 2: پردازش دونه به دونه محصولات
+    print("\nشروع فاز ۲: پردازش محصولات...")
+    for i in range(product_count):
+        process_single_product(i, category_url)
+
+    print("\nتمام محصولات پردازش شدند. فرآیند به پایان رسید.")
+
 
 if __name__ == "__main__":
     main()
