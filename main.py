@@ -24,7 +24,7 @@ if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
     exit(1)
 # ---------------------------------
 
-# --- توابع محاسباتی و کمکی (بدون تغییر) ---
+# --- توابع محاسباتی و کمکی ---
 def is_number(s):
     try:
         float(s.replace(",", "").replace("٬", ""))
@@ -49,7 +49,7 @@ def process_price(price_str):
 
 def get_product_links(category_url):
     """
-    نسخه نهایی با استخراج مستقیم لینک‌ها توسط سلنیوم برای دور زدن Shadow DOM یا دستکاری JS.
+    نسخه تشخیصی برای دیدن لینک‌های خام پیدا شده توسط سلنیوم.
     """
     print("در حال دریافت لینک محصولات از صفحه دسته‌بندی...")
     options = Options()
@@ -90,32 +90,30 @@ def get_product_links(category_url):
                 break
             last_height = new_height
         
-        # --- تغییر کلیدی: استخراج مستقیم با سلنیوم به جای BeautifulSoup ---
         print("اسکرول تمام شد. استخراج لینک‌ها مستقیماً با سلنیوم...")
         
-        # پیدا کردن همه تگ‌های a که داخل باکس محصول قرار دارند
         product_elements = driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"] a')
-        
         print(f"سلنیوم تعداد {len(product_elements)} عنصر لینک پیدا کرد.")
         
         links = []
+        # --- تغییر کلیدی برای دیباگ ---
+        print("\n--- شروع چاپ لینک‌های خام ---")
         for element in product_elements:
             try:
                 href = element.get_attribute('href')
-                # لینک‌ها معمولا به صورت کامل (absolute) توسط get_attribute برگردانده می‌شوند
-                if href and '/p/' in href:
+                print(f"DEBUG_HREF: {href}") # <<<<<< این خط لینک خام را چاپ می‌کند
+                if href and '/p/' in href: # فیلتر هنوز اینجاست
                     if href not in links:
                         links.append(href)
             except Exception as e:
-                # ممکن است عنصر در حین کار ناپدید شود (StaleElementReferenceException)
                 print(f"خطای جزئی در خواندن یک لینک: {e}")
                 continue
+        print("--- پایان چاپ لینک‌های خام ---\n")
 
     except Exception as e:
         print(f"❌ خطایی هنگام دریافت لینک‌ها رخ داد: {e}")
         if driver:
-            with open("debug_page.html", "w", encoding="utf-8") as f:
-                f.write(driver.page_source)
+            with open("debug_page.html", "w", encoding="utf-8") as f: f.write(driver.page_source)
             driver.save_screenshot("debug_screenshot.png")
             print("سورس صفحه و اسکرین‌شات برای دیباگ ذخیره شدند.")
         links = []
@@ -125,7 +123,7 @@ def get_product_links(category_url):
             driver.quit()
 
     if not links:
-        print("❌ هیچ لینکی پیدا نشد.")
+        print("❌ هیچ لینکی به لیست نهایی اضافه نشد (به دلیل عدم تطابق با فیلتر).")
     else:
         print(f"✅ تعداد {len(links)} لینک محصول پیدا شد.")
     
