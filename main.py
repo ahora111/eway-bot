@@ -25,7 +25,6 @@ if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
     exit(1)
 # ---------------------------------
 
-# --- توابع محاسباتی و کمکی ---
 def is_number(s):
     try:
         float(s.replace(",", "").replace("٬", ""))
@@ -46,42 +45,57 @@ def process_price(price_str):
         return str(int(round(new_price / 10000) * 10000))
     return "0"
 
-# --- توابع اصلی اسکریپت ---
-
-def scrape_details_from_driver(driver):
+def scrape_details_from_driver(driver, product_index):
     print("در حال استخراج جزئیات از صفحه فعلی...")
     try:
-        # --- اصلاح کلیدی: منتظر لود شدن نام محصول در صفحه جدید می‌مانیم ---
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, 'h1')))
         soup = BeautifulSoup(driver.page_source, "html.parser")
     except TimeoutException:
         print("❌ صفحه محصول در زمان مقرر لود نشد. از این محصول صرف نظر می‌شود.")
-        driver.save_screenshot("product_page_timeout.png")
+        driver.save_screenshot(f"product_page_timeout_{product_index}.png")
+        with open(f"product_page_timeout_{product_index}.html", "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
         return None
     except Exception as e:
         print(f"خطا در انتظار برای صفحه محصول: {e}")
         return None
 
+    # ذخیره سورس و اسکرین‌شات برای دیباگ
+    driver.save_screenshot(f"product_{product_index}.png")
+    with open(f"product_{product_index}.html", "w", encoding="utf-8") as f:
+        f.write(driver.page_source)
+
     product_name_tag = soup.find("h1", class_="font-bold")
+    if not product_name_tag:
+        print("❌ تگ نام محصول پیدا نشد.")
     product_name = product_name_tag.text.strip() if product_name_tag else "نامشخص"
+
     images = []
     gallery_div = soup.find("div", class_="flex flex-row-reverse gap-4")
+    if not gallery_div:
+        print("❌ گالری تصاویر پیدا نشد.")
     if gallery_div:
         for img in gallery_div.find_all("img"):
             img_url = img.get("src", "")
             if img_url and img_url not in images:
                 img_url = img_url.replace("/128/", "/1024/")
                 images.append(img_url)
+
     price = "0"
     price_tag = soup.find("span", class_="price actual-price")
-    if price_tag and price_tag.find("p"): price = price_tag.find("p").text.strip()
+    if not price_tag:
+        print("❌ تگ قیمت پیدا نشد.")
+    if price_tag and price_tag.find("p"):
+        price = price_tag.find("p").text.strip()
     if not is_number(price):
         price_p = soup.find("p", class_="text-left text-bold")
-        if price_p: price = price_p.text.strip()
+        if price_p:
+            price = price_p.text.strip()
     price = price.replace("تومان", "").replace("از", "").strip()
     if not is_number(price):
         print(f"⚠️ قیمت برای محصول {product_name} یافت نشد.")
         return None
+
     color = "نامشخص"
     for div in soup.find_all("div", class_="flex flex-row gap-2 font-semibold"):
         if "رنگ" in div.text:
@@ -89,6 +103,7 @@ def scrape_details_from_driver(driver):
             if len(color_tags) > 1:
                 color = color_tags[1].text.strip()
                 break
+
     attributes = []
     attr_container = soup.find("div", class_="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2")
     if attr_container:
@@ -98,10 +113,16 @@ def scrape_details_from_driver(driver):
                 attr_name, attr_value = attr_ps[0].text.strip(), attr_ps[1].text.strip()
                 attributes.append({"name": attr_name, "visible": True, "variation": False, "options": [attr_value]})
     attributes.append({"name": "رنگ", "visible": True, "variation": False, "options": [color]})
-    return {"name": product_name, "price": price, "color": color, "images": [{"src": img} for img in images], "attributes": attributes}
+
+    return {
+        "name": product_name,
+        "price": price,
+        "color": color,
+        "images": [{"src": img} for img in images],
+        "attributes": attributes
+    }
 
 def create_or_update_product(product_data):
-    # این تابع بدون تغییر باقی می‌ماند
     sku = f"NAMIN-{product_data['name'].replace(' ', '-')}-{product_data['color'].replace(' ', '-')}"
     final_price = process_price(product_data['price'])
     if final_price == "0":
@@ -159,6 +180,7 @@ def main():
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
         time.sleep(5)
         
+        # اسکرول تا لود کامل محصولات
         last_height = driver.execute_script("return document.body.scrollHeight")
         for _ in range(7):
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -178,43 +200,33 @@ def main():
             print("\n" + "="*50)
             print(f"پردازش محصول شماره {i+1} از {product_count}")
             try:
-                # --- اصلاح کلیدی: همیشه لیست محصولات را تازه می‌کنیم ---
                 all_products = driver.find_elements(By.CSS_SELECTOR, 'div[id^="NAMI-"]')
-                
                 if i >= len(all_products):
                     print("تعداد محصولات کمتر از انتظار بود. حلقه متوقف می‌شود.")
                     break
-                    
                 product_to_click = all_products[i]
-                
                 print("اسکرول و کلیک روی محصول...")
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", product_to_click)
                 time.sleep(1)
-                driver.execute_script("arguments[0].click();", product_to_click)
-                
-                product_details = scrape_details_from_driver(driver)
-                
+                # استفاده از اکشن‌چین برای کلیک مطمئن
+                from selenium.webdriver.common.action_chains import ActionChains
+                actions = ActionChains(driver)
+                actions.move_to_element(product_to_click).click().perform()
+                time.sleep(2)
+                product_details = scrape_details_from_driver(driver, i+1)
                 if product_details:
                     create_or_update_product(product_details)
-                
                 print("بازگشت به صفحه لیست محصولات...")
                 driver.back()
-                
-                # --- اصلاح کلیدی: منتظر می‌مانیم تا صفحه لیست دوباره قابل کلیک شود ---
                 wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
-                time.sleep(3) # وقفه اضافی برای پایداری بیشتر
-                
+                time.sleep(3)
             except Exception as e:
                 print(f"خطای غیرمنتظره در حلقه برای محصول {i+1}: {e}")
                 print("تلاش برای بازیابی با بارگذاری مجدد صفحه...")
-                try:
-                    driver.get(category_url)
-                    wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
-                    continue
-                except Exception as recovery_error:
-                    print(f"بازیابی ناموفق بود: {recovery_error}. برنامه متوقف می‌شود.")
-                    raise recovery_error # خطا را دوباره ایجاد کن تا برنامه متوقف شود
-    
+                driver.get(category_url)
+                wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
+                time.sleep(5)
+                continue
     except Exception as e:
         print(f"❌ خطای اصلی در اجرای برنامه رخ داد: {e}")
         if driver:
