@@ -53,7 +53,6 @@ def scrape_details_from_page(driver):
     soup = BeautifulSoup(driver.page_source, "html.parser")
     product_name_tag = soup.find("h1", class_="font-bold")
     product_name = product_name_tag.text.strip() if product_name_tag else "نامشخص"
-    # ... بقیه کد استخراج بدون تغییر ...
     images = []
     gallery_div = soup.find("div", class_="flex flex-row-reverse gap-4")
     if gallery_div:
@@ -97,7 +96,6 @@ def create_or_update_product(product_data):
         print(f"   قیمت نهایی برای محصول '{product_data['name']}' صفر است. ارسال نمی‌شود.")
         return
     print(f"   در حال بررسی محصول با SKU: {sku} ...")
-    # ... بقیه کد بدون تغییر ...
     check_url = f"{WC_API_URL}?sku={sku}"
     try:
         r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
@@ -188,7 +186,7 @@ def main():
                 print("   بازگشت به صفحه لیست...")
                 driver.back()
                 
-                # منتظر می‌مانیم تا صفحه لیست دوباره کاملا آماده شود
+                # --- اصلاح کلیدی: منتظر می‌مانیم تا صفحه لیست دوباره کاملا آماده شود ---
                 wait.until(EC.url_to_be(category_url))
                 wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'div[id^="NAMI-"]')))
                 time.sleep(2)
