@@ -33,7 +33,10 @@ jobs:
           WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
           WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
         run: python main.py
-
+        
+      - name: Install tqdm
+        run: pip install tqdm
+  
       - name: Upload debug artifacts (در صورت خطا)
         if: failure()
         uses: actions/upload-artifact@v4
