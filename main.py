@@ -75,8 +75,7 @@ def sync_categories():
         print("دریافت دسته‌بندی‌ها از سایت منبع ناموفق بود.")
         return None, []
     
-    # --- اصلاح کلیدی: لیست دسته‌بندی‌ها از کلید 'mega_menu' خوانده می‌شود ---
-    source_cats_raw = api_response.get('mega_menu', api_response if isinstance(api_response, list) else [])
+    source_cats_raw = api_response.get('mega_menu', [])
     
     all_source_cats = []
     def flatten_cats(categories, parent_id=0):
