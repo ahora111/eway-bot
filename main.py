@@ -47,7 +47,7 @@ def extract_categories_from_html(html):
         return []
 
     flat_list = []
-    seen_real_ids = set()
+    # seen_real_ids = set()  # حذف شد تا همه دسته‌ها ثبت شوند
 
     def recursive_extract(ul_tag, parent_id=None, level=0):
         categories = []
@@ -57,9 +57,11 @@ def extract_categories_from_html(html):
                 name = a.get_text(strip=True)
                 link = a.get('href')
                 real_id = extract_real_id_from_link(link)
-                if not name or not link or not real_id or real_id in seen_real_ids:
+                if not name or not link or not real_id:
                     continue
-                seen_real_ids.add(real_id)
+                # if real_id in seen_real_ids:
+                #     continue
+                # seen_real_ids.add(real_id)
                 cat = {
                     'id': real_id,  # ID واقعی سایت
                     'name': name,
@@ -82,9 +84,11 @@ def extract_categories_from_html(html):
             name = a.get_text(strip=True)
             link = a.get('href')
             real_id = extract_real_id_from_link(link)
-            if not name or not link or not real_id or real_id in seen_real_ids:
+            if not name or not link or not real_id:
                 continue
-            seen_real_ids.add(real_id)
+            # if real_id in seen_real_ids:
+            #     continue
+            # seen_real_ids.add(real_id)
             cat = {
                 'id': real_id,
                 'name': name,
