@@ -61,8 +61,6 @@ def get_and_parse_categories(session):
             print("❌ هیچ آیتم دسته‌بندی در HTML پیدا نشد.")
             return []
             
-        print(f"🔎 تعداد {len(all_menu_items)} آیتم منو پیدا شد. در حال پردازش...")
-        
         cats_map = {}
         for item in all_menu_items:
             cat_id_raw = item.get('id', '')
@@ -125,9 +123,8 @@ def get_products_from_category_page(session, category_id):
             current_page_product_ids = []
             for block in product_blocks:
                 try:
-                    is_available = 'noCount' not in block.get('class', [])
-                    if not is_available: continue
-
+                    if 'noCount' in block.get('class', []): continue
+                    
                     id_tag = block.select_one("a[data-productid]")
                     product_id = id_tag['data-productid'] if id_tag else None
                     if not product_id or product_id in seen_product_ids: continue
@@ -137,6 +134,7 @@ def get_products_from_category_page(session, category_id):
                     
                     name = (block.select_one(".goods-record-title").text.strip() if block.select_one(".goods-record-title") else None)
                     price_tag = block.select_one(".goods-record-price")
+                    price = "0"
                     if price_tag:
                         if price_tag.find('del'): price_tag.find('del').decompose()
                         price = re.sub(r'[^\d]', '', price_tag.text.strip()) or "0"
@@ -172,7 +170,7 @@ def get_products_from_category_page(session, category_id):
 def get_all_products(session, categories):
     """تمام محصولات را از تمام دسته‌بندی‌های انتخاب شده جمع‌آوری می‌کند."""
     all_products = {}
-    print("\n⏳ شروع فرآیند جمع‌آوری تمام محصولات از همه دسته‌بندی‌های انتخابی...")
+    print("\n⏳ شروع فرآیند جمع‌آوری تمام محصولات...")
     for category in tqdm(categories, desc="پردازش دسته‌بندی‌ها"):
         products_in_cat = get_products_from_category_page(session, category['id'])
         for product in products_in_cat:
@@ -186,9 +184,7 @@ def get_all_products(session, categories):
 # ==============================================================================
 def sort_cats_for_creation(flat_cats):
     """دسته‌بندی‌ها را برای ایجاد مرتب می‌کند (اول والد، بعد فرزند)."""
-    sorted_cats = []
-    id_to_cat = {cat["id"]: cat for cat in flat_cats}
-    visited = set()
+    sorted_cats, id_to_cat, visited = [], {cat["id"]: cat for cat in flat_cats}, set()
     def visit(cat):
         if cat["id"] in visited: return
         parent_id = cat.get("parent_id")
@@ -196,8 +192,7 @@ def sort_cats_for_creation(flat_cats):
             visit(id_to_cat[parent_id])
         sorted_cats.append(cat)
         visited.add(cat["id"])
-    for cat in flat_cats:
-        visit(cat)
+    for cat in flat_cats: visit(cat)
     return sorted_cats
 
 def get_wc_categories():
@@ -212,58 +207,49 @@ def get_wc_categories():
             wc_cats.extend(data)
             if len(data) < 100: break
             page += 1
-        except Exception as e:
-            print(f"❌ خطا در دریافت دسته‌بندی‌های ووکامرس: {e}")
-            break
+        except Exception as e: break
     return wc_cats
 
 def transfer_categories_to_wc(source_categories):
     """دسته‌بندی‌های انتخاب شده را به ووکامرس منتقل کرده و نقشه IDها را برمی‌گرداند."""
     print("\n⏳ انتقال دسته‌بندی‌ها به ووکامرس...")
     wc_cats = get_wc_categories()
-    wc_cats_map = {cat["name"].strip(): cat["id"] for cat in wc_cats}
+    wc_cats_map = {cat["name"].strip().lower(): cat["id"] for cat in wc_cats}
     source_to_wc_id_map = {}
     
-    sorted_source_cats = sort_cats_for_creation(source_categories)
-    
-    for cat in tqdm(sorted_source_cats, desc="انتقال دسته‌بندی‌ها"):
+    for cat in tqdm(sort_cats_for_creation(source_categories), desc="انتقال دسته‌بندی‌ها"):
         name = cat["name"].strip()
-        if name in wc_cats_map:
-            wc_id = wc_cats_map[name]
+        if name.lower() in wc_cats_map:
+            wc_id = wc_cats_map[name.lower()]
             source_to_wc_id_map[cat["id"]] = wc_id
         else:
             data = {"name": name}
             parent_id = cat.get("parent_id")
             if parent_id and parent_id in source_to_wc_id_map:
                 data["parent"] = source_to_wc_id_map[parent_id]
-            
             try:
                 res = requests.post(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
                 if res.status_code in [200, 201]:
                     new_id = res.json()["id"]
                     source_to_wc_id_map[cat["id"]] = new_id
-                    wc_cats_map[name] = new_id # اضافه کردن به نقشه برای استفاده فرزندان بعدی
-                else:
-                    print(f"❌ خطا در ساخت دسته‌بندی '{name}': {res.text}")
-            except Exception as e:
-                print(f"❌ خطای شبکه در ساخت دسته‌بندی '{name}': {e}")
-                
+                    wc_cats_map[name.lower()] = new_id
+                else: print(f"❌ خطا در ساخت '{name}': {res.text}")
+            except Exception as e: print(f"❌ خطای شبکه در ساخت '{name}': {e}")
     print("✅ انتقال دسته‌بندی‌ها کامل شد.")
     return source_to_wc_id_map
 
 def process_price(price_value):
     """فرمول محاسبه قیمت فروش بر اساس قیمت خرید."""
     try:
-        price_value = float(re.sub(r'[^\d.]', '', str(price_value))) * 1000 # اضافه کردن سه صفر
+        price_value = float(re.sub(r'[^\d.]', '', str(price_value))) * 1000
     except (ValueError, TypeError): return "0"
-    
     if price_value <= 1: return "0"
     elif price_value <= 7000000: new_price = price_value + 260000
     elif price_value <= 10000000: new_price = price_value * 1.035
     elif price_value <= 20000000: new_price = price_value * 1.025
     elif price_value <= 30000000: new_price = price_value * 1.02
     else: new_price = price_value * 1.015
-    return str(int(round(new_price, -4))) # رند کردن به نزدیک‌ترین ده هزار
+    return str(int(round(new_price, -4)))
 
 def _send_to_woocommerce(sku, data, stats):
     """محصول را در ووکامرس ایجاد یا آپدیت می‌کند."""
@@ -284,19 +270,13 @@ def _send_to_woocommerce(sku, data, stats):
             }
             res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=update_data, verify=False, timeout=20)
             if res.status_code == 200:
-                # --- اصلاح این قسمت ---
-                with stats['lock']:
-                    stats['updated'] += 1
-            else:
-                print(f"   ❌ خطا در آپدیت '{data['name']}'. Status: {res.status_code}")
+                with stats['lock']: stats['updated'] += 1
+            else: print(f"   ❌ خطا در آپدیت '{data['name']}'. Status: {res.status_code}")
         else:
             res = requests.post(f"{WC_API_URL}/products", auth=auth, json=data, verify=False, timeout=20)
             if res.status_code == 201:
-                # --- اصلاح این قسمت ---
-                with stats['lock']:
-                    stats['created'] += 1
-            else:
-                print(f"   ❌ خطا در ایجاد '{data['name']}'. Status: {res.status_code}")
+                with stats['lock']: stats['created'] += 1
+            else: print(f"   ❌ خطا در ایجاد '{data['name']}'. Status: {res.status_code}")
     except Exception as e:
         print(f"   ❌ خطای کلی در ارتباط با ووکامرس برای SKU {sku}: {e}")
 
@@ -329,31 +309,28 @@ def main():
 
     session = get_session()
     
-    # 1. دریافت و انتخاب دسته‌بندی‌ها
     source_categories = get_and_parse_categories(session)
-    if not source_categories: return
+    if source_categories is None: return
 
-    # در اینجا باید دسته‌بندی‌های مورد نظر را انتخاب کنید. برای تست، دو دسته را هاردکد می‌کنیم.
-    # در نسخه نهایی، می‌توانید از تابع get_selected_categories_flexible استفاده کنید.
-    # filtered_categories = get_selected_categories_flexible(source_categories)
+    # در اینجا دسته‌بندی‌های مورد نظر را انتخاب کنید.
+    # می‌توانید این بخش را برای خواندن از فایل یا متغیر محیطی فعال کنید.
     selected_ids = [4285, 16778] # مثال: ID برای گوشی و لپ‌تاپ
     filtered_categories = [c for c in source_categories if c['id'] in selected_ids]
-    print(f"\n✅ تست با دسته‌بندی‌های منتخب: {[c['name'] for c in filtered_categories]}")
-    if not filtered_categories: return
+    print(f"\n✅ دسته‌بندی‌های منتخب: {[c['name'] for c in filtered_categories]}")
+    if not filtered_categories:
+        print("❌ هیچکدام از دسته‌بندی‌های منتخب یافت نشدند.")
+        return
 
-    # 2. انتقال دسته‌بندی‌ها به ووکامرس و ساخت نقشه
     category_mapping = transfer_categories_to_wc(filtered_categories)
     if not category_mapping:
         print("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
         return
 
-    # 3. دریافت تمام محصولات
     products = get_all_products(session, filtered_categories)
     if not products:
         print("✅ هیچ محصولی برای پردازش یافت نشد. برنامه با موفقیت خاتمه می‌یابد.")
         return
 
-    # 4. پردازش و ارسال محصولات به ووکامرس
     stats = {'created': 0, 'updated': 0, 'lock': Lock()}
     print(f"\n🚀 شروع پردازش و ارسال {len(products)} محصول به ووکامرس...")
     with ThreadPoolExecutor(max_workers=5) as executor:
@@ -365,6 +342,7 @@ def main():
     print(f"🟢 ایجاد شده: {stats['created']}")
     print(f"🔵 آپدیت شده: {stats['updated']}")
     print("===============================\nتمام!")
+
 
 if __name__ == "__main__":
     main()
