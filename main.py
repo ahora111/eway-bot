@@ -120,55 +120,61 @@ def get_products_from_category_page(session, category_id):
                 
             soup = BeautifulSoup(response.text, 'lxml')
             
-            product_blocks = soup.select(".cat-body.row")
+            # --- سلکتور اصلاح شده و دقیق ---
+            product_blocks = soup.select(".goods_item.goods-record") 
+            
             if not product_blocks:
                 print("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی برای این دسته.")
                 break
 
             print(f"    - تعداد {len(product_blocks)} بلاک محصول پیدا شد.")
-            new_products_found = 0
+            new_products_found_in_page = 0
+            
             for block in product_blocks:
-                name_tag = block.select_one(".goods-item-title a span")
+                # بررسی موجودی: اگر کلاس 'noCount' وجود داشت، محصول ناموجود است.
+                is_available = 'noCount' not in block.get('class', [])
+                
+                if not is_available:
+                    continue # اگر ناموجود بود، از این محصول بگذر
+                    
+                name_tag = block.select_one(".goods-record-title")
                 name = name_tag.text.strip() if name_tag else None
                 
-                price_tag = block.select_one(".price")
-                price_text = "0"
-                if price_tag:
-                    # حذف قیمت قدیمی اگر وجود داشت
-                    if price_tag.find('del'):
-                        price_tag.find('del').decompose()
-                    price_text = price_tag.text.strip()
+                price_tag = block.select_one(".goods-record-price")
+                price_text = price_tag.text.strip() if price_tag else "0"
                 price = re.sub(r'[^\d]', '', price_text)
                 if not price: price = "0"
                 
-                img_tag = block.select_one("img")
+                # تصویر از اتریبیوت data-src خوانده می‌شود
+                img_tag = block.select_one("img.goods-record-image")
                 image_url = ""
-                if img_tag and 'src' in img_tag.attrs:
-                    image_url = img_tag['src']
+                if img_tag and 'data-src' in img_tag.attrs:
+                    image_url = img_tag['data-src']
                     if not image_url.startswith('http'):
+                        # آدرس پایه تصاویر را اضافه می‌کنیم
                         image_url = "https://staticcontent.eways.co" + image_url
                 
+                # ID محصول از اتریبیوت data-productid استخراج می‌شود
                 id_tag = block.select_one("a[data-productid]")
                 product_id = id_tag['data-productid'] if id_tag else None
+                
+                # موجودی دقیق در این صفحه نیست، فقط وضعیت موجود/ناموجود را داریم
+                stock = 1 # به عنوان پیشفرض ۱ میگذاریم چون موجود است
 
-                # استخراج موجودی. این سلکتور بسیار شکننده است.
-                stock_div = block.select(".col-lg-1.text-center.col-xs-6")
-                stock = stock_div[1].text.strip() if len(stock_div) > 1 else "0"
-
-                if product_id and name:
+                if product_id and name and int(price) > 0:
                     products.append({
                         "id": product_id,
                         "name": name,
-                        "price": price,
-                        "stock": int(re.sub(r'[^\d]', '', stock) or 0),
+                        "price": price.replace(",", ""), # حذف کاما از قیمت
+                        "stock": stock,
                         "image": image_url,
                         "category_id": category_id
                     })
-                    new_products_found += 1
+                    new_products_found_in_page += 1
             
-            # اگر در این صفحه محصولی پیدا نشد، احتمالا صفحه آخر بوده
-            if new_products_found == 0:
-                print("    - محصول جدیدی در این صفحه نبود، توقف.")
+            # اگر در این صفحه محصول جدیدی یافت نشد، یعنی به صفحه آخر رسیده‌ایم
+            if new_products_found_in_page == 0:
+                print("    - محصول موجود جدیدی در این صفحه نبود، توقف.")
                 break
 
             page_num += 1
