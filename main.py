@@ -54,7 +54,7 @@ def extract_attributes(short_description):
             })
     return attrs
 
-def create_or_update_product(wc_data, variations=None):
+def create_or_update_product(wc_data, variations=None, stats=None):
     sku = wc_data['sku']
     check_url = f"{WC_API_URL}?sku={sku}"
     try:
@@ -69,6 +69,8 @@ def create_or_update_product(wc_data, variations=None):
             res = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=wc_data)
             if res.status_code in [200, 201]:
                 print(f"   ✅ محصول آپدیت شد (ID: {product_id}).")
+                if stats is not None:
+                    stats['updated'] += 1
             else:
                 print(f"   ❌ خطا در آپدیت محصول. Status: {res.status_code}, Response: {res.text}")
         else:
@@ -77,6 +79,8 @@ def create_or_update_product(wc_data, variations=None):
             if res.status_code in [200, 201]:
                 product_id = res.json()['id']
                 print(f"   ✅ محصول ایجاد شد (ID: {product_id}).")
+                if stats is not None:
+                    stats['created'] += 1
             else:
                 print(f"   ❌ خطا در ایجاد محصول. Status: {res.status_code}, Response: {res.text}")
                 return
@@ -120,7 +124,7 @@ def get_all_products():
     print(f"\nکل محصولات دریافت شده: {len(all_products)}")
     return all_products
 
-def process_product(product):
+def process_product(product, stats):
     print(f"\n" + "="*50)
     product_name = product.get('name', 'بدون نام')
     product_id = product.get('id', product.get('sku', ''))
@@ -164,7 +168,7 @@ def process_product(product):
                 }
             ] + other_attrs
         }
-        create_or_update_product(wc_data, variations)
+        create_or_update_product(wc_data, variations, stats)
     else:
         price = product.get('price') or product.get('final_price_value') or 0
         in_stock = product.get('in_stock', True)
@@ -179,7 +183,7 @@ def process_product(product):
             "stock_status": "instock" if in_stock else "outofstock",
             "attributes": other_attrs
         }
-        create_or_update_product(wc_data)
+        create_or_update_product(wc_data, None, stats)
 
 def main():
     products = get_all_products()
@@ -187,17 +191,27 @@ def main():
     available = sum(1 for p in products if p.get('in_stock', True))
     unavailable = total - available
 
+    stats = {"created": 0, "updated": 0}
+
     print(f"\n🔎 تعداد کل محصولات شناسایی شده: {total}")
     print(f"✅ محصولات موجود: {available}")
     print(f"❌ محصولات ناموجود: {unavailable}\n")
 
     for product in products:
         try:
-            process_product(product)
+            process_product(product, stats)
         except Exception as e:
             print(f"   ❌ خطا در پردازش محصول: {e}")
         time.sleep(1)
-    print("\nتمام محصولات پردازش شدند. فرآیند به پایان رسید.")
+
+    print("\n===============================")
+    print(f"📦 تعداد کل محصولات: {total}")
+    print(f"✅ محصولات موجود: {available}")
+    print(f"❌ محصولات ناموجود: {unavailable}")
+    print(f"🟢 محصولات جدید ایجاد شده: {stats['created']}")
+    print(f"🔵 محصولات آپدیت شده: {stats['updated']}")
+    print("===============================")
+    print("تمام محصولات پردازش شدند. فرآیند به پایان رسید.")
 
 if __name__ == "__main__":
     main()
