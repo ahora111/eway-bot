@@ -7,6 +7,7 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
 from threading import Lock
+import sys
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -119,15 +120,37 @@ def print_categories_tree(categories, all_cats, indent=0):
             print_categories_tree(children, all_cats, indent+1)
 
 def get_selected_categories(source_categories):
-    roots = [cat for cat in source_categories if not cat.get('parent_id')]
-    print("\nلیست دسته‌بندی‌ها (ساختار درختی):\n")
-    print_categories_tree(roots, source_categories)
-    print("\nلطفاً ID دسته‌بندی‌هایی که می‌خواهید منتقل شوند را با کاما جدا وارد کنید (مثلاً: 12,15,22):")
-    selected_ids = input("ID ها: ").strip()
-    selected_ids = [int(x) for x in selected_ids.split(",") if x.strip().isdigit()]
+    # 1. ورودی از متغیر محیطی
+    selected_ids_env = os.environ.get("SELECTED_CATEGORY_IDS")
+    if selected_ids_env:
+        selected_ids = [int(x) for x in selected_ids_env.split(",") if x.strip().isdigit()]
+        print(f"\n✅ دسته‌بندی‌های انتخاب‌شده از متغیر محیطی: {selected_ids}")
+
+    # 2. ورودی از فایل متنی
+    elif os.path.exists("selected_ids.txt"):
+        with open("selected_ids.txt") as f:
+            selected_ids = [int(x) for x in f.read().strip().split(",") if x.strip().isdigit()]
+        print(f"\n✅ دسته‌بندی‌های انتخاب‌شده از فایل: {selected_ids}")
+
+    # 3. محیط تعاملی (فقط اگر stdin باز باشد)
+    elif sys.stdin.isatty():
+        roots = [cat for cat in source_categories if not cat.get('parent_id')]
+        print("\nلیست دسته‌بندی‌ها (ساختار درختی):\n")
+        print_categories_tree(roots, source_categories)
+        print("\nلطفاً ID دسته‌بندی‌هایی که می‌خواهید منتقل شوند را با کاما جدا وارد کنید (مثلاً: 12,15,22):")
+        selected_ids = input("ID ها: ").strip()
+        selected_ids = [int(x) for x in selected_ids.split(",") if x.strip().isdigit()]
+
+    # 4. هیچ ورودی معتبری نبود
+    else:
+        print("❌ هیچ ورودی معتبری برای انتخاب دسته‌بندی پیدا نشد (نه متغیر محیطی، نه فایل، نه محیط تعاملی). برنامه خاتمه می‌یابد.")
+        exit(1)
+
     if not selected_ids:
         print("❌ هیچ دسته‌بندی انتخاب نشد. برنامه خاتمه می‌یابد.")
         exit(1)
+
+    # جمع‌آوری همه زیرمجموعه‌ها
     def collect_with_children(cat_id, all_cats, result):
         result.add(cat_id)
         for c in all_cats:
@@ -352,6 +375,11 @@ def process_product_wrapper(args):
         print(f"   ❌ خطای جدی در پردازش محصول {product.get('id', '')}: {e}")
 
 def main():
+    print("برای انتخاب دسته‌بندی‌ها می‌توانید یکی از این روش‌ها را استفاده کنید:")
+    print("- متغیر محیطی SELECTED_CATEGORY_IDS (مثلاً: 2,6,129)")
+    print("- فایل selected_ids.txt (مثلاً: 2,6,129)")
+    print("- یا در محیط تعاملی، به صورت دستی وارد کنید.\n")
+
     if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
         print("❌ متغیرهای محیطی ووکامرس (WC_*) به درستی تنظیم نشده‌اند. برنامه متوقف می‌شود.")
         return
@@ -360,31 +388,26 @@ def main():
         return
 
     session = get_session()
-    # 1. دریافت دسته‌بندی‌ها
     source_categories, all_categories_tree = get_and_parse_categories(session)
     if not source_categories:
         print("❌ هیچ دسته‌بندی دریافت نشد. برنامه خاتمه می‌یابد.")
         return
 
-    # 2. انتخاب دسته‌بندی‌ها توسط کاربر
     filtered_categories = get_selected_categories(source_categories)
     if not filtered_categories:
         print("❌ هیچ دسته‌بندی برای انتقال انتخاب نشد. برنامه خاتمه می‌یابد.")
         return
 
-    # 3. انتقال دسته‌بندی‌ها به ووکامرس
     category_mapping = transfer_categories_to_wc(filtered_categories)
     if not category_mapping:
         print("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
         return
 
-    # 4. دریافت محصولات فقط از دسته‌بندی‌های انتخابی
     products = get_all_products(session, filtered_categories)
     if not products:
         print("❌ هیچ محصولی برای پردازش یافت نشد. برنامه خاتمه می‌یابد.")
         return
 
-    # 5. ارسال محصولات به ووکامرس
     stats = {'created': 0, 'updated': 0, 'lock': Lock()}
     total = len(products)
     print(f"\n🚀 شروع پردازش و ارسال {total} محصول به ووکامرس...")
