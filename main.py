@@ -66,7 +66,11 @@ def create_or_update_product(wc_data, variations=None):
             product_id = existing[0]['id']
             print(f"   محصول موجود است (ID: {product_id}). آپدیت...")
             update_url = f"{WC_API_URL}/{product_id}"
-            requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=wc_data)
+            res = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=wc_data)
+            if res.status_code in [200, 201]:
+                print(f"   ✅ محصول آپدیت شد (ID: {product_id}).")
+            else:
+                print(f"   ❌ خطا در آپدیت محصول. Status: {res.status_code}, Response: {res.text}")
         else:
             print(f"   محصول جدید است. ایجاد '{wc_data['name']}' ...")
             res = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=wc_data)
@@ -88,27 +92,59 @@ def create_or_update_product(wc_data, variations=None):
     except Exception as e:
         print(f"   ❌ خطا در ارتباط با ووکامرس: {e}")
 
+def get_all_products():
+    all_products = []
+    page = 1
+    while True:
+        url = f"{API_BASE_URL}/categories/{CATEGORY_ID}/products/?page={page}&pageSize=50"
+        headers = {
+            'User-Agent': 'Mozilla/5.0',
+            'Authorization': AUTH_TOKEN,
+            'Referer': REFERER_URL
+        }
+        try:
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as e:
+            print(f"   ❌ خطا در درخواست API به {url}: {e}")
+            break
+        products = data if isinstance(data, list) else data.get("products", [])
+        if not products:
+            break
+        all_products.extend(products)
+        print(f"صفحه {page}، تعداد محصولات این صفحه: {len(products)}")
+        if len(products) < 50:
+            break
+        page += 1
+    print(f"\nکل محصولات دریافت شده: {len(all_products)}")
+    return all_products
+
 def process_product(product):
     print(f"\n" + "="*50)
     product_name = product.get('name', 'بدون نام')
     product_id = product.get('id', product.get('sku', ''))
     print(f"پردازش محصول: {product_name} (ID: {product_id})")
 
+    # گرفتن وارییشن‌ها و ویژگی رنگ از API attr
+    attr_url = f"{API_BASE_URL}/products/attr/{product_id}"
+    attr_data = make_api_request(attr_url)
     is_variable = False
     variations = []
     color_options = []
-    if "attributes" in product and product["attributes"]:
-        for attr in product["attributes"]:
-            if attr.get("product_attribute_name") == "رنگ" and attr.get("attribute_values"):
+    if attr_data and isinstance(attr_data, list):
+        for v in attr_data:
+            if v.get("name") and v.get("price", 0) > 0:
                 is_variable = True
-                for v in attr["attribute_values"]:
-                    color_options.append(v.get("name", ""))
-                    variations.append({
-                        "sku": f"NAMIN-{product_id}-{v.get('id', '')}",
-                        "regular_price": process_price(v.get("price", 0)),
-                        "stock_status": "instock" if v.get("in_stock", True) else "outofstock",
-                        "attributes": [{"name": "رنگ", "option": v.get("name", "")}]
-                    })
+                color_options.append(v.get("name", ""))
+                variations.append({
+                    "sku": f"NAMIN-{product_id}-{v.get('id', '')}",
+                    "regular_price": process_price(v.get("price", 0)),
+                    "stock_status": "instock" if v.get("in_stock", True) else "outofstock",
+                    "attributes": [{"name": "Color", "option": v.get("name", "")}]
+                })
+
+    other_attrs = extract_attributes(product.get('short_description', ''))
 
     if is_variable and variations:
         wc_data = {
@@ -118,13 +154,15 @@ def process_product(product):
             "description": product.get('short_description', ''),
             "categories": [{"id": cid} for cid in product.get("category_ids", []) if cid],
             "images": [{"src": img.get("src", "")} for img in product.get("images", []) if img.get("src")],
-            "attributes": [{
-                "name": "رنگ",
-                "slug": "color",
-                "visible": True,
-                "variation": True,
-                "options": color_options
-            }] + extract_attributes(product.get('short_description', ''))
+            "attributes": [
+                {
+                    "name": "Color",
+                    "slug": "pa_color",
+                    "visible": True,
+                    "variation": True,
+                    "options": color_options
+                }
+            ] + other_attrs
         }
         create_or_update_product(wc_data, variations)
     else:
@@ -139,37 +177,14 @@ def process_product(product):
             "categories": [{"id": cid} for cid in product.get("category_ids", []) if cid],
             "images": [{"src": img.get("src", "")} for img in product.get("images", []) if img.get("src")],
             "stock_status": "instock" if in_stock else "outofstock",
-            "attributes": extract_attributes(product.get('short_description', ''))
+            "attributes": other_attrs
         }
         create_or_update_product(wc_data)
-
-def get_all_products():
-    all_products = []
-    page = 1
-    while True:
-        url = f"{API_BASE_URL}/categories/{CATEGORY_ID}/products/?page={page}&pageSize=50"
-        data = make_api_request(url)
-        if not data:
-            break
-        products = data if isinstance(data, list) else data.get("products", [])
-        if not products:
-            break
-        all_products.extend(products)
-        print(f"صفحه {page}، تعداد محصولات این صفحه: {len(products)}")
-        if len(products) < 50:
-            break
-        page += 1
-    print(f"\nکل محصولات دریافت شده: {len(all_products)}")
-    return all_products
 
 def main():
     products = get_all_products()
     total = len(products)
-    available = sum(1 for p in products if p.get('in_stock', True))
-    unavailable = total - available
-    print(f"\n🔎 تعداد کل محصولات شناسایی شده: {total}")
-    print(f"✅ محصولات موجود: {available}")
-    print(f"❌ محصولات ناموجود: {unavailable}\n")
+    print(f"\n🔎 تعداد کل محصولات شناسایی شده: {total}\n")
     for product in products:
         try:
             process_product(product)
