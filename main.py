@@ -56,7 +56,6 @@ def make_api_request(url, params=None, is_wc=False):
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        # برای دیباگ بهتر، متن پاسخ خطا را هم برمی‌گردانیم
         error_response = {}
         if e.response is not None:
             try:
@@ -96,38 +95,30 @@ def get_all_source_categories():
     """تمام دسته‌بندی‌ها را از سایت مبدا واکشی می‌کند."""
     url = f"{Config.API_BASE_URL}/categories/"
     print("۱. در حال دریافت لیست تمام دسته‌بندی‌ها از سایت مبدا...")
-    print(f"   - آدرس در حال فراخوانی: {url}") # DEBUG: نمایش آدرس دقیق
-
+    
     data = make_api_request(url)
 
-    # --- بخش دیباگ برای شناسایی مشکل ---
-    print("\n--- شروع دیباگ پاسخ API دسته‌بندی‌ها ---")
-    print(f"نوع داده دریافتی: {type(data)}")
-    print(f"محتوای داده دریافتی: {data}")
-    print("--- پایان دیباگ پاسخ API دسته‌بندی‌ها ---\n")
-    # ------------------------------------
-    
-    # اگر در درخواست خطا رخ داده باشد
     if isinstance(data, dict) and 'error' in data:
-        print(f"❌ خطای جدی در دریافت دسته‌بندی‌ها: {data['error']}")
-        print(f"   - پاسخ دریافتی از سرور: {data.get('response_body')}")
+        print(f"❌ خطای جدی در حین درخواست دسته‌بندی‌ها: {data['error']}")
         return []
 
-    # بررسی هوشمندانه تر ساختار پاسخ
-    if not isinstance(data, list):
-        error_msg = 'پاسخ دریافتی یک لیست معتبر (list) نیست.'
-        if isinstance(data, dict):
-            # اگر پاسخ یک دیکشنری است، شاید پیام خطا داخل آن باشد
-            error_msg += f" محتوای دیکشنری: {data.get('message', str(data))}"
-        print(f"❌ خطای جدی در دریافت دسته‌بندی‌ها: {error_msg}")
+    # **اصلاح کلیدی:** لیست دسته‌بندی‌ها از کلید 'categories' استخراج می‌شود
+    categories_list = []
+    if isinstance(data, dict) and 'categories' in data and isinstance(data['categories'], list):
+        categories_list = data['categories']
+    else:
+        print(f"❌ خطای ساختاری: پاسخ API دسته‌بندی‌ها نامعتبر است. محتوای دریافتی: {data}")
         return []
 
-    if not data:
-        print("⚠️ هشدار: لیستی از دسته‌بندی‌ها دریافت شد اما خالی است.")
+    if not categories_list:
+        print("⚠️ هشدار: هیچ دسته‌بندی در پاسخ API یافت نشد.")
         return []
 
-    category_ids = [cat['id'] for cat in data if 'id' in cat]
-    print(f"✅ {len(category_ids)} دسته‌بندی برای پردازش پیدا شد.")
+    # بهینه‌سازی: فقط دسته‌بندی‌های منتشر شده ('published': True) را پردازش می‌کنیم
+    published_categories = [cat for cat in categories_list if cat.get('published')]
+    category_ids = [cat['id'] for cat in published_categories if 'id' in cat]
+
+    print(f"✅ {len(categories_list)} دسته‌بندی در کل یافت شد. {len(category_ids)} دسته‌بندی 'منتشر شده' برای پردازش انتخاب شد.")
     return category_ids
 
 
@@ -139,10 +130,14 @@ def get_products_from_category(category_id):
     while True:
         params = {'page': page, 'pageSize': 100}
         data = make_api_request(url_template, params=params)
-        if not data or 'error' in data or not data.get("products"):
+        # محصولات نیز ممکن است داخل یک کلید باشند، این ساختار را بررسی می‌کنیم
+        products_in_page = []
+        if isinstance(data, dict) and 'products' in data:
+            products_in_page = data.get("products", [])
+        
+        if not data or 'error' in data or not products_in_page:
             break
         
-        products_in_page = data["products"]
         products.extend(products_in_page)
         
         if len(products_in_page) < 100: break
@@ -212,7 +207,8 @@ def prepare_product_data(product, variations_data):
     sku = f"NAMIN-{product.get('sku', product_id)}"
     base_data = {
         "name": product.get('name', 'بدون نام'), "sku": sku,
-        "description": product.get('short_description', ''),
+        "description": product.get('description', ''), # استفاده از description اصلی برای جزئیات کامل
+        "short_description": product.get('short_description', ''),
         "categories": [{"id": cat_id} for cat_id in product.get('category_ids', []) if cat_id],
         "images": [{"src": img.get("src")} for img in product.get("images", []) if img.get("src")],
         "attributes": parse_attributes_from_description(product.get('short_description', ''))
@@ -312,18 +308,20 @@ def main():
     if not validate_config():
         exit(1)
 
+    # مرحله ۱: واکشی دسته‌بندی‌های منتشر شده
     category_ids = get_all_source_categories()
     if not category_ids:
-        print("هیچ دسته‌بندی برای پردازش یافت نشد. پایان کار.")
+        print("هیچ دسته‌بندی فعالی برای پردازش یافت نشد. پایان کار.")
         return
     
+    # مرحله ۲: واکشی محصولات
     source_products = get_all_products_concurrently(category_ids)
     if not source_products:
         print("هیچ محصولی برای پردازش یافت نشد. پایان کار.")
         return
         
+    # مراحل بعدی...
     variations_map = fetch_variations_concurrently(source_products)
-    
     existing_wc_products = get_existing_woocommerce_products()
 
     print("\n۵. در حال آماده‌سازی داده‌ها برای ارسال به ووکامرس...")
@@ -332,19 +330,15 @@ def main():
     stats = {'created': 0, 'updated': 0, 'skipped': 0, 'failed': 0}
 
     for product in tqdm(source_products, desc="Preparing Products"):
-        is_simple_available = 'variations' not in product and product.get('in_stock', True) and product.get('price', 0) > 0
-        has_variations = product.get('id') in variations_map and variations_map[product.get('id')]
-        
-        # محصول متغیر زمانی در دسترس است که حداقل یک متغیر موجود داشته باشد
-        is_variable_available = has_variations and any(
-            var.get("in_stock") and var.get("price", 0) > 0 for var in variations_map[product.get('id')]
-        )
+        variations_data = variations_map.get(product.get('id'))
+        is_simple_available = not variations_data and product.get('in_stock', True) and product.get('price', 0) > 0
+        is_variable_available = variations_data and any(v.get("in_stock") and v.get("price", 0) > 0 for v in variations_data)
         
         if not (is_simple_available or is_variable_available):
             stats['skipped'] += 1
             continue
             
-        product_data, variations = prepare_product_data(product, variations_map.get(product.get('id')))
+        product_data, variations = prepare_product_data(product, variations_data)
         sku = product_data['sku']
         
         if variations:
