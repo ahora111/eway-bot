@@ -4,6 +4,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
 
 # غیرفعال کردن هشدار SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -18,7 +19,6 @@ if not all([WC_API_URL_BASE, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
     exit(1)
 
 WC_PRODUCTS_API_URL = f"{WC_API_URL_BASE}/products"
-WC_CAT_API_URL = f"{WC_API_URL_BASE}/products/categories"
 # ---------------------------------
 
 # --- اطلاعات API سایت هدف ---
@@ -40,8 +40,8 @@ def make_api_request(url, params=None):
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        print(f"   ❌ خطا در درخواست API به {url}: {e}")
-        return None
+        # در حالت موازی، خطا را برمی‌گردانیم تا مدیریت شود
+        return {'error': str(e)}
 
 def process_price(price_value):
     try:
@@ -73,10 +73,10 @@ def get_all_products(category_id):
     while True:
         print(f"در حال دریافت صفحه {page} از محصولات دسته‌بندی {category_id}...")
         url = PRODUCTS_LIST_URL_TEMPLATE.format(category_id=category_id)
-        params = {'page': page, 'pageSize': 100} # افزایش اندازه صفحه برای کاهش تعداد درخواست‌ها
+        params = {'page': page, 'pageSize': 100}
         data = make_api_request(url, params=params)
         
-        if data is None: break
+        if not data or 'error' in data: break
         
         products_in_page = data.get("products", [])
         if not products_in_page:
@@ -92,9 +92,6 @@ def get_all_products(category_id):
     return all_products
 
 def fetch_variation_data_concurrently(products):
-    """
-    اطلاعات متغیرها را برای همه محصولات به صورت موازی دریافت می‌کند.
-    """
     product_variations = {}
     with ThreadPoolExecutor(max_workers=10) as executor:
         future_to_product = {
@@ -102,25 +99,24 @@ def fetch_variation_data_concurrently(products):
             for p in products if p.get('id')
         }
         
-        print(f"\nدر حال دریافت موازی اطلاعات متغیرها برای {len(products)} محصول...")
-        for future in as_completed(future_to_product):
+        # استفاده از tqdm برای نمایش نوار پیشرفت
+        print("\nدر حال دریافت موازی اطلاعات متغیرها...")
+        for future in tqdm(as_completed(future_to_product), total=len(products), desc="Fetching Variations"):
             product_id = future_to_product[future]
-            try:
-                product_variations[product_id] = future.result()
-            except Exception as exc:
-                print(f'محصول ID {product_id} در گرفتن متغیرها با خطا مواجه شد: {exc}')
+            result = future.result()
+            if result and 'error' not in result:
+                product_variations[product_id] = result
     
     return product_variations
 
 def send_batch_to_woocommerce(batch_data, stats):
-    """
-    محصولات را به صورت دسته‌ای به ووکامرس ارسال می‌کند.
-    """
     if not any(batch_data.values()):
-        print("هیچ محصولی برای ارسال دسته‌ای وجود ندارد.")
-        return
+        print("\nهیچ محصولی برای ارسال دسته‌ای وجود ندارد.")
+        return {}
 
-    print(f"\nدر حال ارسال دسته‌ای {len(batch_data.get('create', []))} محصول جدید و {len(batch_data.get('update', []))} محصول برای آپدیت...")
+    create_count = len(batch_data.get('create', []))
+    update_count = len(batch_data.get('update', []))
+    print(f"\nدر حال ارسال دسته‌ای {create_count} محصول جدید و {update_count} محصول برای آپدیت...")
     try:
         res = requests.post(f"{WC_PRODUCTS_API_URL}/batch", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=batch_data, verify=False)
         res.raise_for_status()
@@ -129,8 +125,7 @@ def send_batch_to_woocommerce(batch_data, stats):
         stats['created'] += len(response_data.get('create', []))
         stats['updated'] += len(response_data.get('update', []))
         
-        print(f"✅ عملیات دسته‌ای با موفقیت انجام شد.")
-        # برگرداندن نقشه SKU به ID برای آپدیت متغیرها
+        print(f"✅ عملیات دسته‌ای محصولات اصلی با موفقیت انجام شد.")
         all_processed = response_data.get('create', []) + response_data.get('update', [])
         return {item['sku']: item['id'] for item in all_processed if 'sku' in item and 'id' in item}
     except Exception as e:
@@ -140,33 +135,36 @@ def send_batch_to_woocommerce(batch_data, stats):
         return {}
 
 def process_and_send_variations(wc_product_map, variations_map, stats):
-    """
-    متغیرها را برای محصولات ایجاد یا آپدیت شده، ارسال می‌کند.
-    """
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    tasks = []
+    for sku, product_id in wc_product_map.items():
+        if sku in variations_map and variations_map[sku]:
+            tasks.append({'id': product_id, 'sku': sku, 'variations': variations_map[sku]})
+    
+    if not tasks: return
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        print("\nدر حال ثبت/آپدیت متغیرها به صورت موازی...")
         futures = []
-        for sku, product_id in wc_product_map.items():
-            if sku in variations_map and variations_map[sku]:
-                variations = variations_map[sku]
-                print(f"   زمان‌بندی آپدیت {len(variations)} متغیر برای محصول ID: {product_id} (SKU: {sku})")
-                
-                # برای هر محصول، یک وظیفه جداگانه ارسال می‌کنیم
-                variations_url = f"{WC_PRODUCTS_API_URL}/{product_id}/variations/batch"
-                batch_data = {"create": variations} # همیشه از create استفاده می‌کنیم چون قبلی‌ها پاک شده‌اند
-                
-                # ابتدا متغیرهای قدیمی را پاک می‌کنیم
-                requests.post(variations_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json={"delete": [v['id'] for v in requests.get(f"{WC_PRODUCTS_API_URL}/{product_id}/variations", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET)).json()]}, verify=False)
-
+        for task in tasks:
+            variations_url = f"{WC_PRODUCTS_API_URL}/{task['id']}/variations/batch"
+            
+            # ابتدا متغیرهای قدیمی را پاک می‌کنیم
+            delete_ids = [v['id'] for v in requests.get(f"{WC_PRODUCTS_API_URL}/{task['id']}/variations", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False).json()]
+            if delete_ids:
+                requests.post(variations_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json={"delete": delete_ids}, verify=False)
+            
+            # متغیرهای جدید را در دسته‌های کوچک ارسال می‌کنیم
+            for i in range(0, len(task['variations']), 20):
+                batch_data = {"create": task['variations'][i:i+20]}
                 futures.append(executor.submit(requests.post, variations_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=batch_data, verify=False))
-
-        for future in as_completed(futures):
+        
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Sending Variations"):
             try:
                 res = future.result()
                 if res.status_code not in [200, 201]:
-                    print(f"   ❌ خطا در ثبت دسته متغیرها. Status: {res.status_code}, Response: {res.text}")
+                    print(f"\n   ❌ خطا در ثبت دسته متغیرها. Status: {res.status_code}, Response: {res.text}")
             except Exception as e:
-                 print(f"   ❌ خطای شبکه در هنگام ثبت متغیرها: {e}")
-
+                 print(f"\n   ❌ خطای شبکه در هنگام ثبت متغیرها: {e}")
 
 def main():
     start_time = time.time()
@@ -176,12 +174,9 @@ def main():
         
     variations_map_by_id = fetch_variation_data_concurrently(products_summary)
     
-    batch_to_create = []
-    batch_to_update = []
-    variations_to_process = {}
+    batch_to_create, batch_to_update, variations_to_process = [], [], {}
     stats = {'created': 0, 'updated': 0, 'skipped': 0, 'failed': 0}
 
-    # دریافت تمام SKU های موجود در ووکامرس برای مقایسه
     print("\nدر حال دریافت SKU های موجود از ووکامرس...")
     existing_skus = {}
     page = 1
@@ -194,7 +189,8 @@ def main():
         page += 1
     print(f"تعداد {len(existing_skus)} SKU موجود پیدا شد.")
 
-    for product in products_summary:
+    print("\nدر حال آماده‌سازی داده‌ها برای ارسال...")
+    for product in tqdm(products_summary, desc="Preparing Products"):
         if not (product.get('in_stock', True) and product.get('price', 0) > 0):
             stats['skipped'] += 1
             continue
@@ -220,14 +216,13 @@ def main():
                     })
 
         other_attrs = parse_attributes_from_description(product.get('short_description', ''))
-        
         sku = f"NAMIN-{product.get('sku', product_id)}"
         
         if variations:
             wc_data = {
                 "name": product_name, "type": "variable", "sku": sku,
                 "description": product.get('short_description', ''),
-                "categories": [{"id": 13}],
+                "categories": [{"id": cat_id} for cat_id in product.get('category_ids', []) if cat_id],
                 "images": [{"src": img.get("src", "")} for img in product.get("images", [])],
                 "attributes": [{"name": "رنگ", "visible": True, "variation": True, "options": sorted(list(color_options))}] + other_attrs,
                 "default_attributes": [{"name": "رنگ", "option": sorted(list(color_options))[0]}] if color_options else []
@@ -238,7 +233,7 @@ def main():
                 "name": product_name, "type": "simple", "sku": sku,
                 "regular_price": process_price(product.get('price', 0)),
                 "description": product.get('short_description', ''),
-                "categories": [{"id": 13}],
+                "categories": [{"id": cat_id} for cat_id in product.get('category_ids', []) if cat_id],
                 "images": [{"src": img.get("src", "")} for img in product.get("images", [])],
                 "stock_status": "instock", "attributes": other_attrs
             }
@@ -249,10 +244,8 @@ def main():
         else:
             batch_to_create.append(wc_data)
 
-    # ارسال دسته‌ای محصولات
     wc_product_map = send_batch_to_woocommerce({'create': batch_to_create, 'update': batch_to_update}, stats)
     
-    # ارسال متغیرها برای محصولات ایجاد/آپدیت شده
     if wc_product_map:
         process_and_send_variations(wc_product_map, variations_to_process, stats)
 
