@@ -21,12 +21,10 @@ if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
 
 # --- اطلاعات API سایت هدف ---
 API_BASE_URL = "https://panel.naminet.co/api"
-CATEGORY_ID = 1
-PRODUCTS_LIST_URL_TEMPLATE = f"{API_BASE_URL}/categories/{CATEGORY_ID}/products/"
-PRODUCT_ATTRIBUTES_API_URL_TEMPLATE = f"{API_BASE_URL}/products/attr/{{product_id}}"
 AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
 REFERER_URL = "https://naminet.co/"
 SOURCE_CATS_API = "https://panel.naminet.co/api/categories/"
+PRODUCT_ATTRIBUTES_API_URL_TEMPLATE = f"{API_BASE_URL}/products/attr/{{product_id}}"
 # ---------------------------------------------
 
 def make_api_request(url, params=None):
@@ -60,8 +58,8 @@ def flatten_cats(tree, flat=None, parent_id=None):
         flat = []
     for cat in tree:
         if not isinstance(cat, dict):
-            continue  # اگر آیتم دیکشنری نبود، رد کن
-        cat = dict(cat)  # کپی برای تغییر
+            continue
+        cat = dict(cat)
         if parent_id:
             cat["parent_category_id"] = parent_id
         flat.append(cat)
@@ -138,7 +136,6 @@ def create_wc_category(cat, wc_cats_map, source_to_wc_id_map):
 def transfer_categories():
     print("⏳ دریافت دسته‌بندی‌های منبع ...")
     source_tree = get_source_categories()
-    # اگر خروجی یک دیکشنری است و کلید categories دارد:
     if isinstance(source_tree, dict) and 'categories' in source_tree:
         source_tree = source_tree['categories']
     print("تعداد دسته‌بندی سطح اول:", len(source_tree))
@@ -167,9 +164,31 @@ def transfer_categories():
                 source_to_wc_id_map[cat["id"]] = new_id
 
     print("\n✅ انتقال دسته‌بندی‌ها کامل شد.")
-    return source_to_wc_id_map
+    return source_to_wc_id_map, flat_cats
 
-# ----------------------------------------------------------
+# ------------------ جمع‌آوری همه محصولات کل سایت ------------------
+
+def get_all_products_all_categories(flat_cats):
+    all_products = {}
+    for cat in flat_cats:
+        cat_id = cat['id']
+        print(f"در حال دریافت محصولات دسته {cat['name']} (id={cat_id}) ...")
+        page = 1
+        while True:
+            url = f"{API_BASE_URL}/categories/{cat_id}/products/"
+            params = {'page': page, 'pageSize': 100}
+            data = make_api_request(url, params=params)
+            if not data or not data.get("products"):
+                break
+            for p in data["products"]:
+                all_products[p['id']] = p  # با id یکتا ذخیره می‌کنیم تا تکراری نشه
+            if len(data["products"]) < 100:
+                break
+            page += 1
+    print(f"کل محصولات یکتا دریافت شده: {len(all_products)}")
+    return list(all_products.values())
+
+# ------------------ ادامه کد محصولات (همانند قبل) ------------------
 
 def process_price(price_value):
     try:
@@ -352,30 +371,6 @@ def process_product(product, stats, category_mapping):
         else:
             print(f"   محصول ساده قیمت ندارد یا ناموجود است. نادیده گرفته شد.")
 
-def get_all_products():
-    all_products = []
-    page = 1
-    while True:
-        print(f"در حال دریافت صفحه {page} از لیست محصولات...")
-        params = {'page': page, 'pageSize': 100}
-        data = make_api_request(PRODUCTS_LIST_URL_TEMPLATE, params=params)
-        
-        if data is None: break
-        
-        products_in_page = data.get("products", [])
-        if not products_in_page:
-            print("صفحه آخر دریافت شد.")
-            break
-        
-        all_products.extend(products_in_page)
-        print(f"تعداد {len(products_in_page)} محصول از صفحه {page} دریافت شد.")
-        
-        if len(products_in_page) < 100: break
-        page += 1
-        
-    print(f"\nدریافت اطلاعات از API کامل شد. کل محصولات دریافت شده: {len(all_products)}")
-    return all_products
-
 def process_product_wrapper(args):
     product, stats, category_mapping = args
     try:
@@ -386,12 +381,12 @@ def process_product_wrapper(args):
 
 def main():
     # انتقال دسته‌بندی‌ها
-    category_mapping = transfer_categories()
+    category_mapping, flat_cats = transfer_categories()
     print("نگاشت id منبع به id ووکامرس:")
     print(category_mapping)
-    print("\n⏳ انتقال محصولات ...")
+    print("\n⏳ جمع‌آوری همه محصولات کل سایت ...")
 
-    products = get_all_products()
+    products = get_all_products_all_categories(flat_cats)
     if not products:
         print("هیچ محصولی برای پردازش یافت نشد. برنامه خاتمه می‌یابد.")
         return
@@ -402,8 +397,8 @@ def main():
     
     stats = {'created': 0, 'updated': 0}
     
-    print(f"\n🔎 تعداد کل گروه‌های محصول شناسایی شده: {total}")
-    print(f"✅ گروه‌های محصول موجود و با قیمت: {available}\n")
+    print(f"\n🔎 تعداد کل محصولات یکتا شناسایی شده: {total}")
+    print(f"✅ محصولات موجود و با قیمت: {available}\n")
     
     with ThreadPoolExecutor(max_workers=5) as executor:
         list(tqdm(executor.map(process_product_wrapper, [(p, stats, category_mapping) for p in products]), total=len(products), desc="در حال پردازش محصولات", unit="محصول"))
