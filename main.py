@@ -112,53 +112,62 @@ def get_and_parse_categories(session):
         print(f"✅ تعداد {len(flat_list)} دسته‌بندی استخراج شد.")
     return flat_list, all_categories
 
-def print_categories_tree(categories, all_cats, indent=0):
-    for cat in categories:
-        print('  ' * indent + f"[{cat['id']}] {cat['name']}")
-        children = [c for c in all_cats if c.get('parent_id') == cat['id']]
-        if children:
-            print_categories_tree(children, all_cats, indent+1)
+def get_selected_categories_flexible(source_categories):
+    # چاپ لیست دسته‌بندی‌ها با ID و نام
+    def print_tree(categories, all_cats, indent=0):
+        for cat in categories:
+            print('  ' * indent + f"[{cat['id']}] {cat['name']}")
+            children = [c for c in all_cats if c.get('parent_id') == cat['id']]
+            if children:
+                print_tree(children, all_cats, indent+1)
 
-def get_selected_categories(source_categories):
-    # 1. ورودی از متغیر محیطی
-    selected_ids_env = os.environ.get("SELECTED_CATEGORY_IDS")
-    if selected_ids_env:
-        selected_ids = [int(x) for x in selected_ids_env.split(",") if x.strip().isdigit()]
-        print(f"\n✅ دسته‌بندی‌های انتخاب‌شده از متغیر محیطی: {selected_ids}")
+    roots = [cat for cat in source_categories if not cat.get('parent_id')]
+    print("\nلیست دسته‌بندی‌ها (ساختار درختی):\n")
+    print_tree(roots, source_categories)
 
-    # 2. ورودی از فایل متنی
-    elif os.path.exists("selected_ids.txt"):
-        with open("selected_ids.txt") as f:
-            selected_ids = [int(x) for x in f.read().strip().split(",") if x.strip().isdigit()]
-        print(f"\n✅ دسته‌بندی‌های انتخاب‌شده از فایل: {selected_ids}")
+    # ورودی از متغیر محیطی
+    selected_env = os.environ.get("SELECTED_CATEGORIES")
+    if selected_env:
+        selected_raw = [x.strip() for x in selected_env.split(",") if x.strip()]
+        print(f"\n✅ دسته‌بندی‌های انتخاب‌شده از متغیر محیطی: {selected_raw}")
 
-    # 3. محیط تعاملی (فقط اگر stdin باز باشد)
+    # ورودی از فایل متنی
+    elif os.path.exists("selected_categories.txt"):
+        with open("selected_categories.txt") as f:
+            selected_raw = [x.strip() for x in f.read().strip().split(",") if x.strip()]
+        print(f"\n✅ دسته‌بندی‌های انتخاب‌شده از فایل: {selected_raw}")
+
+    # محیط تعاملی
     elif sys.stdin.isatty():
-        roots = [cat for cat in source_categories if not cat.get('parent_id')]
-        print("\nلیست دسته‌بندی‌ها (ساختار درختی):\n")
-        print_categories_tree(roots, source_categories)
-        print("\nلطفاً ID دسته‌بندی‌هایی که می‌خواهید منتقل شوند را با کاما جدا وارد کنید (مثلاً: 12,15,22):")
-        selected_ids = input("ID ها: ").strip()
-        selected_ids = [int(x) for x in selected_ids.split(",") if x.strip().isdigit()]
+        print("\nلطفاً نام یا ID دسته‌بندی‌هایی که می‌خواهید منتقل شوند را با کاما جدا وارد کنید (مثلاً: 6,جانبی موبایل,129):")
+        selected_raw = input("نام یا ID ها: ").strip().split(",")
+        selected_raw = [x.strip() for x in selected_raw if x.strip()]
 
-    # 4. هیچ ورودی معتبری نبود
     else:
         print("❌ هیچ ورودی معتبری برای انتخاب دسته‌بندی پیدا نشد (نه متغیر محیطی، نه فایل، نه محیط تعاملی). برنامه خاتمه می‌یابد.")
         exit(1)
 
-    if not selected_ids:
+    if not selected_raw:
         print("❌ هیچ دسته‌بندی انتخاب نشد. برنامه خاتمه می‌یابد.")
         exit(1)
 
-    # جمع‌آوری همه زیرمجموعه‌ها
-    def collect_with_children(cat_id, all_cats, result):
-        result.add(cat_id)
+    # جمع‌آوری همه دسته‌هایی که نام یا IDشان در لیست است (و زیرمجموعه‌ها)
+    def collect_with_children(cat, all_cats, result):
+        result.add(cat['id'])
         for c in all_cats:
-            if c.get('parent_id') == cat_id:
-                collect_with_children(c['id'], all_cats, result)
+            if c.get('parent_id') == cat['id']:
+                collect_with_children(c, all_cats, result)
+
     final_ids = set()
-    for cid in selected_ids:
-        collect_with_children(cid, source_categories, final_ids)
+    for item in selected_raw:
+        if item.isdigit():
+            matched = [cat for cat in source_categories if cat['id'] == int(item)]
+        else:
+            matched = [cat for cat in source_categories if cat['name'] == item]
+        if not matched:
+            print(f"⚠️ هشدار: هیچ دسته‌ای با '{item}' پیدا نشد.")
+        for cat in matched:
+            collect_with_children(cat, source_categories, final_ids)
     filtered_cats = [cat for cat in source_categories if cat['id'] in final_ids]
     print(f"\n✅ تعداد {len(filtered_cats)} دسته‌بندی برای انتقال انتخاب شد.")
     return filtered_cats
@@ -376,8 +385,8 @@ def process_product_wrapper(args):
 
 def main():
     print("برای انتخاب دسته‌بندی‌ها می‌توانید یکی از این روش‌ها را استفاده کنید:")
-    print("- متغیر محیطی SELECTED_CATEGORY_IDS (مثلاً: 2,6,129)")
-    print("- فایل selected_ids.txt (مثلاً: 2,6,129)")
+    print("- متغیر محیطی SELECTED_CATEGORIES (مثلاً: 6,جانبی موبایل,129)")
+    print("- فایل selected_categories.txt (مثلاً: 6,جانبی موبایل,129)")
     print("- یا در محیط تعاملی، به صورت دستی وارد کنید.\n")
 
     if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
@@ -393,7 +402,7 @@ def main():
         print("❌ هیچ دسته‌بندی دریافت نشد. برنامه خاتمه می‌یابد.")
         return
 
-    filtered_categories = get_selected_categories(source_categories)
+    filtered_categories = get_selected_categories_flexible(source_categories)
     if not filtered_categories:
         print("❌ هیچ دسته‌بندی برای انتقال انتخاب نشد. برنامه خاتمه می‌یابد.")
         return
