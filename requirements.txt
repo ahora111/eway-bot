@@ -2,3 +2,5 @@ beautifulsoup4
 requests
 tqdm
 lxml
+urllib3
+woocommerce
