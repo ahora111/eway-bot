@@ -1,12 +1,32 @@
 import requests
 import os
-import json
 import re
+import time
 
 # --- اطلاعات ووکامرس ---
 WC_API_URL = os.environ.get("WC_API_URL", "https://your-woocommerce-site.com/wp-json/wc/v3/products")
 WC_CONSUMER_KEY = os.environ.get("WC_CONSUMER_KEY", "ck_xxx")
 WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET", "cs_xxx")
+
+# --- اطلاعات API سایت هدف ---
+API_BASE_URL = "https://panel.naminet.co/api"
+CATEGORY_ID = 13
+AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
+REFERER_URL = "https://naminet.co/"
+
+def make_api_request(url):
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0',
+            'Authorization': AUTH_TOKEN,
+            'Referer': REFERER_URL
+        }
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"   ❌ خطا در درخواست API به {url}: {e}")
+        return None
 
 def process_price(price_value):
     try:
@@ -72,51 +92,40 @@ def create_or_update_product(wc_data, variations=None):
     except Exception as e:
         print(f"   ❌ خطا در ارتباط با ووکامرس: {e}")
 
-def main():
-    # --- خواندن داده محصول از فایل products.json ---
-    with open("products.json", "r", encoding="utf-8") as f:
-        data = json.load(f)
-    products = data["products"] if "products" in data else data
+def process_product(product):
+    print(f"\n" + "="*50)
+    product_name = product.get('name', 'بدون نام')
+    product_id = product.get('id', product.get('sku', ''))
+    print(f"پردازش محصول: {product_name} (ID: {product_id})")
 
-    for product in products:
-        print(f"\n" + "="*50)
-        product_name = product.get('name', 'بدون نام')
-        product_id = product.get('id', product.get('sku', ''))
-        print(f"پردازش محصول: {product_name} (ID: {product_id})")
+    is_variable = False
+    variations = []
+    color_options = []
+    if "attributes" in product and product["attributes"]:
+        for attr in product["attributes"]:
+            if attr.get("product_attribute_name") == "رنگ" and attr.get("attribute_values"):
+                is_variable = True
+                for v in attr["attribute_values"]:
+                    color_options.append(v.get("name", ""))
+                    variations.append({
+                        "sku": f"NAMIN-{product_id}-{v.get('id', '')}",
+                        "regular_price": process_price(v.get("price", 0)),
+                        "stock_status": "instock" if v.get("in_stock", True) else "outofstock",
+                        "attributes": [{"name": "Color", "option": v.get("name", "")}]
+                    })
 
-        # آماده‌سازی ویژگی رنگ و وارییشن‌ها
-        attribute = None
-        for attr in product.get("attributes", []):
-            if attr.get("product_attribute_name") == "رنگ":
-                attribute = attr
-                break
+    other_attrs = extract_attributes(product.get('short_description', ''))
 
-        color_options = []
-        variations = []
-        if attribute:
-            for v in attribute.get("attribute_values", []):
-                color_options.append(v["name"])
-                variations.append({
-                    "sku": f"NAMIN-{product_id}-{v['id']}",
-                    "regular_price": str(int(v["price"])),
-                    "stock_status": "instock" if v["in_stock"] else "outofstock",
-                    "attributes": [{"name": "Color", "option": v["name"]}]
-                })
-
-        # استخراج سایر ویژگی‌ها از توضیحات کوتاه
-        other_attrs = extract_attributes(product.get("short_description", ""))
-
-        # آماده‌سازی محصول مادر (variable)
+    if is_variable and variations:
         wc_data = {
-            "name": product["name"],
+            "name": product_name,
             "type": "variable",
-            "sku": f"NAMIN-{product['sku']}",
-            "description": product.get("short_description", ""),
-            "categories": [{"id": cid} for cid in product.get("category_ids", [])],
-            "images": [{"src": img["src"]} for img in product.get("images", [])],
+            "sku": f"NAMIN-{product.get('sku', product_id)}",
+            "description": product.get('short_description', ''),
+            "categories": [{"id": cid} for cid in product.get("category_ids", []) if cid],
+            "images": [{"src": img.get("src", "")} for img in product.get("images", []) if img.get("src")],
             "attributes": [
                 {
-                    "id": 1,  # آیدی ویژگی global رنگ در ووکامرس (در پنل ویژگی‌ها ببین)
                     "name": "Color",
                     "slug": "pa_color",
                     "visible": True,
@@ -125,8 +134,62 @@ def main():
                 }
             ] + other_attrs
         }
-
         create_or_update_product(wc_data, variations)
+    else:
+        price = product.get('price') or product.get('final_price_value') or 0
+        in_stock = product.get('in_stock', True)
+        wc_data = {
+            "name": product_name,
+            "type": "simple",
+            "sku": f"NAMIN-{product.get('sku', product_id)}",
+            "regular_price": process_price(price),
+            "description": product.get('short_description', ''),
+            "categories": [{"id": cid} for cid in product.get("category_ids", []) if cid],
+            "images": [{"src": img.get("src", "")} for img in product.get("images", []) if img.get("src")],
+            "stock_status": "instock" if in_stock else "outofstock",
+            "attributes": other_attrs
+        }
+        create_or_update_product(wc_data)
+
+def get_all_products():
+    all_products = []
+    page = 1
+    while True:
+        url = f"{API_BASE_URL}/categories/{CATEGORY_ID}/products/?page={page}&pageSize=50"
+        headers = {
+            'User-Agent': 'Mozilla/5.0',
+            'Authorization': AUTH_TOKEN,
+            'Referer': REFERER_URL
+        }
+        try:
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as e:
+            print(f"   ❌ خطا در درخواست API به {url}: {e}")
+            break
+        products = data if isinstance(data, list) else data.get("products", [])
+        if not products:
+            break
+        all_products.extend(products)
+        print(f"صفحه {page}، تعداد محصولات این صفحه: {len(products)}")
+        if len(products) < 50:
+            break
+        page += 1
+    print(f"\nکل محصولات دریافت شده: {len(all_products)}")
+    return all_products
+
+def main():
+    products = get_all_products()
+    total = len(products)
+    print(f"\n🔎 تعداد کل محصولات شناسایی شده: {total}\n")
+    for product in products:
+        try:
+            process_product(product)
+        except Exception as e:
+            print(f"   ❌ خطا در پردازش محصول: {e}")
+        time.sleep(1)
+    print("\nتمام محصولات پردازش شدند. فرآیند به پایان رسید.")
 
 if __name__ == "__main__":
     main()
