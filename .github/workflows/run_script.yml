@@ -38,5 +38,5 @@ jobs:
           WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
           WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
           EWAYS_AUTH_TOKEN: ${{ secrets.EWAYS_AUTH_TOKEN }}
-          SELECTED_CATEGORIES: "گوشی _تبلت_لپ تاپ"
+          SELECTED_CATEGORIES: "4949,گوشی موبایل"
         run: python main.py
