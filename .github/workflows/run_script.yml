@@ -12,40 +12,29 @@ on:
 jobs:
   sync-products:
     runs-on: ubuntu-latest
-
     steps:
+      # 1. کد مخزن را دانلود می‌کند
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. پایتون را آماده می‌کند
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
+      # 3. کتابخانه‌های مورد نیاز را از requirements.txt نصب می‌کند
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run product sync script
+      # 4. اسکریپت اصلی را اجرا می‌کند
+      - name: Run Eways Sync Script
         env:
+          # خواندن اطلاعات حساس از Secrets گیت‌هاب
           WC_API_URL: ${{ secrets.WC_API_URL }}
           WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
           WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
-          NAMINet_AUTH_TOKEN: ${{ secrets.NAMINet_AUTH_TOKEN }} 
+          EWAYS_AUTH_TOKEN: ${{ secrets.EWAYS_AUTH_TOKEN }}
         run: python main.py
-        
-      - name: Install tqdm
-        run: pip install tqdm
-
-      - name: Install dependencies
-        run: pip install beautifulsoup4 requests
-  
-      - name: Upload debug artifacts (در صورت خطا)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-files
-          path: |
-            debug_page.html
-            debug_screenshot.png
