@@ -31,6 +31,12 @@ def get_session():
     session.verify = False
     return session
 
+def extract_real_id_from_link(link):
+    m = re.search(r'/Store/List/(\d+)/', link)
+    if m:
+        return int(m.group(1))
+    return None
+
 def extract_categories_from_html(html):
     soup = BeautifulSoup(html, 'lxml')
     root_ul = soup.find('ul', id='kanivmm-menu-id')
@@ -41,8 +47,7 @@ def extract_categories_from_html(html):
         return []
 
     flat_list = []
-    id_counter = [1]
-    seen = set()
+    seen_real_ids = set()
 
     def recursive_extract(ul_tag, parent_id=None, level=0):
         categories = []
@@ -51,13 +56,12 @@ def extract_categories_from_html(html):
             if a:
                 name = a.get_text(strip=True)
                 link = a.get('href')
-                if not name or not link or (name, link) in seen:
+                real_id = extract_real_id_from_link(link)
+                if not name or not link or not real_id or real_id in seen_real_ids:
                     continue
-                seen.add((name, link))
-                cat_id = id_counter[0]
-                id_counter[0] += 1
+                seen_real_ids.add(real_id)
                 cat = {
-                    'id': cat_id,
+                    'id': real_id,  # ID واقعی سایت
                     'name': name,
                     'link': link,
                     'parent_id': parent_id,
@@ -67,7 +71,7 @@ def extract_categories_from_html(html):
                 flat_list.append(cat)
                 sub_ul = li.find('ul', class_='sub-menu')
                 if sub_ul:
-                    cat['children'] = recursive_extract(sub_ul, parent_id=cat_id, level=level+1)
+                    cat['children'] = recursive_extract(sub_ul, parent_id=real_id, level=level+1)
                 categories.append(cat)
         return categories
 
@@ -77,13 +81,12 @@ def extract_categories_from_html(html):
         if a:
             name = a.get_text(strip=True)
             link = a.get('href')
-            if not name or not link or (name, link) in seen:
+            real_id = extract_real_id_from_link(link)
+            if not name or not link or not real_id or real_id in seen_real_ids:
                 continue
-            seen.add((name, link))
-            cat_id = id_counter[0]
-            id_counter[0] += 1
+            seen_real_ids.add(real_id)
             cat = {
-                'id': cat_id,
+                'id': real_id,
                 'name': name,
                 'link': link,
                 'parent_id': None,
@@ -93,7 +96,7 @@ def extract_categories_from_html(html):
             flat_list.append(cat)
             sub_ul = li.find('ul', class_='sub-menu')
             if sub_ul:
-                cat['children'] = recursive_extract(sub_ul, parent_id=cat_id, level=1)
+                cat['children'] = recursive_extract(sub_ul, parent_id=real_id, level=1)
             all_categories.append(cat)
     return flat_list, all_categories
 
@@ -113,7 +116,6 @@ def get_and_parse_categories(session):
     return flat_list, all_categories
 
 def get_selected_categories_flexible(source_categories):
-    # چاپ لیست دسته‌بندی‌ها با ID و نام
     def print_tree(categories, all_cats, indent=0):
         for cat in categories:
             print('  ' * indent + f"[{cat['id']}] {cat['name']}")
@@ -125,24 +127,18 @@ def get_selected_categories_flexible(source_categories):
     print("\nلیست دسته‌بندی‌ها (ساختار درختی):\n")
     print_tree(roots, source_categories)
 
-    # ورودی از متغیر محیطی
     selected_env = os.environ.get("SELECTED_CATEGORIES")
     if selected_env:
         selected_raw = [x.strip() for x in selected_env.split(",") if x.strip()]
         print(f"\n✅ دسته‌بندی‌های انتخاب‌شده از متغیر محیطی: {selected_raw}")
-
-    # ورودی از فایل متنی
     elif os.path.exists("selected_categories.txt"):
         with open("selected_categories.txt") as f:
             selected_raw = [x.strip() for x in f.read().strip().split(",") if x.strip()]
         print(f"\n✅ دسته‌بندی‌های انتخاب‌شده از فایل: {selected_raw}")
-
-    # محیط تعاملی
     elif sys.stdin.isatty():
-        print("\nلطفاً نام یا ID دسته‌بندی‌هایی که می‌خواهید منتقل شوند را با کاما جدا وارد کنید (مثلاً: 6,جانبی موبایل,129):")
+        print("\nلطفاً نام یا ID واقعی دسته‌بندی‌هایی که می‌خواهید منتقل شوند را با کاما جدا وارد کنید (مثلاً: 327,گوشی موبایل,344):")
         selected_raw = input("نام یا ID ها: ").strip().split(",")
         selected_raw = [x.strip() for x in selected_raw if x.strip()]
-
     else:
         print("❌ هیچ ورودی معتبری برای انتخاب دسته‌بندی پیدا نشد (نه متغیر محیطی، نه فایل، نه محیط تعاملی). برنامه خاتمه می‌یابد.")
         exit(1)
@@ -151,7 +147,6 @@ def get_selected_categories_flexible(source_categories):
         print("❌ هیچ دسته‌بندی انتخاب نشد. برنامه خاتمه می‌یابد.")
         exit(1)
 
-    # جمع‌آوری همه دسته‌هایی که نام یا IDشان در لیست است (و زیرمجموعه‌ها)
     def collect_with_children(cat, all_cats, result):
         result.add(cat['id'])
         for c in all_cats:
@@ -385,8 +380,8 @@ def process_product_wrapper(args):
 
 def main():
     print("برای انتخاب دسته‌بندی‌ها می‌توانید یکی از این روش‌ها را استفاده کنید:")
-    print("- متغیر محیطی SELECTED_CATEGORIES (مثلاً: 6,جانبی موبایل,129)")
-    print("- فایل selected_categories.txt (مثلاً: 6,جانبی موبایل,129)")
+    print("- متغیر محیطی SELECTED_CATEGORIES (مثلاً: 327,گوشی موبایل,344)")
+    print("- فایل selected_categories.txt (مثلاً: 327,گوشی موبایل,344)")
     print("- یا در محیط تعاملی، به صورت دستی وارد کنید.\n")
 
     if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
