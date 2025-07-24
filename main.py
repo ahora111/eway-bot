@@ -32,7 +32,7 @@ def get_session():
     return session
 
 def extract_real_id_from_link(link):
-    m = re.search(r'/Store/List/(\d+)/', link)
+    m = re.search(r'/Store/List/(\d+)', link)
     if m:
         return int(m.group(1))
     return None
@@ -136,7 +136,7 @@ def get_selected_categories_flexible(source_categories):
             selected_raw = [x.strip() for x in f.read().strip().split(",") if x.strip()]
         print(f"\n✅ دسته‌بندی‌های انتخاب‌شده از فایل: {selected_raw}")
     elif sys.stdin.isatty():
-        print("\nلطفاً نام یا ID واقعی دسته‌بندی‌هایی که می‌خواهید منتقل شوند را با کاما جدا وارد کنید (مثلاً: 327,گوشی موبایل,344):")
+        print("\nلطفاً نام یا ID واقعی دسته‌بندی‌هایی که می‌خواهید منتقل شوند را با کاما جدا وارد کنید (مثلاً: 4949,گوشی موبایل,344):")
         selected_raw = input("نام یا ID ها: ").strip().split(",")
         selected_raw = [x.strip() for x in selected_raw if x.strip()]
     else:
@@ -380,8 +380,8 @@ def process_product_wrapper(args):
 
 def main():
     print("برای انتخاب دسته‌بندی‌ها می‌توانید یکی از این روش‌ها را استفاده کنید:")
-    print("- متغیر محیطی SELECTED_CATEGORIES (مثلاً: 327,گوشی موبایل,344)")
-    print("- فایل selected_categories.txt (مثلاً: 327,گوشی موبایل,344)")
+    print("- متغیر محیطی SELECTED_CATEGORIES (مثلاً: 4949,گوشی موبایل,344)")
+    print("- فایل selected_categories.txt (مثلاً: 4949,گوشی موبایل,344)")
     print("- یا در محیط تعاملی، به صورت دستی وارد کنید.\n")
 
     if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
