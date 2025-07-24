@@ -37,6 +37,9 @@ jobs:
         
       - name: Install tqdm
         run: pip install tqdm
+
+      - name: Install dependencies
+        run: pip install beautifulsoup4 requests
   
       - name: Upload debug artifacts (در صورت خطا)
         if: failure()
