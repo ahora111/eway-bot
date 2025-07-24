@@ -1,7 +1,7 @@
 import os
 import requests
 from bs4 import BeautifulSoup
-from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 import time
 
 # --- اطلاعات ووکامرس ---
@@ -27,6 +27,7 @@ def parse_html_products(html):
                 productid = tag.find('a', attrs={'data-productid': True})['data-productid']
                 detail_link = tag.find('div', class_='goods-item-title').find('a')['href']
             except Exception as e:
+                print(f"❌ خطا در استخراج محصول: {e}")
                 continue
 
             products.append({
@@ -43,7 +44,6 @@ def parse_html_products(html):
 # ---------- استخراج توضیحات و تصویر اصلی از HTML جزئیات ----------
 def parse_product_detail(html):
     soup = BeautifulSoup(html, 'html.parser')
-    # توضیحات (در div با کلاس خاص یا meta description)
     desc = ''
     desc_tag = soup.find('div', class_='product-desc')
     if desc_tag:
@@ -52,7 +52,6 @@ def parse_product_detail(html):
         meta_desc = soup.find('meta', attrs={'name': 'description'})
         if meta_desc:
             desc = meta_desc['content'].strip()
-    # تصویر اصلی (اولین img با src که به ProductPictures اشاره دارد)
     img = ''
     img_tag = soup.find('img', src=lambda x: x and 'ProductPictures' in x)
     if img_tag:
@@ -84,10 +83,10 @@ def get_wc_categories():
 def build_wc_cats_map(wc_cats):
     return {cat["name"].strip(): cat["id"] for cat in wc_cats}
 
-def create_wc_category(cat_name, wc_cats_map):
+def create_wc_category(cat, wc_cats_map, source_to_wc_id_map):
     data = {
-        "name": cat_name.strip(),
-        "slug": cat_name.strip().replace(' ', '-')
+        "name": cat.strip(),
+        "slug": cat.strip().replace(' ', '-')
     }
     res = requests.post(
         f"{WC_API_URL}/products/categories",
@@ -97,36 +96,110 @@ def create_wc_category(cat_name, wc_cats_map):
     )
     if res.status_code in [200, 201]:
         new_id = res.json()["id"]
-        print(f"✅ دسته‌بندی '{cat_name}' ساخته شد. (id={new_id})")
+        print(f"✅ دسته‌بندی '{cat}' ساخته شد. (id={new_id})")
         return new_id
     else:
-        print(f"❌ خطا در ساخت دسته‌بندی '{cat_name}': {res.text}")
+        print(f"❌ خطا در ساخت دسته‌بندی '{cat}': {res.text}")
         return None
 
-# ---------- ووکامرس: ارسال محصول ----------
-def send_product_to_woocommerce(product, wc_cat_id):
-    data = {
-        "name": product['name'],
+# ---------- اعتبارسنجی محصول ----------
+def validate_product(wc_data):
+    errors = []
+    if not wc_data.get('name'):
+        errors.append("نام محصول وجود ندارد.")
+    if wc_data.get('type') == 'simple':
+        price = wc_data.get('regular_price')
+        if not price or price == "0":
+            errors.append("قیمت محصول ساده معتبر نیست.")
+    if not wc_data.get('sku'):
+        errors.append("کد SKU وجود ندارد.")
+    if not wc_data.get('categories') or not isinstance(wc_data['categories'], list) or not wc_data['categories']:
+        errors.append("دسته‌بندی محصول وجود ندارد.")
+    return errors
+
+# ---------- ارسال به ووکامرس (ایجاد یا آپدیت) ----------
+def _send_to_woocommerce(sku, data, stats, retries=3):
+    check_url = f"{WC_API_URL}/products?sku={sku}"
+    for attempt in range(retries):
+        try:
+            r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
+            r.raise_for_status()
+            existing = r.json()
+            product_id = None
+            if existing:
+                product_id = existing[0]['id']
+                update_url = f"{WC_API_URL}/products/{product_id}"
+                res = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
+                if res.status_code == 200:
+                    stats['updated'] += 1
+                else:
+                    print(f"   ❌ خطا در آپدیت. Status: {res.status_code}, Response: {res.text}")
+            else:
+                res = requests.post(f"{WC_API_URL}/products", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
+                if res.status_code == 201:
+                    product_id = res.json()['id']
+                    stats['created'] += 1
+                else:
+                    print(f"   ❌ خطا در ایجاد محصول. Status: {res.status_code}, Response: {res.text}")
+            return product_id
+        except requests.exceptions.HTTPError as e:
+            if r.status_code in [429, 500] and attempt < retries - 1:
+                print(f"   ⏳ تلاش مجدد به دلیل خطای {r.status_code} ...")
+                time.sleep(5)
+                continue
+            print(f"   ❌ خطای کلی در ارتباط با ووکامرس: {e}")
+            return None
+        except Exception as e:
+            print(f"   ❌ خطای کلی در ارتباط با ووکامرس: {e}")
+            return None
+
+# ---------- پردازش و ارسال هر محصول ----------
+def process_product(product, stats, category_mapping):
+    product_name = product.get('name', 'بدون نام')
+    product_id = product.get('id', '')
+    category = product.get('category', '')
+    wc_cat_id = category_mapping.get(category)
+    if not wc_cat_id:
+        print(f"❌ دسته‌بندی ووکامرس برای '{category}' یافت نشد.")
+        return
+
+    # توضیحات و تصویر از صفحه جزئیات
+    detail_file = f"details/{product_id}.html"
+    description = ''
+    image = product['image']
+    if os.path.exists(detail_file):
+        with open(detail_file, 'r', encoding='utf-8') as f:
+            detail_html = f.read()
+        detail_info = parse_product_detail(detail_html)
+        if detail_info['description']:
+            description = detail_info['description']
+        if detail_info['image']:
+            image = detail_info['image']
+
+    wc_data = {
+        "name": product_name,
         "type": "simple",
-        "sku": f"EWAYS-{product['id']}",
-        "regular_price": product['price'],
+        "sku": f"EWAYS-{product_id}",
+        "regular_price": product.get('price', '0'),
+        "description": description,
         "categories": [{"id": wc_cat_id}],
-        "images": [{"src": product['image']}],
-        "stock_status": "instock" if int(product['stock']) > 0 else "outofstock",
-        "description": product.get('description', '')
+        "images": [{"src": image}],
+        "stock_status": "instock" if int(product.get('stock', '0')) > 0 else "outofstock"
     }
-    res = requests.post(
-        f"{WC_API_URL}/products",
-        auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET),
-        json=data,
-        verify=False
-    )
-    if res.status_code in [200, 201]:
-        print(f"✅ محصول '{product['name']}' ثبت شد.")
-        return True
-    else:
-        print(f"❌ خطا در ثبت محصول '{product['name']}': {res.text}")
-        return False
+    errors = validate_product(wc_data)
+    if errors:
+        print(f"   ❌ محصول '{wc_data.get('name', '')}' اعتبارسنجی نشد:")
+        for err in errors:
+            print(f"      - {err}")
+        return
+    _send_to_woocommerce(wc_data['sku'], wc_data, stats)
+
+def process_product_wrapper(args):
+    product, stats, category_mapping = args
+    try:
+        process_product(product, stats, category_mapping)
+    except Exception as e:
+        print(f"   ❌ خطا در پردازش محصول {product.get('id', '')}: {e}")
 
 # ---------- اجرای اصلی ----------
 def main():
@@ -149,42 +222,22 @@ def main():
         if cat in wc_cats_map:
             cat_name_to_id[cat] = wc_cats_map[cat]
         else:
-            new_id = create_wc_category(cat, wc_cats_map)
+            new_id = create_wc_category(cat, wc_cats_map, cat_name_to_id)
             if new_id:
                 cat_name_to_id[cat] = new_id
 
-    # 4. استخراج توضیحات و تصویر اصلی هر محصول از HTML جزئیات
-    success, fail = 0, 0
-    for idx, p in enumerate(products, 1):
-        detail_file = f"details/{p['id']}.html"
-        if os.path.exists(detail_file):
-            with open(detail_file, 'r', encoding='utf-8') as f:
-                detail_html = f.read()
-            detail_info = parse_product_detail(detail_html)
-            if detail_info['description']:
-                p['description'] = detail_info['description']
-            if detail_info['image']:
-                p['image'] = detail_info['image']
-        else:
-            print(f"⚠️ فایل جزئیات برای محصول {p['id']} وجود ندارد. (فقط اطلاعات لیست ثبت می‌شود)")
+    print(f"🔹 تعداد کل دسته‌بندی‌های نهایی: {len(cat_name_to_id)}")
 
-        wc_cat_id = cat_name_to_id.get(p['category'], None)
-        if wc_cat_id:
-            ok = send_product_to_woocommerce(p, wc_cat_id)
-            if ok:
-                success += 1
-            else:
-                fail += 1
-        else:
-            print(f"❌ دسته‌بندی ووکامرس برای '{p['category']}' یافت نشد.")
-            fail += 1
-        time.sleep(0.5)  # برای جلوگیری از بلاک شدن توسط سرور
+    # 4. ارسال محصولات به ووکامرس (موازی)
+    stats = {'created': 0, 'updated': 0}
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        list(executor.map(process_product_wrapper, [(p, stats, cat_name_to_id) for p in products]))
 
     # 5. آمار نهایی
     print("\n===============================")
     print(f"📦 تعداد کل محصولات پردازش شده: {len(products)}")
-    print(f"🟢 محصولات موفق ثبت شده: {success}")
-    print(f"🔴 محصولات ناموفق: {fail}")
+    print(f"🟢 محصولات جدید ایجاد شده: {stats['created']}")
+    print(f"🔵 محصولات آپدیت شده: {stats['updated']}")
     print(f"🔸 تعداد کل دسته‌بندی‌ها: {len(cat_name_to_id)}")
     print("===============================")
     print("تمام محصولات پردازش شدند. فرآیند به پایان رسید.")
