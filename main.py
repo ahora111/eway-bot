@@ -21,18 +21,13 @@ if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
 
 # --- اطلاعات API سایت هدف ---
 API_BASE_URL = "https://panel.naminet.co/api"
-CATEGORY_ID = 1
+CATEGORY_ID = 13
 PRODUCTS_LIST_URL_TEMPLATE = f"{API_BASE_URL}/categories/{CATEGORY_ID}/products/"
 PRODUCT_ATTRIBUTES_API_URL_TEMPLATE = f"{API_BASE_URL}/products/attr/{{product_id}}"
 AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
 REFERER_URL = "https://naminet.co/"
+SOURCE_CATS_API = "https://panel.naminet.co/api/categories/"
 # ---------------------------------------------
-
-# --- mega_menu را اینجا قرار بده (یا از API بخوان) ---
-mega_menu = [
-    # ... اینجا همان لیست mega_menu که دادی قرار بگیرد ...
-]
-# -------------------------------------------------------
 
 def make_api_request(url, params=None):
     try:
@@ -50,36 +45,75 @@ def make_api_request(url, params=None):
 
 # ------------------ انتقال دسته‌بندی‌ها ------------------
 
-def get_wc_category_by_name(name):
-    """بررسی وجود دسته‌بندی با نام مشابه در ووکامرس"""
-    url = f"{WC_API_URL}/products/categories"
-    params = {"search": name}
-    res = requests.get(url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), params=params, verify=False)
-    if res.status_code == 200:
-        cats = res.json()
-        for cat in cats:
-            if cat["name"].strip() == name.strip():
-                return cat["id"]
-    return None
+def get_source_categories():
+    res = requests.get(SOURCE_CATS_API, verify=False)
+    res.raise_for_status()
+    return res.json()
 
-def create_wc_category(cat, parent_id=None):
-    """ساخت دسته‌بندی در ووکامرس (در صورت عدم وجود)"""
-    # اول چک کن وجود داره یا نه
-    cat_id = get_wc_category_by_name(cat["name"])
-    if cat_id:
-        print(f"⏩ دسته‌بندی '{cat['name']}' قبلاً وجود دارد. (id={cat_id})")
-        return cat_id
+def flatten_cats(tree, flat=None, parent_id=None):
+    if flat is None:
+        flat = []
+    for cat in tree:
+        cat = dict(cat)  # کپی برای تغییر
+        if parent_id:
+            cat["parent_category_id"] = parent_id
+        flat.append(cat)
+        if cat.get("childs"):
+            flatten_cats(cat["childs"], flat, cat["id"])
+    return flat
 
+def build_source_cats_map(flat_cats):
+    return {cat["id"]: cat for cat in flat_cats}
+
+def get_wc_categories():
+    wc_cats = []
+    page = 1
+    while True:
+        url = f"{WC_API_URL}/products/categories"
+        params = {"per_page": 100, "page": page}
+        res = requests.get(url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), params=params, verify=False)
+        if res.status_code != 200:
+            break
+        data = res.json()
+        if not data:
+            break
+        wc_cats.extend(data)
+        if len(data) < 100:
+            break
+        page += 1
+    return wc_cats
+
+def build_wc_cats_map(wc_cats):
+    return {cat["name"].strip(): cat["id"] for cat in wc_cats}
+
+def sort_cats_for_creation(flat_cats):
+    sorted_cats = []
+    id_to_cat = {cat["id"]: cat for cat in flat_cats}
+    visited = set()
+    def visit(cat):
+        if cat["id"] in visited:
+            return
+        parent_id = cat.get("parent_category_id")
+        if parent_id and parent_id in id_to_cat:
+            visit(id_to_cat[parent_id])
+        sorted_cats.append(cat)
+        visited.add(cat["id"])
+    for cat in flat_cats:
+        visit(cat)
+    return sorted_cats
+
+def create_wc_category(cat, wc_cats_map, source_to_wc_id_map):
     data = {
         "name": cat["name"].strip(),
+        "slug": cat.get("se_name", ""),
         "description": cat.get("description", ""),
     }
     img_url = cat.get("image", {}).get("src", "")
     if img_url:
         data["image"] = {"src": img_url}
-    if parent_id:
-        data["parent"] = parent_id
-
+    parent_id = cat.get("parent_category_id")
+    if parent_id and parent_id in source_to_wc_id_map:
+        data["parent"] = source_to_wc_id_map[parent_id]
     res = requests.post(
         f"{WC_API_URL}/products/categories",
         auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET),
@@ -87,24 +121,42 @@ def create_wc_category(cat, parent_id=None):
         verify=False
     )
     if res.status_code in [200, 201]:
-        cat_id = res.json()["id"]
-        print(f"✅ دسته‌بندی '{cat['name']}' ساخته شد. (id={cat_id})")
-        return cat_id
+        new_id = res.json()["id"]
+        print(f"✅ دسته‌بندی '{cat['name']}' ساخته شد. (id={new_id})")
+        return new_id
     else:
         print(f"❌ خطا در ساخت دسته‌بندی '{cat['name']}': {res.text}")
         return None
 
-def process_categories(categories, parent_id=None, mapping=None):
-    """انتقال همه دسته‌بندی‌ها و زیرمجموعه‌ها به ووکامرس"""
-    if mapping is None:
-        mapping = {}
-    for cat in categories:
-        cat_id = create_wc_category(cat, parent_id)
-        if cat_id:
-            mapping[cat["id"]] = cat_id  # نگاشت id منبع به id ووکامرس
-            if cat.get("childs"):
-                process_categories(cat["childs"], parent_id=cat_id, mapping=mapping)
-    return mapping
+def transfer_categories():
+    print("⏳ دریافت دسته‌بندی‌های منبع ...")
+    source_tree = get_source_categories()
+    flat_cats = flatten_cats(source_tree)
+    source_cats = build_source_cats_map(flat_cats)
+    print(f"تعداد کل دسته‌بندی منبع: {len(flat_cats)}")
+
+    print("⏳ دریافت دسته‌بندی‌های ووکامرس ...")
+    wc_cats = get_wc_categories()
+    wc_cats_map = build_wc_cats_map(wc_cats)
+    print(f"تعداد کل دسته‌بندی ووکامرس: {len(wc_cats)}")
+
+    sorted_cats = sort_cats_for_creation(flat_cats)
+    source_to_wc_id_map = {}
+
+    for cat in sorted_cats:
+        name = cat["name"].strip()
+        if name in wc_cats_map:
+            wc_id = wc_cats_map[name]
+            print(f"⏩ دسته‌بندی '{name}' قبلاً وجود دارد. (id={wc_id})")
+            source_to_wc_id_map[cat["id"]] = wc_id
+        else:
+            new_id = create_wc_category(cat, wc_cats_map, source_to_wc_id_map)
+            if new_id:
+                wc_cats_map[name] = new_id
+                source_to_wc_id_map[cat["id"]] = new_id
+
+    print("\n✅ انتقال دسته‌بندی‌ها کامل شد.")
+    return source_to_wc_id_map
 
 # ----------------------------------------------------------
 
@@ -205,14 +257,11 @@ def create_or_update_variations(product_id, variations):
             break
 
 def extract_category_ids(product, category_mapping):
-    # اول category_ids را چک کن
     category_ids = product.get("category_ids")
     if not category_ids:
-        # اگر نبود، از categories استخراج کن
         category_ids = [cat.get("id") for cat in product.get("categories", []) if cat.get("id")]
     if not category_ids:
         category_ids = [13]  # پیش‌فرض
-    # نگاشت به id ووکامرس
     wc_cat_ids = [category_mapping.get(cid, 13) for cid in category_ids]
     return wc_cat_ids
 
@@ -220,7 +269,6 @@ def process_product(product, stats, category_mapping):
     product_name = product.get('name', 'بدون نام')
     product_id = product.get('id', '')
 
-    # استخراج دسته‌بندی داینامیک
     category_ids = extract_category_ids(product, category_mapping)
 
     variations_raw = make_api_request(PRODUCT_ATTRIBUTES_API_URL_TEMPLATE.format(product_id=product_id))
@@ -326,9 +374,11 @@ def process_product_wrapper(args):
         print(f"   ❌ خطا در پردازش محصول {product.get('id', '')}: {e}")
 
 def main():
-    print("⏳ انتقال دسته‌بندی‌ها به ووکامرس ...")
-    category_mapping = process_categories(mega_menu)
-    print("\n✅ انتقال دسته‌بندی‌ها کامل شد.\n")
+    # انتقال دسته‌بندی‌ها
+    category_mapping = transfer_categories()
+    print("نگاشت id منبع به id ووکامرس:")
+    print(category_mapping)
+    print("\n⏳ انتقال محصولات ...")
 
     products = get_all_products()
     if not products:
