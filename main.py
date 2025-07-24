@@ -18,9 +18,9 @@ class Config:
 
     # اطلاعات API سایت هدف
     API_BASE_URL = "https://panel.naminet.co/api"
-    AUTH_TOKEN = os.environ.get("NAMINet_AUTH_TOKEN") 
+    AUTH_TOKEN = os.environ.get("NAMINet_AUTH_TOKEN")
     REFERER_URL = "https://naminet.co/"
-    
+
     # تنظیمات اجرایی برای افزایش سرعت
     MAX_THREADS_CATEGORIES = 5   # تعداد ترد برای واکشی موازی محصولات از دسته‌بندی‌ها
     MAX_THREADS_VARIATIONS = 10  # تعداد ترد برای واکشی اطلاعات متغیرها
@@ -51,12 +51,19 @@ def make_api_request(url, params=None, is_wc=False):
                 'Authorization': f"Bearer {Config.AUTH_TOKEN}",
                 'Referer': Config.REFERER_URL
             }
-        
+
         response = requests.get(url, headers=headers, params=params, auth=auth, timeout=45, verify=False)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        return {'error': str(e)}
+        # برای دیباگ بهتر، متن پاسخ خطا را هم برمی‌گردانیم
+        error_response = {}
+        if e.response is not None:
+            try:
+                error_response = e.response.json()
+            except requests.exceptions.JSONDecodeError:
+                error_response = {'raw_text': e.response.text}
+        return {'error': str(e), 'response_body': error_response}
 
 def process_price(price_value):
     """قیمت را بر اساس منطق تعریف شده محاسبه و گرد می‌کند."""
@@ -89,14 +96,40 @@ def get_all_source_categories():
     """تمام دسته‌بندی‌ها را از سایت مبدا واکشی می‌کند."""
     url = f"{Config.API_BASE_URL}/categories/"
     print("۱. در حال دریافت لیست تمام دسته‌بندی‌ها از سایت مبدا...")
+    print(f"   - آدرس در حال فراخوانی: {url}") # DEBUG: نمایش آدرس دقیق
+
     data = make_api_request(url)
-    if not data or 'error' in data or not isinstance(data, list):
-        print(f"❌ خطای جدی در دریافت دسته‌بندی‌ها: {data.get('error', 'پاسخ نامعتبر')}")
-        return []
+
+    # --- بخش دیباگ برای شناسایی مشکل ---
+    print("\n--- شروع دیباگ پاسخ API دسته‌بندی‌ها ---")
+    print(f"نوع داده دریافتی: {type(data)}")
+    print(f"محتوای داده دریافتی: {data}")
+    print("--- پایان دیباگ پاسخ API دسته‌بندی‌ها ---\n")
+    # ------------------------------------
     
+    # اگر در درخواست خطا رخ داده باشد
+    if isinstance(data, dict) and 'error' in data:
+        print(f"❌ خطای جدی در دریافت دسته‌بندی‌ها: {data['error']}")
+        print(f"   - پاسخ دریافتی از سرور: {data.get('response_body')}")
+        return []
+
+    # بررسی هوشمندانه تر ساختار پاسخ
+    if not isinstance(data, list):
+        error_msg = 'پاسخ دریافتی یک لیست معتبر (list) نیست.'
+        if isinstance(data, dict):
+            # اگر پاسخ یک دیکشنری است، شاید پیام خطا داخل آن باشد
+            error_msg += f" محتوای دیکشنری: {data.get('message', str(data))}"
+        print(f"❌ خطای جدی در دریافت دسته‌بندی‌ها: {error_msg}")
+        return []
+
+    if not data:
+        print("⚠️ هشدار: لیستی از دسته‌بندی‌ها دریافت شد اما خالی است.")
+        return []
+
     category_ids = [cat['id'] for cat in data if 'id' in cat]
     print(f"✅ {len(category_ids)} دسته‌بندی برای پردازش پیدا شد.")
     return category_ids
+
 
 def get_products_from_category(category_id):
     """تمام محصولات یک دسته‌بندی خاص را واکشی می‌کند (برای استفاده در تردها)."""
@@ -114,13 +147,13 @@ def get_products_from_category(category_id):
         
         if len(products_in_page) < 100: break
         page += 1
-        time.sleep(0.1) # یک مکث کوتاه برای جلوگیری از فشار به API
+        time.sleep(0.1)
     return products
 
 def get_all_products_concurrently(category_ids):
     """محصولات تمام دسته‌بندی‌ها را به صورت موازی واکشی و ادغام می‌کند."""
     print("\n۲. شروع دریافت موازی محصولات از تمام دسته‌بندی‌ها...")
-    all_products_map = {}  # استفاده از دیکشنری برای حذف خودکار محصولات تکراری
+    all_products_map = {}
     
     with ThreadPoolExecutor(max_workers=Config.MAX_THREADS_CATEGORIES) as executor:
         future_to_cat = {executor.submit(get_products_from_category, cat_id): cat_id for cat_id in category_ids}
@@ -130,7 +163,7 @@ def get_all_products_concurrently(category_ids):
             if products_list:
                 for product in products_list:
                     if 'id' in product:
-                        all_products_map[product['id']] = product # اگر محصول تکراری باشد، بازنویسی می‌شود
+                        all_products_map[product['id']] = product
     
     final_list = list(all_products_map.values())
     print(f"✅ در مجموع {len(final_list)} محصول منحصر به فرد از {len(category_ids)} دسته‌بندی دریافت شد.")
@@ -172,11 +205,6 @@ def get_existing_woocommerce_products():
         page += 1
     print(f"✅ {len(existing_products)} محصول موجود در فروشگاه شما شناسایی شد.")
     return existing_products
-
-# --- توابع پردازش و ارسال به ووکامرس (بقیه توابع بدون تغییر باقی می‌مانند) ---
-# ... (توابع prepare_product_data, send_batch_to_woocommerce, sync_variations از کد قبلی اینجا کپی شوند) ...
-# برای جلوگیری از تکرار، فرض می‌کنیم آن توابع اینجا هستند. من فقط تابع اصلی را بازنویسی می‌کنم.
-# (کد کامل در انتهای پاسخ قرار دارد)
 
 def prepare_product_data(product, variations_data):
     """داده‌های یک محصول را برای ارسال به ووکامرس آماده می‌کند."""
@@ -231,13 +259,16 @@ def send_batches_to_woocommerce(batch_data, stats):
                 response_data = res.json()
                 
                 processed_items = response_data.get(batch_type, [])
-                stats[f"{batch_type}d"] += len(processed_items) # created or updated
+                if batch_type == 'create':
+                    stats['created'] += len(processed_items)
+                elif batch_type == 'update':
+                    stats['updated'] += len(processed_items)
+
                 for item in processed_items:
                     if item.get('sku') and item.get('id') and 'error' not in item:
                         all_wc_product_map[item['sku']] = item['id']
                     elif 'error' in item:
                         stats['failed'] += 1
-                        # print(f"   ⚠️ خطا برای SKU {item.get('sku', 'N/A')}: {item['error']['message']}")
             except requests.exceptions.RequestException as e:
                 print(f"   ❌ خطای جدی در ارسال دسته {batch_type}: {e}")
                 stats['failed'] += len(chunk)
@@ -269,10 +300,9 @@ def sync_variations(wc_product_id, new_variations):
     if any(batch_payload.values()):
         try:
             requests.post(f"{variations_url}/batch", auth=(Config.WC_CONSUMER_KEY, Config.WC_CONSUMER_SECRET), json=batch_payload, verify=False).raise_for_status()
-        except requests.exceptions.RequestException as e:
-            return f"خطا در همگام‌سازی متغیرهای محصول {wc_product_id}: {e}"
+        except requests.exceptions.RequestException:
+            pass
     return True
-
 
 # --- تابع اصلی (Main Function) ---
 
@@ -282,7 +312,6 @@ def main():
     if not validate_config():
         exit(1)
 
-    # مرحله ۱ و ۲: واکشی تمام دسته‌بندی‌ها و سپس تمام محصولات به صورت موازی
     category_ids = get_all_source_categories()
     if not category_ids:
         print("هیچ دسته‌بندی برای پردازش یافت نشد. پایان کار.")
@@ -293,23 +322,24 @@ def main():
         print("هیچ محصولی برای پردازش یافت نشد. پایان کار.")
         return
         
-    # مرحله ۳: واکشی اطلاعات متغیرها
     variations_map = fetch_variations_concurrently(source_products)
     
-    # مرحله ۴: واکشی محصولات موجود در ووکامرس
     existing_wc_products = get_existing_woocommerce_products()
 
-    # مرحله ۵: آماده‌سازی داده‌ها برای ارسال
     print("\n۵. در حال آماده‌سازی داده‌ها برای ارسال به ووکامرس...")
     batch_to_create, batch_to_update = [], []
     variations_to_process = {}
     stats = {'created': 0, 'updated': 0, 'skipped': 0, 'failed': 0}
 
     for product in tqdm(source_products, desc="Preparing Products"):
-        # فیلتر کردن محصولات ناموجود یا بدون قیمت در مبدا
-        is_simple_available = product.get('type') != 'variable' and product.get('in_stock', True) and product.get('price', 0) > 0
-        is_variable_available = product.get('id') in variations_map and any(v.get('in_stock') for v in variations_map[product.get('id')])
-
+        is_simple_available = 'variations' not in product and product.get('in_stock', True) and product.get('price', 0) > 0
+        has_variations = product.get('id') in variations_map and variations_map[product.get('id')]
+        
+        # محصول متغیر زمانی در دسترس است که حداقل یک متغیر موجود داشته باشد
+        is_variable_available = has_variations and any(
+            var.get("in_stock") and var.get("price", 0) > 0 for var in variations_map[product.get('id')]
+        )
+        
         if not (is_simple_available or is_variable_available):
             stats['skipped'] += 1
             continue
@@ -326,10 +356,8 @@ def main():
         else:
             batch_to_create.append(product_data)
 
-    # مرحله ۶: ارسال دسته‌ای محصولات به ووکامرس
     wc_product_map = send_batches_to_woocommerce({'create': batch_to_create, 'update': batch_to_update}, stats)
     
-    # مرحله ۷: همگام‌سازی متغیرها
     if wc_product_map and variations_to_process:
         print("\n۷. شروع فرآیند همگام‌سازی متغیرها...")
         tasks = [(pid, variations_to_process[sku]) for sku, pid in wc_product_map.items() if sku in variations_to_process]
@@ -339,7 +367,6 @@ def main():
             for _ in tqdm(as_completed(futures), total=len(futures), desc="Syncing Variations"):
                 pass
 
-    # مرحله ۸: نمایش آمار نهایی
     end_time = time.time()
     total_duration = end_time - start_time
     print("\n" + "="*40)
