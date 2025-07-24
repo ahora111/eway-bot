@@ -29,8 +29,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Create selected_ids.txt
-        run: echo "2,6,129,252" > selected_ids.txt
         
       # 4. اسکریپت اصلی را اجرا می‌کند
       - name: Run Eways Sync Script
@@ -40,4 +38,5 @@ jobs:
           WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
           WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
           EWAYS_AUTH_TOKEN: ${{ secrets.EWAYS_AUTH_TOKEN }}
+          SELECTED_CATEGORIES: "گوشی _تبلت_لپ تاپ"
         run: python main.py
