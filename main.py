@@ -75,11 +75,9 @@ def sync_categories():
         print("دریافت دسته‌بندی‌ها از سایت منبع ناموفق بود.")
         return None, []
     
-    # --- اصلاح کلیدی: لیست دسته‌بندی‌ها را از کلید 'mega_menu' یا خود پاسخ می‌خوانیم ---
-    source_cats_raw = api_response.get('mega_menu', [])
-    if not source_cats_raw and isinstance(api_response, list):
-         source_cats_raw = api_response
-
+    # --- اصلاح کلیدی: لیست دسته‌بندی‌ها از کلید 'mega_menu' خوانده می‌شود ---
+    source_cats_raw = api_response.get('mega_menu', api_response if isinstance(api_response, list) else [])
+    
     all_source_cats = []
     def flatten_cats(categories, parent_id=0):
         for cat in categories:
@@ -244,7 +242,7 @@ def main():
     existing_skus = {p['sku']: p['id'] for p in requests.get(f"{WC_PRODUCTS_API_URL}?per_page=100&fields=id,sku", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False).json()}
 
     for product in tqdm(unique_products, desc="Preparing Data"):
-        if not (product.get('price', 0) > 0):
+        if not (product.get('price', 0) > 0 and product.get('in_stock', True)):
             stats['skipped'] += 1
             continue
             
