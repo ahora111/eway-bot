@@ -4,6 +4,7 @@ import os
 import re
 import time
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 
 # غیرفعال کردن هشدار SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -95,20 +96,20 @@ def _send_to_woocommerce(sku, data, stats, retries=3):
             product_id = None
             if existing:
                 product_id = existing[0]['id']
-                print(f"   محصول موجود است (ID: {product_id}). در حال آپدیت...")
+                # print(f"   محصول موجود است (ID: {product_id}). در حال آپدیت...")
                 update_url = f"{WC_API_URL}/{product_id}"
                 res = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
                 if res.status_code == 200:
-                    print(f"   ✅ محصول '{data['name']}' آپدیت شد.")
+                    # print(f"   ✅ محصول '{data['name']}' آپدیت شد.")
                     stats['updated'] += 1
                 else:
                     print(f"   ❌ خطا در آپدیت. Status: {res.status_code}, Response: {res.text}")
             else:
-                print(f"   محصول جدید است. در حال ایجاد '{data['name']}' ...")
+                # print(f"   محصول جدید است. در حال ایجاد '{data['name']}' ...")
                 res = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
                 if res.status_code == 201:
                     product_id = res.json()['id']
-                    print(f"   ✅ محصول ایجاد شد (ID: {product_id}).")
+                    # print(f"   ✅ محصول ایجاد شد (ID: {product_id}).")
                     stats['created'] += 1
                 else:
                     print(f"   ❌ خطا در ایجاد محصول. Status: {res.status_code}, Response: {res.text}")
@@ -128,14 +129,14 @@ def _send_to_woocommerce(sku, data, stats, retries=3):
 def create_or_update_variations(product_id, variations):
     if not product_id or not variations: return
         
-    print(f"   در حال ثبت {len(variations)} متغیر برای محصول ID: {product_id}...")
+    # print(f"   در حال ثبت {len(variations)} متغیر برای محصول ID: {product_id}...")
     variations_url = f"{WC_API_URL}/{product_id}/variations/batch"
     
     existing_vars_resp = requests.get(f"{WC_API_URL}/{product_id}/variations?per_page=100", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
     if existing_vars_resp.status_code == 200 and existing_vars_resp.json():
         delete_ids = [v['id'] for v in existing_vars_resp.json()]
         if delete_ids:
-            print(f"   در حال پاک کردن {len(delete_ids)} متغیر قدیمی...")
+            # print(f"   در حال پاک کردن {len(delete_ids)} متغیر قدیمی...")
             requests.post(variations_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json={"delete": delete_ids}, verify=False)
     
     for i in range(0, len(variations), 10):
@@ -145,14 +146,12 @@ def create_or_update_variations(product_id, variations):
         if res_vars.status_code not in [200, 201]:
             print(f"   ❌ خطا در ثبت دسته متغیرها. Status: {res_vars.status_code}, Response: {res_vars.text}")
             break
-    else:
-        print(f"   ✅ متغیرها با موفقیت ثبت شدند.")
+    # else:
+    #     print(f"   ✅ متغیرها با موفقیت ثبت شدند.")
 
 def process_product(product, stats):
-    print("\n" + "="*50)
     product_name = product.get('name', 'بدون نام')
     product_id = product.get('id', '')
-    print(f"پردازش: {product_name} (ID: {product_id})")
 
     variations_raw = make_api_request(PRODUCT_ATTRIBUTES_API_URL_TEMPLATE.format(product_id=product_id))
     
@@ -222,14 +221,14 @@ def process_product(product, stats):
                 return
             _send_to_woocommerce(wc_data['sku'], wc_data, stats)
         else:
-            print("   محصول ساده قیمت ندارد یا ناموجود است. نادیده گرفته شد.")
+            print(f"   محصول ساده قیمت ندارد یا ناموجود است. نادیده گرفته شد.")
 
 def get_all_products():
     all_products = []
     page = 1
     while True:
         print(f"در حال دریافت صفحه {page} از لیست محصولات...")
-        params = {'page': page, 'pageSize': 50}
+        params = {'page': page, 'pageSize': 100}  # افزایش pageSize برای سرعت بیشتر
         data = make_api_request(PRODUCTS_LIST_URL_TEMPLATE, params=params)
         
         if data is None: break
@@ -242,12 +241,20 @@ def get_all_products():
         all_products.extend(products_in_page)
         print(f"تعداد {len(products_in_page)} محصول از صفحه {page} دریافت شد.")
         
-        if len(products_in_page) < 50: break
+        if len(products_in_page) < 100: break
         page += 1
-        time.sleep(1)
+        # time.sleep(1)  # اگر لازم بود فعال کن
         
     print(f"\nدریافت اطلاعات از API کامل شد. کل محصولات دریافت شده: {len(all_products)}")
     return all_products
+
+def process_product_wrapper(args):
+    product, stats = args
+    try:
+        if product.get('in_stock', True) and product.get('price', 0) > 0:
+            process_product(product, stats)
+    except Exception as e:
+        print(f"   ❌ خطا در پردازش محصول {product.get('id', '')}: {e}")
 
 def main():
     products = get_all_products()
@@ -264,16 +271,9 @@ def main():
     print(f"\n🔎 تعداد کل گروه‌های محصول شناسایی شده: {total}")
     print(f"✅ گروه‌های محصول موجود و با قیمت: {available}\n")
     
-    for product in tqdm(products, desc="در حال پردازش محصولات", unit="محصول"):
-        try:
-            if product.get('in_stock', True) and product.get('price', 0) > 0:
-                process_product(product, stats)
-            else:
-                print("\n" + "="*50)
-                print(f"نادیده گرفتن گروه محصول ناموجود/بدون قیمت: {product.get('name')}")
-        except Exception as e:
-            print(f"   ❌ خطا در پردازش محصول {product.get('id', '')}: {e}")
-        time.sleep(1.5)
+    # پردازش موازی محصولات
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        list(tqdm(executor.map(process_product_wrapper, [(p, stats) for p in products]), total=len(products), desc="در حال پردازش محصولات", unit="محصول"))
         
     print("\n===============================")
     print(f"📦 تعداد کل محصولات پردازش شده: {available} از {total}")
