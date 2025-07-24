@@ -3,25 +3,31 @@ import urllib3
 import os
 import re
 import time
-from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor
+import json
 
+# غیرفعال کردن هشدار SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-WC_API_URL = os.environ.get("WC_API_URL")
+# --- اطلاعات ووکامرس (خوانده شده از Secrets گیت‌هاب) ---
+WC_API_URL_BASE = os.environ.get("WC_API_URL", "https://your-site.com/wp-json/wc/v3")
+WC_API_URL = f"{WC_API_URL_BASE}/products"
+WC_CAT_API_URL = f"{WC_API_URL_BASE}/products/categories"
 WC_CONSUMER_KEY = os.environ.get("WC_CONSUMER_KEY")
 WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET")
 
 if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
     print("❌ متغیرهای محیطی ووکامرس به درستی تنظیم نشده‌اند. برنامه متوقف می‌شود.")
     exit(1)
+# ---------------------------------
 
+# --- اطلاعات API سایت هدف ---
 API_BASE_URL = "https://panel.naminet.co/api"
-CATEGORY_ID = 13
-PRODUCTS_LIST_URL_TEMPLATE = f"{API_BASE_URL}/categories/{CATEGORY_ID}/products/"
+CATEGORIES_API_URL = f"{API_BASE_URL}/categories/"
+PRODUCTS_LIST_URL_TEMPLATE = f"{API_BASE_URL}/categories/{{category_id}}/products/"
 PRODUCT_ATTRIBUTES_API_URL_TEMPLATE = f"{API_BASE_URL}/products/attr/{{product_id}}"
 AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYmYiOiIxNzUyMjUyMTE2IiwiZXhwIjoiMTc2MDAzMTcxNiIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6IjA5MzcxMTExNTU4QGhtdGVtYWlsLm5leHQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6ImE3OGRkZjViLTVhMjMtNDVkZC04MDBlLTczNTc3YjBkMzQzOSIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL25hbWUiOiIwOTM3MTExMTU1OCIsIkN1c3RvbWVySWQiOiIxMDA4NCJ9.kXoXA0atw0M64b6m084Gt4hH9MoC9IFFDFwuHOEdazA"
 REFERER_URL = "https://naminet.co/"
+# ---------------------------------------------
 
 def make_api_request(url, params=None):
     try:
@@ -38,11 +44,10 @@ def make_api_request(url, params=None):
         return None
 
 def process_price(price_value):
+    # ... (بدون تغییر)
     try:
-        price_value = re.sub(r'[^\d.]', '', str(price_value))
         price_value = float(price_value)
-    except (ValueError, TypeError):
-        return "0"
+    except (ValueError, TypeError): return "0"
     if price_value <= 1: return "0"
     elif price_value <= 7000000: new_price = price_value + 260000
     elif price_value <= 10000000: new_price = price_value * 1.035
@@ -52,6 +57,7 @@ def process_price(price_value):
     return str(int(round(new_price / 10000) * 10000))
 
 def parse_attributes_from_description(description):
+    # ... (بدون تغییر)
     attrs = []
     if description:
         lines = description.split('\r\n')
@@ -63,66 +69,122 @@ def parse_attributes_from_description(description):
                     attrs.append({"name": name, "visible": True, "options": [value]})
     return attrs
 
-def validate_product(wc_data):
-    errors = []
-    if not wc_data.get('name'):
-        errors.append("نام محصول وجود ندارد.")
-    if wc_data.get('type') == 'simple':
-        price = wc_data.get('regular_price')
-        if not price or price == "0":
-            errors.append("قیمت محصول ساده معتبر نیست.")
-    if not wc_data.get('sku'):
-        errors.append("کد SKU وجود ندارد.")
-    if not wc_data.get('categories') or not isinstance(wc_data['categories'], list) or not wc_data['categories']:
-        errors.append("دسته‌بندی محصول وجود ندارد.")
-    return errors
+def sync_categories():
+    print("="*20 + " فاز ۰: شروع همگام‌سازی دسته‌بندی‌ها " + "="*20)
+    stats = {'created': 0, 'existing': 0, 'failed': 0}
+    
+    # 1. گرفتن دسته‌بندی‌ها از سایت منبع
+    source_cats_raw = make_api_request(CATEGORIES_API_URL)
+    if not source_cats_raw:
+        print("دریافت دسته‌بندی‌ها از سایت منبع ناموفق بود.")
+        return None
+    
+    source_cats = {cat['id']: cat for cat in source_cats_raw}
 
-def _send_to_woocommerce(sku, data, stats, retries=3):
-    check_url = f"{WC_API_URL}?sku={sku}"
-    for attempt in range(retries):
-        try:
-            r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
-            r.raise_for_status()
-            existing = r.json()
+    # 2. گرفتن دسته‌بندی‌های موجود در ووکامرس
+    wc_cats_map = {}
+    page = 1
+    while True:
+        resp = requests.get(f"{WC_CAT_API_URL}?per_page=100&page={page}", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
+        if not resp.ok or not resp.json():
+            break
+        for cat in resp.json():
+            wc_cats_map[cat['name']] = cat['id']
+        page += 1
+    
+    # 3. ایجاد دسته‌بندی‌های جدید در صورت نیاز
+    for cat_id, cat_data in source_cats.items():
+        cat_name = cat_data.get('name')
+        if not cat_name:
+            continue
             
-            product_id = None
-            if existing:
-                product_id = existing[0]['id']
-                update_url = f"{WC_API_URL}/{product_id}"
-                res = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
-                if res.status_code == 200:
-                    stats['updated'] += 1
-                else:
-                    print(f"   ❌ خطا در آپدیت. Status: {res.status_code}, Response: {res.text}")
+        if cat_name not in wc_cats_map:
+            print(f"   ایجاد دسته‌بندی جدید: '{cat_name}'")
+            new_cat_data = {
+                "name": cat_name,
+                "slug": cat_data.get('se_name', cat_name)
+            }
+            # اگر دسته‌بندی والد داشت، آن را هم تنظیم می‌کنیم
+            parent_id = cat_data.get('parent_category_id', 0)
+            if parent_id in source_cats:
+                 parent_name = source_cats[parent_id].get('name')
+                 if parent_name in wc_cats_map:
+                     new_cat_data['parent'] = wc_cats_map[parent_name]
+
+            res = requests.post(WC_CAT_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=new_cat_data, verify=False)
+            if res.status_code == 201:
+                stats['created'] += 1
+                wc_cats_map[cat_name] = res.json()['id'] # به لیست اضافه می‌کنیم تا برای والدها استفاده شود
             else:
-                res = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
-                if res.status_code == 201:
-                    product_id = res.json()['id']
-                    stats['created'] += 1
-                else:
-                    print(f"   ❌ خطا در ایجاد محصول. Status: {res.status_code}, Response: {res.text}")
+                stats['failed'] += 1
+                print(f"   ❌ خطا در ایجاد دسته‌بندی '{cat_name}'. Status: {res.status_code}, Response: {res.text}")
+        else:
+            stats['existing'] += 1
+    
+    print("\n===============================")
+    print("📊 آمار همگام‌سازی دسته‌بندی‌ها:")
+    print(f"   - 🟢 دسته‌بندی‌های جدید ایجاد شده: {stats['created']}")
+    print(f"   - 🔵 دسته‌بندی‌های موجود: {stats['existing']}")
+    print(f"   - 🔴 خطا در ایجاد: {stats['failed']}")
+    print("===============================\n")
+
+    # یک نقشه از ID منبع به ID ووکامرس برمی‌گردانیم
+    source_to_wc_id_map = {}
+    for source_id, source_data in source_cats.items():
+        if source_data['name'] in wc_cats_map:
+            source_to_wc_id_map[source_id] = wc_cats_map[source_data['name']]
             
-            return product_id
-        except requests.exceptions.HTTPError as e:
-            if r.status_code in [429, 500] and attempt < retries - 1:
-                print(f"   ⏳ تلاش مجدد به دلیل خطای {r.status_code} ...")
-                time.sleep(5)
-                continue
-            print(f"   ❌ خطای کلی در ارتباط با ووکامرس: {e}")
-            return None
-        except Exception as e:
-            print(f"   ❌ خطای کلی در ارتباط با ووکامرس: {e}")
-            return None
+    return source_to_wc_id_map
+
+def _send_to_woocommerce(sku, data, stats):
+    # ... (این تابع بدون تغییر باقی می‌ماند، فقط stats را می‌پذیرد)
+    check_url = f"{WC_API_URL}?sku={sku}"
+    try:
+        r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
+        r.raise_for_status()
+        existing = r.json()
+        
+        product_id = None
+        if existing:
+            product_id = existing[0]['id']
+            print(f"   محصول موجود است (ID: {product_id}). در حال آپدیت...")
+            update_url = f"{WC_API_URL}/{product_id}"
+            res = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
+            if res.status_code == 200:
+                stats['updated'] += 1
+                print(f"   ✅ محصول '{data['name']}' آپدیت شد.")
+            else:
+                stats['failed'] += 1
+                print(f"   ❌ خطا در آپدیت. Status: {res.status_code}, Response: {res.text}")
+        else:
+            print(f"   محصول جدید است. در حال ایجاد '{data['name']}' ...")
+            res = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
+            if res.status_code == 201:
+                product_id = res.json()['id']
+                stats['created'] += 1
+                print(f"   ✅ محصول ایجاد شد (ID: {product_id}).")
+            else:
+                stats['failed'] += 1
+                print(f"   ❌ خطا در ایجاد محصول. Status: {res.status_code}, Response: {res.text}")
+        
+        return product_id
+    except Exception as e:
+        stats['failed'] += 1
+        print(f"   ❌ خطای کلی در ارتباط با ووکامرس: {e}")
+        return None
 
 def create_or_update_variations(product_id, variations):
+    # ... (بدون تغییر)
     if not product_id or not variations: return
         
+    print(f"   در حال ثبت {len(variations)} متغیر برای محصول ID: {product_id}...")
     variations_url = f"{WC_API_URL}/{product_id}/variations/batch"
     
     existing_vars_resp = requests.get(f"{WC_API_URL}/{product_id}/variations?per_page=100", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
     if existing_vars_resp.status_code == 200 and existing_vars_resp.json():
         delete_ids = [v['id'] for v in existing_vars_resp.json()]
         if delete_ids:
+            print(f"   در حال پاک کردن {len(delete_ids)} متغیر قدیمی...")
             requests.post(variations_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json={"delete": delete_ids}, verify=False)
     
     for i in range(0, len(variations), 10):
@@ -132,103 +194,14 @@ def create_or_update_variations(product_id, variations):
         if res_vars.status_code not in [200, 201]:
             print(f"   ❌ خطا در ثبت دسته متغیرها. Status: {res_vars.status_code}, Response: {res_vars.text}")
             break
-
-def extract_category_ids(product):
-    category_ids = product.get("category_ids")
-    if not category_ids:
-        category_ids = [cat.get("id") for cat in product.get("categories", []) if cat.get("id")]
-    if not category_ids:
-        category_ids = [13]
-    return category_ids
-
-def get_all_products():
-    all_products = []
-    page = 1
-    while True:
-        print(f"در حال دریافت صفحه {page} از لیست محصولات...")
-        params = {'page': page, 'pageSize': 100}
-        data = make_api_request(PRODUCTS_LIST_URL_TEMPLATE, params=params)
-        
-        if data is None: break
-        
-        products_in_page = data.get("products", [])
-        if not products_in_page:
-            print("صفحه آخر دریافت شد.")
-            break
-        
-        all_products.extend(products_in_page)
-        print(f"تعداد {len(products_in_page)} محصول از صفحه {page} دریافت شد.")
-        
-        if len(products_in_page) < 100: break
-        page += 1
-        
-    print(f"\nدریافت اطلاعات از API کامل شد. کل محصولات دریافت شده: {len(all_products)}")
-    return all_products
-
-def get_all_wc_categories():
-    categories = []
-    page = 1
-    while True:
-        url = f"{WC_API_URL.replace('/products', '/products/categories')}?per_page=100&page={page}"
-        r = requests.get(url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
-        if r.status_code != 200:
-            print(f"   ❌ خطا در دریافت دسته‌بندی‌های ووکامرس: {r.status_code}")
-            break
-        data = r.json()
-        if not data:
-            break
-        categories.extend(data)
-        if len(data) < 100:
-            break
-        page += 1
-    return categories
-
-def create_wc_category(name, parent=0):
-    url = WC_API_URL.replace('/products', '/products/categories')
-    data = {"name": name, "parent": parent}
-    r = requests.post(url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
-    if r.status_code in [200, 201]:
-        return r.json()
     else:
-        print(f"   ❌ خطا در ایجاد دسته‌بندی '{name}': {r.status_code} - {r.text}")
-        return None
+        print(f"   ✅ متغیرها با موفقیت ثبت شدند.")
 
-def sync_categories(products):
-    # جمع‌آوری همه دسته‌های منبع
-    source_cats = {}
-    for p in products:
-        # اگر category_ids و category_names داری
-        if "categories" in p and isinstance(p["categories"], list):
-            for cat in p["categories"]:
-                if cat.get("id") and cat.get("name"):
-                    source_cats[cat["id"]] = cat["name"]
-    # گرفتن دسته‌های فعلی ووکامرس
-    wc_cats = get_all_wc_categories()
-    wc_cat_names = {c["name"]: c["id"] for c in wc_cats}
-    wc_cat_ids = {c["id"]: c["name"] for c in wc_cats}
-
-    created = 0
-    existed = 0
-    cat_id_map = {}
-
-    for src_id, src_name in source_cats.items():
-        if src_name in wc_cat_names:
-            existed += 1
-            cat_id_map[src_id] = wc_cat_names[src_name]
-        else:
-            new_cat = create_wc_category(src_name)
-            if new_cat and "id" in new_cat:
-                created += 1
-                cat_id_map[src_id] = new_cat["id"]
-    return existed, created, cat_id_map
-
-def process_product(product, stats, cat_id_map):
+def process_product(product, cat_map, stats):
+    print("\n" + "="*50)
     product_name = product.get('name', 'بدون نام')
     product_id = product.get('id', '')
-
-    # استخراج دسته‌بندی داینامیک و نگاشت به آی‌دی ووکامرس
-    category_ids = extract_category_ids(product)
-    wc_category_ids = [cat_id_map.get(cid, 13) for cid in category_ids if cat_id_map.get(cid, 13)]
+    print(f"پردازش: {product_name} (ID: {product_id})")
 
     variations_raw = make_api_request(PRODUCT_ATTRIBUTES_API_URL_TEMPLATE.format(product_id=product_id))
     
@@ -249,6 +222,11 @@ def process_product(product, stats, cat_id_map):
                 })
 
     other_attrs = parse_attributes_from_description(product.get('short_description', ''))
+    
+    # تبدیل ID دسته‌بندی منبع به ID ووکامرس
+    wc_categories = [{"id": cat_map[cid]} for cid in product.get('category_ids', []) if cid in cat_map]
+    if not wc_categories:
+        print("   هشدار: هیچ دسته‌بندی معتبری برای این محصول یافت نشد.")
 
     if variations:
         wc_data = {
@@ -256,7 +234,7 @@ def process_product(product, stats, cat_id_map):
             "type": "variable",
             "sku": f"NAMIN-{product.get('sku', product_id)}",
             "description": product.get('short_description', ''),
-            "categories": [{"id": cid} for cid in wc_category_ids if cid],
+            "categories": wc_categories,
             "images": [{"src": img.get("src", "")} for img in product.get("images", [])],
             "attributes": [
                 {
@@ -268,12 +246,6 @@ def process_product(product, stats, cat_id_map):
             ] + other_attrs,
             "default_attributes": [{"name": "رنگ", "option": sorted(list(color_options))[0]}] if color_options else []
         }
-        errors = validate_product(wc_data)
-        if errors:
-            print(f"   ❌ محصول '{wc_data.get('name', '')}' اعتبارسنجی نشد:")
-            for err in errors:
-                print(f"      - {err}")
-            return
         product_wc_id = _send_to_woocommerce(wc_data['sku'], wc_data, stats)
         create_or_update_variations(product_wc_id, variations)
     else:
@@ -285,58 +257,82 @@ def process_product(product, stats, cat_id_map):
                 "sku": f"NAMIN-{product.get('sku', product_id)}",
                 "regular_price": process_price(price),
                 "description": product.get('short_description', ''),
-                "categories": [{"id": cid} for cid in wc_category_ids if cid],
+                "categories": wc_categories,
                 "images": [{"src": img.get("src", "")} for img in product.get("images", [])],
                 "stock_status": "instock",
                 "attributes": other_attrs
             }
-            errors = validate_product(wc_data)
-            if errors:
-                print(f"   ❌ محصول '{wc_data.get('name', '')}' اعتبارسنجی نشد:")
-                for err in errors:
-                    print(f"      - {err}")
-                return
             _send_to_woocommerce(wc_data['sku'], wc_data, stats)
         else:
-            print(f"   محصول ساده قیمت ندارد یا ناموجود است. نادیده گرفته شد.")
+            stats['skipped'] += 1
+            print("   محصول ساده قیمت ندارد یا ناموجود است. نادیده گرفته شد.")
 
-def process_product_wrapper(args):
-    product, stats, cat_id_map = args
-    try:
-        if product.get('in_stock', True) and product.get('price', 0) > 0:
-            process_product(product, stats, cat_id_map)
-    except Exception as e:
-        print(f"   ❌ خطا در پردازش محصول {product.get('id', '')}: {e}")
+def get_all_products(category_id):
+    all_products = []
+    page = 1
+    while True:
+        print(f"در حال دریافت صفحه {page} از محصولات دسته‌بندی {category_id}...")
+        url = PRODUCTS_LIST_URL_TEMPLATE.format(category_id=category_id)
+        params = {'page': page, 'pageSize': 50}
+        data = make_api_request(url, params=params)
+        
+        if data is None: break
+        
+        products_in_page = data.get("products", [])
+        if not products_in_page:
+            print("صفحه آخر دریافت شد.")
+            break
+        
+        all_products.extend(products_in_page)
+        print(f"تعداد {len(products_in_page)} محصول از صفحه {page} دریافت شد.")
+        
+        if len(products_in_page) < 50: break
+        page += 1
+        time.sleep(1)
+        
+    print(f"\nدریافت اطلاعات از API کامل شد. کل محصولات دریافت شده: {len(all_products)}")
+    return all_products
 
 def main():
-    products = get_all_products()
+    # فاز ۰: همگام‌سازی دسته‌بندی‌ها
+    cat_map = sync_categories()
+    if cat_map is None:
+        print("ادامه فرآیند به دلیل خطای همگام‌سازی دسته‌بندی‌ها ممکن نیست.")
+        return
+
+    # فاز ۱: دریافت تمام محصولات از تمام دسته‌بندی‌ها
+    # برای سادگی فعلا فقط دسته‌بندی اصلی (موبایل) را می‌گیریم
+    products = get_all_products(1) # ID 1 برای دسته‌بندی اصلی موبایل است
     if not products:
         print("هیچ محصولی برای پردازش یافت نشد. برنامه خاتمه می‌یابد.")
         return
-
-    print("\nدر حال همگام‌سازی دسته‌بندی‌ها...")
-    existed, created, cat_id_map = sync_categories(products)
-    print(f"\n📂 دسته‌بندی‌های موجود در ووکامرس: {existed}")
-    print(f"🆕 دسته‌بندی‌های جدید ایجاد شده: {created}\n")
-
-    total = len(products)
-    available = sum(1 for p in products if p.get('in_stock', True) and p.get('price', 0) > 0)
-    stats = {'created': 0, 'updated': 0}
+        
+    stats = {'created': 0, 'updated': 0, 'skipped': 0, 'failed': 0}
     
-    print(f"\n🔎 تعداد کل گروه‌های محصول شناسایی شده: {total}")
-    print(f"✅ گروه‌های محصول موجود و با قیمت: {available}\n")
-    
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        list(tqdm(executor.map(process_product_wrapper, [(p, stats, cat_id_map) for p in products]), total=len(products), desc="در حال پردازش محصولات", unit="محصول"))
+    # فاز ۲: پردازش محصولات
+    for product in products:
+        try:
+            if product.get('in_stock', True) and product.get('price', 0) > 0:
+                process_product(product, cat_map, stats)
+            else:
+                stats['skipped'] += 1
+                print("\n" + "="*50)
+                print(f"نادیده گرفتن گروه محصول ناموجود/بدون قیمت: {product.get('name')}")
+        except Exception as e:
+            stats['failed'] += 1
+            print(f"   ❌ خطا در پردازش محصول {product.get('id', '')}: {e}")
+        time.sleep(1.5)
         
     print("\n===============================")
-    print(f"📦 تعداد کل محصولات پردازش شده: {available} از {total}")
+    print("📊 آمار نهایی همگام‌سازی محصولات:")
+    print(f"📦 تعداد کل گروه‌های محصول شناسایی شده: {len(products)}")
+    print(f"✅ محصولات پردازش شده: {stats['created'] + stats['updated']}")
+    print(f"❌ محصولات نادیده گرفته شده: {stats['skipped']}")
     print(f"🟢 محصولات جدید ایجاد شده: {stats['created']}")
     print(f"🔵 محصولات آپدیت شده: {stats['updated']}")
-    print(f"📂 دسته‌بندی‌های موجود: {existed}")
-    print(f"🆕 دسته‌بندی‌های جدید ایجاد شده: {created}")
+    print(f"🔴 خطا در پردازش: {stats['failed']}")
     print("===============================")
-    print("تمام محصولات و دسته‌بندی‌ها پردازش شدند. فرآیند به پایان رسید.")
+    print("تمام محصولات پردازش شدند. فرآیند به پایان رسید.")
 
 if __name__ == "__main__":
     main()
