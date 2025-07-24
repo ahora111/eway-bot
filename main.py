@@ -80,9 +80,6 @@ def validate_product(wc_data):
         errors.append("کد SKU وجود ندارد.")
     if not wc_data.get('categories') or not isinstance(wc_data['categories'], list) or not wc_data['categories']:
         errors.append("دسته‌بندی محصول وجود ندارد.")
-    # اگر تصویر اجباری است:
-    # if not wc_data.get('images') or not wc_data['images']:
-    #     errors.append("تصویر محصول وجود ندارد.")
     return errors
 
 def _send_to_woocommerce(sku, data, stats, retries=3):
@@ -96,20 +93,16 @@ def _send_to_woocommerce(sku, data, stats, retries=3):
             product_id = None
             if existing:
                 product_id = existing[0]['id']
-                # print(f"   محصول موجود است (ID: {product_id}). در حال آپدیت...")
                 update_url = f"{WC_API_URL}/{product_id}"
                 res = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
                 if res.status_code == 200:
-                    # print(f"   ✅ محصول '{data['name']}' آپدیت شد.")
                     stats['updated'] += 1
                 else:
                     print(f"   ❌ خطا در آپدیت. Status: {res.status_code}, Response: {res.text}")
             else:
-                # print(f"   محصول جدید است. در حال ایجاد '{data['name']}' ...")
                 res = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
                 if res.status_code == 201:
                     product_id = res.json()['id']
-                    # print(f"   ✅ محصول ایجاد شد (ID: {product_id}).")
                     stats['created'] += 1
                 else:
                     print(f"   ❌ خطا در ایجاد محصول. Status: {res.status_code}, Response: {res.text}")
@@ -129,14 +122,12 @@ def _send_to_woocommerce(sku, data, stats, retries=3):
 def create_or_update_variations(product_id, variations):
     if not product_id or not variations: return
         
-    # print(f"   در حال ثبت {len(variations)} متغیر برای محصول ID: {product_id}...")
     variations_url = f"{WC_API_URL}/{product_id}/variations/batch"
     
     existing_vars_resp = requests.get(f"{WC_API_URL}/{product_id}/variations?per_page=100", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
     if existing_vars_resp.status_code == 200 and existing_vars_resp.json():
         delete_ids = [v['id'] for v in existing_vars_resp.json()]
         if delete_ids:
-            # print(f"   در حال پاک کردن {len(delete_ids)} متغیر قدیمی...")
             requests.post(variations_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json={"delete": delete_ids}, verify=False)
     
     for i in range(0, len(variations), 10):
@@ -146,12 +137,23 @@ def create_or_update_variations(product_id, variations):
         if res_vars.status_code not in [200, 201]:
             print(f"   ❌ خطا در ثبت دسته متغیرها. Status: {res_vars.status_code}, Response: {res_vars.text}")
             break
-    # else:
-    #     print(f"   ✅ متغیرها با موفقیت ثبت شدند.")
+
+def extract_category_ids(product):
+    # اول category_ids را چک کن
+    category_ids = product.get("category_ids")
+    if not category_ids:
+        # اگر نبود، از categories استخراج کن
+        category_ids = [cat.get("id") for cat in product.get("categories", []) if cat.get("id")]
+    if not category_ids:
+        category_ids = [13]  # پیش‌فرض
+    return category_ids
 
 def process_product(product, stats):
     product_name = product.get('name', 'بدون نام')
     product_id = product.get('id', '')
+
+    # استخراج دسته‌بندی داینامیک
+    category_ids = extract_category_ids(product)
 
     variations_raw = make_api_request(PRODUCT_ATTRIBUTES_API_URL_TEMPLATE.format(product_id=product_id))
     
@@ -179,7 +181,7 @@ def process_product(product, stats):
             "type": "variable",
             "sku": f"NAMIN-{product.get('sku', product_id)}",
             "description": product.get('short_description', ''),
-            "categories": [{"id": 13}],
+            "categories": [{"id": cid} for cid in category_ids if cid],
             "images": [{"src": img.get("src", "")} for img in product.get("images", [])],
             "attributes": [
                 {
@@ -208,7 +210,7 @@ def process_product(product, stats):
                 "sku": f"NAMIN-{product.get('sku', product_id)}",
                 "regular_price": process_price(price),
                 "description": product.get('short_description', ''),
-                "categories": [{"id": 13}],
+                "categories": [{"id": cid} for cid in category_ids if cid],
                 "images": [{"src": img.get("src", "")} for img in product.get("images", [])],
                 "stock_status": "instock",
                 "attributes": other_attrs
@@ -228,7 +230,7 @@ def get_all_products():
     page = 1
     while True:
         print(f"در حال دریافت صفحه {page} از لیست محصولات...")
-        params = {'page': page, 'pageSize': 100}  # افزایش pageSize برای سرعت بیشتر
+        params = {'page': page, 'pageSize': 100}
         data = make_api_request(PRODUCTS_LIST_URL_TEMPLATE, params=params)
         
         if data is None: break
@@ -243,7 +245,6 @@ def get_all_products():
         
         if len(products_in_page) < 100: break
         page += 1
-        # time.sleep(1)  # اگر لازم بود فعال کن
         
     print(f"\nدریافت اطلاعات از API کامل شد. کل محصولات دریافت شده: {len(all_products)}")
     return all_products
@@ -271,7 +272,6 @@ def main():
     print(f"\n🔎 تعداد کل گروه‌های محصول شناسایی شده: {total}")
     print(f"✅ گروه‌های محصول موجود و با قیمت: {available}\n")
     
-    # پردازش موازی محصولات
     with ThreadPoolExecutor(max_workers=5) as executor:
         list(tqdm(executor.map(process_product_wrapper, [(p, stats) for p in products]), total=len(products), desc="در حال پردازش محصولات", unit="محصول"))
         
