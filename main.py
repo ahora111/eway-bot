@@ -95,22 +95,117 @@ def get_and_parse_categories(session):
         return None
 
 
+# (کد قبلی را دست نخورده نگه دارید و این توابع را به آن اضافه کنید)
+
+# الگو برای URL صفحه محصولات یک دسته‌بندی
+PRODUCT_LIST_URL_TEMPLATE = f"{BASE_URL}/Store/List/{{category_id}}/2/2/0/0/0/10000000000"
+
+def get_products_from_category_page(session, category_id):
+    """محصولات را از صفحه HTML یک دسته‌بندی استخراج می‌کند."""
+    
+    products = []
+    page_num = 1 # فرض می‌کنیم صفحه‌بندی با پارامتر page=N است
+    
+    while True:
+        # آدرس URL را برای هر صفحه می‌سازیم
+        # این الگو ممکن است نیاز به تغییر داشته باشد (مثلاً page= در پارامترها)
+        url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id)
+        # اگر صفحه‌بندی پارامتر داشت: params = {'page': page_num}
+        
+        print(f"  - در حال دریافت محصولات از صفحه {page_num} برای دسته‌بندی {category_id}...")
+        print(f"    URL: {url}")
+        
+        try:
+            response = session.get(url)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'lxml')
+            
+            # پیدا کردن بلاک‌های محصولات. این سلکتور کاملا حدسی است و باید اصلاح شود.
+            # بر اساس کدهای قبلی، شاید چیزی شبیه به این باشد:
+            product_blocks = soup.select(".cat-body") 
+            if not product_blocks:
+                # اگر سلکتور بالا کار نکرد، شاید این یکی باشد
+                product_blocks = soup.select(".goods-item-title") 
+            
+            if not product_blocks:
+                print("    - هیچ محصولی در این صفحه یافت نشد یا صفحه‌بندی تمام شد.")
+                break # اگر محصولی پیدا نشد از حلقه خارج شو
+
+            print(f"    - تعداد {len(product_blocks)} بلاک محصول پیدا شد.")
+
+            for block in product_blocks:
+                # استخراج اطلاعات از هر بلاک. این بخش نیاز به دقت و بررسی HTML واقعی دارد.
+                # مثال‌های فرضی:
+                name_tag = block.select_one("a span")
+                name = name_tag.text.strip() if name_tag else "بدون نام"
+                
+                price_tag = block.select_one(".price")
+                price_text = price_tag.text.strip() if price_tag else "0"
+                # پاکسازی قیمت از حروف و کاما
+                price = re.sub(r'[^\d]', '', price_text)
+                
+                img_tag = block.select_one("img")
+                image_url = img_tag['src'] if img_tag and 'src' in img_tag.attrs else ""
+                if image_url and not image_url.startswith('http'):
+                    image_url = "https://staticcontent.eways.co" + image_url
+                
+                # پیدا کردن ID محصول از لینک 'add to cart' یا لینک جزئیات
+                id_tag = block.select_one("a[data-productid]")
+                product_id = id_tag['data-productid'] if id_tag else None
+
+                stock_tag = block.select_one(".col-lg-1.text-center.col-xs-6")
+                stock = stock_tag.text.strip() if stock_tag else "0"
+                
+                if product_id and name:
+                    products.append({
+                        "id": product_id,
+                        "name": name,
+                        "price": price,
+                        "stock": stock,
+                        "image": image_url,
+                        "category_id": category_id
+                    })
+            
+            # مدیریت صفحه‌بندی (بسیار مهم)
+            # باید ببینیم آیا لینک "صفحه بعد" وجود دارد یا نه
+            # این بخش فعلا غیرفعال است تا منطق اصلی را تست کنیم.
+            # next_page_link = soup.select_one("a.pagination-next")
+            # if not next_page_link:
+            #     break
+            
+            # فعلا فقط صفحه اول را میخوانیم و از حلقه خارج میشویم
+            break
+            
+            # page_num += 1
+
+        except Exception as e:
+            print(f"    - خطا در پردازش صفحه محصولات: {e}")
+            break
+            
+    return products
+
+# --- در تابع main ---
 def main():
-    """تابع اصلی برای اجرای برنامه."""
+    # ... (کدهای قبلی برای دریافت دسته‌بندی‌ها) ...
     session = get_session()
     flat_categories = get_and_parse_categories(session)
 
     if flat_categories:
-        print("\n✅ پردازش دسته‌بندی‌ها با موفقیت انجام شد.")
-        print(f"تعداد کل دسته‌بندی‌های استخراج شده: {len(flat_categories)}")
+        # --- بخش جدید برای تست دریافت محصولات ---
         
-        # مرتب‌سازی بر اساس parent_id برای نمایش بهتر
-        sorted_cats = sorted(flat_categories, key=lambda x: (x['parent_id'] or -1, x['id']))
+        # یک دسته‌بندی برای تست انتخاب می‌کنیم (مثلاً اولین دسته‌بندی که پیدا شده)
+        test_category_id = 4285 # این ID دسته‌بندی موبایل از URLهای قبلی شما بود
+        print(f"\n--- تست دریافت محصولات برای دسته‌بندی ID: {test_category_id} ---")
         
-        print("\n--- نمونه دسته‌بندی‌ها (مرتب شده) ---")
-        print(json.dumps(sorted_cats[:15], indent=2, ensure_ascii=False))
+        products = get_products_from_category_page(session, test_category_id)
+        
+        if products:
+            print(f"\n✅ تعداد {len(products)} محصول با موفقیت از صفحه اول استخراج شد.")
+            print("--- نمونه ۳ محصول اول ---")
+            print(json.dumps(products[:3], indent=2, ensure_ascii=False))
+        else:
+            print("\n❌ استخراج محصول ناموفق بود. لطفاً سلکتورها را در کد بررسی کنید.")
+    
     else:
-        print("\n❌ استخراج دسته‌بندی‌ها ناموفق بود. لطفاً خروجی خطا را بررسی کنید.")
+        print("\n❌ استخراج دسته‌بندی‌ها ناموفق بود.")
 
-if __name__ == "__main__":
-    main()
