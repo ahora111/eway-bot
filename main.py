@@ -25,7 +25,8 @@ WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET")
 BASE_URL = "https://panel.eways.co"
 AUT_COOKIE_VALUE = os.environ.get("EWAYS_AUTH_TOKEN")
 SOURCE_CATS_API_URL = f"{BASE_URL}/Store/GetCategories"
-PRODUCT_LIST_URL_TEMPLATE = f"{BASE_URL}/Store/List/{{category_id}}/2/2/0/0/0/10000000000?page={{page}}"
+# و آن را با این خط جایگزین کنید:
+PRODUCT_LIST_URL_TEMPLATE = f"{BASE_URL}/Store/List/{{category_id}}/2/2/{{page}}/0/0/10000000000"
 
 # ==============================================================================
 # --- توابع مربوط به سایت مبدا (Eways.co) ---
