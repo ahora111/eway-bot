@@ -277,19 +277,26 @@ def _send_to_woocommerce(sku, data, stats):
         
         if existing:
             product_id = existing[0]['id']
-            # فقط قیمت و موجودی را آپدیت می‌کنیم تا سریع‌تر باشد
             update_data = {
                 "regular_price": data["regular_price"],
                 "stock_quantity": data["stock_quantity"],
                 "stock_status": data["stock_status"]
             }
             res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=update_data, verify=False, timeout=20)
-            if res.status_code == 200: with stats['lock']: stats['updated'] += 1
-            else: print(f"   ❌ خطا در آپدیت '{data['name']}'. Status: {res.status_code}")
+            if res.status_code == 200:
+                # --- اصلاح این قسمت ---
+                with stats['lock']:
+                    stats['updated'] += 1
+            else:
+                print(f"   ❌ خطا در آپدیت '{data['name']}'. Status: {res.status_code}")
         else:
             res = requests.post(f"{WC_API_URL}/products", auth=auth, json=data, verify=False, timeout=20)
-            if res.status_code == 201: with stats['lock']: stats['created'] += 1
-            else: print(f"   ❌ خطا در ایجاد '{data['name']}'. Status: {res.status_code}")
+            if res.status_code == 201:
+                # --- اصلاح این قسمت ---
+                with stats['lock']:
+                    stats['created'] += 1
+            else:
+                print(f"   ❌ خطا در ایجاد '{data['name']}'. Status: {res.status_code}")
     except Exception as e:
         print(f"   ❌ خطای کلی در ارتباط با ووکامرس برای SKU {sku}: {e}")
 
