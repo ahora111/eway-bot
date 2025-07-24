@@ -3,6 +3,7 @@ import urllib3
 import os
 import re
 import time
+from tqdm import tqdm
 
 # غیرفعال کردن هشدار SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -42,8 +43,10 @@ def make_api_request(url, params=None):
 
 def process_price(price_value):
     try:
+        price_value = re.sub(r'[^\d.]', '', str(price_value))
         price_value = float(price_value)
-    except (ValueError, TypeError): return "0"
+    except (ValueError, TypeError):
+        return "0"
     if price_value <= 1: return "0"
     elif price_value <= 7000000: new_price = price_value + 260000
     elif price_value <= 10000000: new_price = price_value * 1.035
@@ -64,38 +67,63 @@ def parse_attributes_from_description(description):
                     attrs.append({"name": name, "visible": True, "options": [value]})
     return attrs
 
-def _send_to_woocommerce(sku, data, stats):
+def validate_product(wc_data):
+    errors = []
+    if not wc_data.get('name'):
+        errors.append("نام محصول وجود ندارد.")
+    if wc_data.get('type') == 'simple':
+        price = wc_data.get('regular_price')
+        if not price or price == "0":
+            errors.append("قیمت محصول ساده معتبر نیست.")
+    if not wc_data.get('sku'):
+        errors.append("کد SKU وجود ندارد.")
+    if not wc_data.get('categories') or not isinstance(wc_data['categories'], list) or not wc_data['categories']:
+        errors.append("دسته‌بندی محصول وجود ندارد.")
+    # اگر تصویر اجباری است:
+    # if not wc_data.get('images') or not wc_data['images']:
+    #     errors.append("تصویر محصول وجود ندارد.")
+    return errors
+
+def _send_to_woocommerce(sku, data, stats, retries=3):
     check_url = f"{WC_API_URL}?sku={sku}"
-    try:
-        r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
-        r.raise_for_status()
-        existing = r.json()
-        
-        product_id = None
-        if existing:
-            product_id = existing[0]['id']
-            print(f"   محصول موجود است (ID: {product_id}). در حال آپدیت...")
-            update_url = f"{WC_API_URL}/{product_id}"
-            res = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
-            if res.status_code == 200:
-                print(f"   ✅ محصول '{data['name']}' آپدیت شد.")
-                stats['updated'] += 1
+    for attempt in range(retries):
+        try:
+            r = requests.get(check_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False)
+            r.raise_for_status()
+            existing = r.json()
+            
+            product_id = None
+            if existing:
+                product_id = existing[0]['id']
+                print(f"   محصول موجود است (ID: {product_id}). در حال آپدیت...")
+                update_url = f"{WC_API_URL}/{product_id}"
+                res = requests.put(update_url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
+                if res.status_code == 200:
+                    print(f"   ✅ محصول '{data['name']}' آپدیت شد.")
+                    stats['updated'] += 1
+                else:
+                    print(f"   ❌ خطا در آپدیت. Status: {res.status_code}, Response: {res.text}")
             else:
-                print(f"   ❌ خطا در آپدیت. Status: {res.status_code}, Response: {res.text}")
-        else:
-            print(f"   محصول جدید است. در حال ایجاد '{data['name']}' ...")
-            res = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
-            if res.status_code == 201:
-                product_id = res.json()['id']
-                print(f"   ✅ محصول ایجاد شد (ID: {product_id}).")
-                stats['created'] += 1
-            else:
-                print(f"   ❌ خطا در ایجاد محصول. Status: {res.status_code}, Response: {res.text}")
-        
-        return product_id
-    except Exception as e:
-        print(f"   ❌ خطای کلی در ارتباط با ووکامرس: {e}")
-        return None
+                print(f"   محصول جدید است. در حال ایجاد '{data['name']}' ...")
+                res = requests.post(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
+                if res.status_code == 201:
+                    product_id = res.json()['id']
+                    print(f"   ✅ محصول ایجاد شد (ID: {product_id}).")
+                    stats['created'] += 1
+                else:
+                    print(f"   ❌ خطا در ایجاد محصول. Status: {res.status_code}, Response: {res.text}")
+            
+            return product_id
+        except requests.exceptions.HTTPError as e:
+            if r.status_code in [429, 500] and attempt < retries - 1:
+                print(f"   ⏳ تلاش مجدد به دلیل خطای {r.status_code} ...")
+                time.sleep(5)
+                continue
+            print(f"   ❌ خطای کلی در ارتباط با ووکامرس: {e}")
+            return None
+        except Exception as e:
+            print(f"   ❌ خطای کلی در ارتباط با ووکامرس: {e}")
+            return None
 
 def create_or_update_variations(product_id, variations):
     if not product_id or not variations: return
@@ -164,6 +192,12 @@ def process_product(product, stats):
             ] + other_attrs,
             "default_attributes": [{"name": "رنگ", "option": sorted(list(color_options))[0]}] if color_options else []
         }
+        errors = validate_product(wc_data)
+        if errors:
+            print(f"   ❌ محصول '{wc_data.get('name', '')}' اعتبارسنجی نشد:")
+            for err in errors:
+                print(f"      - {err}")
+            return
         product_wc_id = _send_to_woocommerce(wc_data['sku'], wc_data, stats)
         create_or_update_variations(product_wc_id, variations)
     else:
@@ -180,6 +214,12 @@ def process_product(product, stats):
                 "stock_status": "instock",
                 "attributes": other_attrs
             }
+            errors = validate_product(wc_data)
+            if errors:
+                print(f"   ❌ محصول '{wc_data.get('name', '')}' اعتبارسنجی نشد:")
+                for err in errors:
+                    print(f"      - {err}")
+                return
             _send_to_woocommerce(wc_data['sku'], wc_data, stats)
         else:
             print("   محصول ساده قیمت ندارد یا ناموجود است. نادیده گرفته شد.")
@@ -224,7 +264,7 @@ def main():
     print(f"\n🔎 تعداد کل گروه‌های محصول شناسایی شده: {total}")
     print(f"✅ گروه‌های محصول موجود و با قیمت: {available}\n")
     
-    for product in products:
+    for product in tqdm(products, desc="در حال پردازش محصولات", unit="محصول"):
         try:
             if product.get('in_stock', True) and product.get('price', 0) > 0:
                 process_product(product, stats)
