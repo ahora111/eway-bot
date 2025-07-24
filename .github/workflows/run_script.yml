@@ -32,6 +32,7 @@ jobs:
           WC_API_URL: ${{ secrets.WC_API_URL }}
           WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
           WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
+          NAMINet_AUTH_TOKEN: ${{ secrets.NAMINet_AUTH_TOKEN }} 
         run: python main.py
         
       - name: Install tqdm
