@@ -275,7 +275,7 @@ def get_products_from_category_page(session, category_id):
             id_tag = block.select_one("a[data-productid]")
             product_id = id_tag['data-productid'] if id_tag else None
             stock = 1
-            if product_id and name and int(price) > 0:
+            if product_id and name and int(price) > 0 and is_available:
                 products.append({
                     "id": product_id,
                     "name": name,
@@ -323,6 +323,9 @@ def process_product(product, stats, category_mapping):
     if not wc_cat_id:
         print(f"   - هشدار: برای محصول '{product_name}' دسته‌بندی معادل یافت نشد.")
         return
+    if int(product.get('stock', 0)) <= 0:
+        print(f"   - محصول '{product_name}' ناموجود است و ارسال نمی‌شود.")
+        return
     wc_data = {
         "name": product_name,
         "type": "simple",
@@ -334,11 +337,8 @@ def process_product(product, stats, category_mapping):
         "images": [{"src": product.get("image")}] if product.get("image") else [],
         "stock_quantity": product.get('stock'),
         "manage_stock": True,
+        "stock_status": "instock"
     }
-    if int(wc_data.get("stock_quantity", 0)) > 0:
-        wc_data["stock_status"] = "instock"
-    else:
-        wc_data["stock_status"] = "outofstock"
     _send_to_woocommerce(wc_data['sku'], wc_data, stats)
 
 def _send_to_woocommerce(sku, data, stats, retries=3):
