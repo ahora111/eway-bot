@@ -16,10 +16,12 @@ from threading import Lock
 # ==============================================================================
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# --- اطلاعات ووکامرس ---
 WC_API_URL = os.environ.get("WC_API_URL")
 WC_CONSUMER_KEY = os.environ.get("WC_CONSUMER_KEY")
 WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET")
 
+# --- اطلاعات سایت Eways ---
 BASE_URL = "https://panel.eways.co"
 AUT_COOKIE_VALUE = os.environ.get("EWAYS_AUTH_TOKEN")
 SOURCE_CATS_API_URL = f"{BASE_URL}/Store/GetCategories"
@@ -46,11 +48,10 @@ def get_and_parse_categories(session):
     """دسته‌بندی‌ها را از API دریافت و به صورت یک لیست مسطح برمی‌گرداند."""
     print(f"⏳ دریافت دسته‌بندی‌ها از: {SOURCE_CATS_API_URL}")
     try:
-        response = session.get(SOURCE_CATS_API_URL)
+        response = session.get(SOURCE_CATS_API_URL, timeout=30)
         if response.status_code != 200:
             print(f"❌ خطای وضعیت {response.status_code} در دریافت دسته‌بندی‌ها.")
-            print("پاسخ سرور:", response.text[:500])
-            response.raise_for_status()
+            return None
         print("✅ HTML دسته‌بندی‌ها با موفقیت دریافت شد.")
         
         soup = BeautifulSoup(response.text, 'lxml')
@@ -67,7 +68,7 @@ def get_and_parse_categories(session):
             cat_id_raw = item.get('id', '')
             match = re.search(r'(\d+)', cat_id_raw)
             if not match: continue
-            cat_id = int(match.group(1))
+            cat_menu_id = int(match.group(1))
 
             a_tag = item.find('a', recursive=False) or item.select_one("a")
             if not a_tag or not a_tag.get('href'): continue
@@ -76,14 +77,14 @@ def get_and_parse_categories(session):
             real_id_match = re.search(r'/Store/List/(\d+)', a_tag['href'])
             real_id = int(real_id_match.group(1)) if real_id_match else None
 
-            if name and real_id:
-                cats_map[cat_id] = {"id": real_id, "name": name, "parent_id": None, "menu_item_id": cat_id}
+            if name and real_id and name != "#":
+                cats_map[cat_menu_id] = {"id": real_id, "name": name, "parent_id": None}
 
         for item in all_menu_items:
             cat_id_raw = item.get('id', '')
             match = re.search(r'(\d+)', cat_id_raw)
             if not match: continue
-            cat_id = int(match.group(1))
+            cat_menu_id = int(match.group(1))
 
             parent_li = item.find_parent("li", class_="menu-item-has-children")
             if parent_li:
@@ -91,8 +92,8 @@ def get_and_parse_categories(session):
                 parent_match = re.search(r'(\d+)', parent_id_raw)
                 if parent_match:
                     parent_menu_id = int(parent_match.group(1))
-                    if cat_id in cats_map and parent_menu_id in cats_map:
-                        cats_map[cat_id]['parent_id'] = cats_map[parent_menu_id]['id']
+                    if cat_menu_id in cats_map and parent_menu_id in cats_map:
+                        cats_map[cat_menu_id]['parent_id'] = cats_map[parent_menu_id]['id']
         
         final_cats = list(cats_map.values())
         print(f"✅ تعداد {len(final_cats)} دسته‌بندی معتبر استخراج شد.")
@@ -102,8 +103,9 @@ def get_and_parse_categories(session):
         return None
 
 def get_products_from_category_page(session, category_id):
-    """محصولات را از صفحات HTML یک دسته‌بندی استخراج می‌کند و صفحه‌بندی را مدیریت می‌کند."""
-    products = []
+    """محصولات را از صفحات HTML یک دسته‌بندی استخراج می‌کند و صفحه‌بندی را هوشمندانه مدیریت می‌کند."""
+    all_products_in_category = []
+    seen_product_ids = set()
     page_num = 1
     
     while True:
@@ -111,178 +113,240 @@ def get_products_from_category_page(session, category_id):
         print(f"  - در حال دریافت محصولات از: {url}")
         
         try:
-            response = session.get(url)
-            if response.status_code != 200:
-                print(f"    - خطای وضعیت {response.status_code}, توقف برای این دسته‌بندی.")
-                break
+            response = session.get(url, timeout=30)
+            if response.status_code != 200: break
                 
             soup = BeautifulSoup(response.text, 'lxml')
-            
             product_blocks = soup.select(".goods_item.goods-record")
             if not product_blocks:
-                print("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی برای این دسته.")
+                print("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی.")
                 break
 
-            print(f"    - تعداد {len(product_blocks)} بلاک محصول پیدا شد.")
-            new_products_found_in_page = 0
-            
+            current_page_product_ids = []
             for block in product_blocks:
                 try:
                     is_available = 'noCount' not in block.get('class', [])
-                    if not is_available:
-                        continue
+                    if not is_available: continue
 
-                    name_tag = block.select_one(".goods-record-title")
-                    name = name_tag.text.strip() if name_tag else None
+                    id_tag = block.select_one("a[data-productid]")
+                    product_id = id_tag['data-productid'] if id_tag else None
+                    if not product_id or product_id in seen_product_ids: continue
+
+                    seen_product_ids.add(product_id)
+                    current_page_product_ids.append(product_id)
                     
+                    name = (block.select_one(".goods-record-title").text.strip() if block.select_one(".goods-record-title") else None)
                     price_tag = block.select_one(".goods-record-price")
-                    price_text = "0"
                     if price_tag:
                         if price_tag.find('del'): price_tag.find('del').decompose()
-                        price_text = price_tag.text.strip()
-                    price = re.sub(r'[^\d]', '', price_text) or "0"
+                        price = re.sub(r'[^\d]', '', price_tag.text.strip()) or "0"
                     
                     img_tag = block.select_one("img.goods-record-image")
                     image_url = (img_tag['data-src'] if img_tag and 'data-src' in img_tag.attrs else "")
                     if image_url and not image_url.startswith('http'):
                         image_url = "https://staticcontent.eways.co" + image_url
                     
-                    id_tag = block.select_one("a[data-productid]")
-                    product_id = id_tag['data-productid'] if id_tag else None
-
                     stock_tag = block.select_one(".goods-record-count span")
                     stock = int(stock_tag.text.strip()) if stock_tag else 1
                     
-                    if product_id and name and int(price) > 0:
-                        products.append({
-                            "id": product_id,
-                            "name": name,
-                            "price": price,
-                            "stock": stock,
-                            "image": image_url,
-                            "category_id": category_id
+                    if name and int(price) > 0:
+                        all_products_in_category.append({
+                            "id": product_id, "name": name, "price": price, "stock": stock,
+                            "image": image_url, "category_id": category_id
                         })
-                        new_products_found_in_page += 1
                 except Exception as e:
                     print(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
 
-            if new_products_found_in_page == 0 and page_num > 1:
-                print("    - محصول جدیدی در این صفحه نبود، توقف.")
+            if not current_page_product_ids:
+                print("    - محصول جدیدی در این صفحه یافت نشد، توقف صفحه‌بندی.")
                 break
 
             page_num += 1
             time.sleep(random.uniform(0.5, 1.5))
-
         except Exception as e:
             print(f"    - خطای کلی در پردازش صفحه محصولات: {e}")
             break
             
-    return products
-    
-# ... (بقیه توابع مثل get_all_products, process_price, و ... از کد شما اینجا قرار میگیرند) ...
-# من فقط تابع main را با چند اصلاح کوچک می‌آورم تا کامل باشد.
+    return all_products_in_category
+
 def get_all_products(session, categories):
+    """تمام محصولات را از تمام دسته‌بندی‌های انتخاب شده جمع‌آوری می‌کند."""
     all_products = {}
     print("\n⏳ شروع فرآیند جمع‌آوری تمام محصولات از همه دسته‌بندی‌های انتخابی...")
     for category in tqdm(categories, desc="پردازش دسته‌بندی‌ها"):
-        cat_id = category['id']
-        cat_name = category['name']
-        print(f"\nدر حال دریافت محصولات دسته‌بندی: '{cat_name}' (ID: {cat_id})")
-        products_in_cat = get_products_from_category_page(session, cat_id)
+        products_in_cat = get_products_from_category_page(session, category['id'])
         for product in products_in_cat:
-            all_products[product['id']] = product # ذخیره با ID برای جلوگیری از تکرار
+            all_products[product['id']] = product
     print(f"\n✅ فرآیند جمع‌آوری کامل شد. تعداد کل محصولات یکتا و موجود: {len(all_products)}")
     return list(all_products.values())
 
+
+# ==============================================================================
+# --- توابع مربوط به ووکامرس و انتقال داده ---
+# ==============================================================================
+def sort_cats_for_creation(flat_cats):
+    """دسته‌بندی‌ها را برای ایجاد مرتب می‌کند (اول والد، بعد فرزند)."""
+    sorted_cats = []
+    id_to_cat = {cat["id"]: cat for cat in flat_cats}
+    visited = set()
+    def visit(cat):
+        if cat["id"] in visited: return
+        parent_id = cat.get("parent_id")
+        if parent_id and parent_id in id_to_cat:
+            visit(id_to_cat[parent_id])
+        sorted_cats.append(cat)
+        visited.add(cat["id"])
+    for cat in flat_cats:
+        visit(cat)
+    return sorted_cats
+
+def get_wc_categories():
+    """تمام دسته‌بندی‌های موجود در ووکامرس را دریافت می‌کند."""
+    wc_cats, page = [], 1
+    while True:
+        try:
+            res = requests.get(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), params={"per_page": 100, "page": page}, verify=False)
+            res.raise_for_status()
+            data = res.json()
+            if not data: break
+            wc_cats.extend(data)
+            if len(data) < 100: break
+            page += 1
+        except Exception as e:
+            print(f"❌ خطا در دریافت دسته‌بندی‌های ووکامرس: {e}")
+            break
+    return wc_cats
+
+def transfer_categories_to_wc(source_categories):
+    """دسته‌بندی‌های انتخاب شده را به ووکامرس منتقل کرده و نقشه IDها را برمی‌گرداند."""
+    print("\n⏳ انتقال دسته‌بندی‌ها به ووکامرس...")
+    wc_cats = get_wc_categories()
+    wc_cats_map = {cat["name"].strip(): cat["id"] for cat in wc_cats}
+    source_to_wc_id_map = {}
+    
+    sorted_source_cats = sort_cats_for_creation(source_categories)
+    
+    for cat in tqdm(sorted_source_cats, desc="انتقال دسته‌بندی‌ها"):
+        name = cat["name"].strip()
+        if name in wc_cats_map:
+            wc_id = wc_cats_map[name]
+            source_to_wc_id_map[cat["id"]] = wc_id
+        else:
+            data = {"name": name}
+            parent_id = cat.get("parent_id")
+            if parent_id and parent_id in source_to_wc_id_map:
+                data["parent"] = source_to_wc_id_map[parent_id]
+            
+            try:
+                res = requests.post(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
+                if res.status_code in [200, 201]:
+                    new_id = res.json()["id"]
+                    source_to_wc_id_map[cat["id"]] = new_id
+                    wc_cats_map[name] = new_id # اضافه کردن به نقشه برای استفاده فرزندان بعدی
+                else:
+                    print(f"❌ خطا در ساخت دسته‌بندی '{name}': {res.text}")
+            except Exception as e:
+                print(f"❌ خطای شبکه در ساخت دسته‌بندی '{name}': {e}")
+                
+    print("✅ انتقال دسته‌بندی‌ها کامل شد.")
+    return source_to_wc_id_map
+
 def process_price(price_value):
+    """فرمول محاسبه قیمت فروش بر اساس قیمت خرید."""
     try:
-        price_value = float(re.sub(r'[^\d.]', '', str(price_value)))
-    except (ValueError, TypeError):
-        return "0"
-    price_value = price_value * 1000
+        price_value = float(re.sub(r'[^\d.]', '', str(price_value))) * 1000 # اضافه کردن سه صفر
+    except (ValueError, TypeError): return "0"
+    
     if price_value <= 1: return "0"
     elif price_value <= 7000000: new_price = price_value + 260000
     elif price_value <= 10000000: new_price = price_value * 1.035
     elif price_value <= 20000000: new_price = price_value * 1.025
     elif price_value <= 30000000: new_price = price_value * 1.02
     else: new_price = price_value * 1.015
-    return str(int(round(new_price, -4)))
+    return str(int(round(new_price, -4))) # رند کردن به نزدیک‌ترین ده هزار
 
-def process_product(product, stats, category_mapping):
-    product_name = product.get('name', 'بدون نام')
-    wc_cat_id = category_mapping.get(product.get('category_id'))
-    if not wc_cat_id:
-        print(f"   - هشدار: برای محصول '{product_name}' دسته‌بندی معادل یافت نشد.")
-        return
-    wc_data = {
-        "name": product_name, "type": "simple", "sku": f"EWAYS-{product.get('id')}",
-        "regular_price": process_price(product.get('price', 0)),
-        "categories": [{"id": wc_cat_id}],
-        "images": [{"src": product.get("image")}] if product.get("image") else [],
-        "stock_quantity": product.get('stock'), "manage_stock": True,
-        "stock_status": "instock" if product.get('stock', 0) > 0 else "outofstock"
-    }
-    _send_to_woocommerce(wc_data['sku'], wc_data, stats)
-
-def _send_to_woocommerce(sku, data, stats, retries=3):
-    check_url = f"{WC_API_URL}/products?sku={sku}"
-    for attempt in range(retries):
-        try:
-            auth = (WC_CONSUMER_KEY, WC_CONSUMER_SECRET)
-            r_check = requests.get(check_url, auth=auth, verify=False)
-            r_check.raise_for_status()
-            existing = r_check.json()
-            if existing:
-                product_id = existing[0]['id']
-                res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=data, verify=False)
-                if res.status_code == 200:
-                    with stats['lock']: stats['updated'] += 1
-                else: print(f"   ❌ خطا در آپدیت '{data['name']}'. Status: {res.status_code}")
-            else:
-                res = requests.post(f"{WC_API_URL}/products", auth=auth, json=data, verify=False)
-                if res.status_code == 201:
-                    with stats['lock']: stats['created'] += 1
-                else: print(f"   ❌ خطا در ایجاد '{data['name']}'. Status: {res.status_code}")
-            return
-        except requests.exceptions.RequestException as e:
-            print(f"   ❌ خطای شبکه: {e}")
-            if attempt < retries - 1: time.sleep(5)
-            else: print("   ❌ تلاش‌ها تمام شد.")
+def _send_to_woocommerce(sku, data, stats):
+    """محصول را در ووکامرس ایجاد یا آپدیت می‌کند."""
+    try:
+        auth = (WC_CONSUMER_KEY, WC_CONSUMER_SECRET)
+        check_url = f"{WC_API_URL}/products?sku={sku}"
+        
+        r_check = requests.get(check_url, auth=auth, verify=False, timeout=20)
+        r_check.raise_for_status()
+        existing = r_check.json()
+        
+        if existing:
+            product_id = existing[0]['id']
+            # فقط قیمت و موجودی را آپدیت می‌کنیم تا سریع‌تر باشد
+            update_data = {
+                "regular_price": data["regular_price"],
+                "stock_quantity": data["stock_quantity"],
+                "stock_status": data["stock_status"]
+            }
+            res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=update_data, verify=False, timeout=20)
+            if res.status_code == 200: with stats['lock']: stats['updated'] += 1
+            else: print(f"   ❌ خطا در آپدیت '{data['name']}'. Status: {res.status_code}")
+        else:
+            res = requests.post(f"{WC_API_URL}/products", auth=auth, json=data, verify=False, timeout=20)
+            if res.status_code == 201: with stats['lock']: stats['created'] += 1
+            else: print(f"   ❌ خطا در ایجاد '{data['name']}'. Status: {res.status_code}")
+    except Exception as e:
+        print(f"   ❌ خطای کلی در ارتباط با ووکامرس برای SKU {sku}: {e}")
 
 def process_product_wrapper(args):
-    try: process_product(*args)
-    except Exception as e: print(f"   ❌ خطای جدی در پردازش محصول: {e}")
+    """Wrapper برای استفاده در ThreadPoolExecutor."""
+    product, stats, category_mapping = args
+    try:
+        wc_cat_id = category_mapping.get(product.get('category_id'))
+        if not wc_cat_id: return
+            
+        wc_data = {
+            "name": product.get('name', 'بدون نام'), "type": "simple", "sku": f"EWAYS-{product.get('id')}",
+            "regular_price": process_price(product.get('price', 0)),
+            "categories": [{"id": wc_cat_id}],
+            "images": [{"src": product.get("image")}] if product.get("image") else [],
+            "stock_quantity": product.get('stock', 0), "manage_stock": True,
+            "stock_status": "instock" if product.get('stock', 0) > 0 else "outofstock"
+        }
+        _send_to_woocommerce(wc_data['sku'], wc_data, stats)
+    except Exception as e:
+        print(f"   ❌ خطای جدی در پردازش محصول {product.get('id', '')}: {e}")
 
-# (توابع transfer_categories_to_wc و get_selected_categories_flexible و ... را اینجا کپی کنید)
-# ...
-
+# ==============================================================================
+# --- تابع اصلی برنامه ---
+# ==============================================================================
 def main():
     if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET, AUT_COOKIE_VALUE]):
         print("❌ یکی از متغیرهای محیطی ضروری (WC_* یا EWAYS_AUTH_TOKEN) تنظیم نشده است.")
         return
 
     session = get_session()
+    
+    # 1. دریافت و انتخاب دسته‌بندی‌ها
     source_categories = get_and_parse_categories(session)
     if not source_categories: return
 
-    # اینجا باید تابع get_selected_categories_flexible را فراخوانی کنید
+    # در اینجا باید دسته‌بندی‌های مورد نظر را انتخاب کنید. برای تست، دو دسته را هاردکد می‌کنیم.
+    # در نسخه نهایی، می‌توانید از تابع get_selected_categories_flexible استفاده کنید.
     # filtered_categories = get_selected_categories_flexible(source_categories)
-    # برای تست، فعلا چند دسته را دستی انتخاب میکنیم
-    filtered_categories = [c for c in source_categories if c['id'] in [4285, 16778]] # مثال: موبایل و لپتاپ
+    selected_ids = [4285, 16778] # مثال: ID برای گوشی و لپ‌تاپ
+    filtered_categories = [c for c in source_categories if c['id'] in selected_ids]
     print(f"\n✅ تست با دسته‌بندی‌های منتخب: {[c['name'] for c in filtered_categories]}")
     if not filtered_categories: return
 
-    # اینجا باید تابع transfer_categories_to_wc را فراخوانی کنید
-    # category_mapping = transfer_categories_to_wc(filtered_categories)
-    # برای تست، یک نقشه موقت میسازیم
-    category_mapping = {cat['id']: cat['id'] for cat in filtered_categories}
-    print("⚠️ هشدار: از نقشه موقت برای دسته‌بندی‌ها استفاده می‌شود.")
-    
-    products = get_all_products(session, filtered_categories)
-    if not products:
-        print("❌ هیچ محصولی برای پردازش یافت نشد.")
+    # 2. انتقال دسته‌بندی‌ها به ووکامرس و ساخت نقشه
+    category_mapping = transfer_categories_to_wc(filtered_categories)
+    if not category_mapping:
+        print("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
         return
 
+    # 3. دریافت تمام محصولات
+    products = get_all_products(session, filtered_categories)
+    if not products:
+        print("✅ هیچ محصولی برای پردازش یافت نشد. برنامه با موفقیت خاتمه می‌یابد.")
+        return
+
+    # 4. پردازش و ارسال محصولات به ووکامرس
     stats = {'created': 0, 'updated': 0, 'lock': Lock()}
     print(f"\n🚀 شروع پردازش و ارسال {len(products)} محصول به ووکامرس...")
     with ThreadPoolExecutor(max_workers=5) as executor:
@@ -294,7 +358,6 @@ def main():
     print(f"🟢 ایجاد شده: {stats['created']}")
     print(f"🔵 آپدیت شده: {stats['updated']}")
     print("===============================\nتمام!")
-
 
 if __name__ == "__main__":
     main()
