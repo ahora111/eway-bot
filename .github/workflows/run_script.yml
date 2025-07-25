@@ -21,8 +21,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
-
+          python-version: '3.x'
+        
       # 3. کتابخانه‌های مورد نیاز را از requirements.txt نصب می‌کند
       - name: Install dependencies
         run: |
@@ -34,7 +34,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 tqdm concurrent.futures selenium webdriver-manager
 
-        
       # 4. اسکریپت اصلی را اجرا می‌کند
       - name: Run Eways Sync Script
         env:
