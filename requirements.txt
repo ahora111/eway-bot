@@ -4,3 +4,5 @@ tqdm
 lxml
 urllib3
 woocommerce
+selenium
+webdriver-manager
