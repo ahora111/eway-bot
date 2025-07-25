@@ -18,7 +18,7 @@ from requests.packages.urllib3.util.retry import Retry
 # ==============================================================================
 # --- تنظیمات لاگینگ ---
 # ==============================================================================
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')  # تغییر به DEBUG برای جزئیات بیشتر
 logger = logging.getLogger(__name__)
 handler = RotatingFileHandler('app.log', maxBytes=1024*1024, backupCount=5)  # 1MB per file, 5 backups
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
@@ -155,8 +155,8 @@ def get_selected_categories_flexible(source_categories):
     try:
         selected_input = input("شماره‌های مورد نظر را با کاما وارد کنید (مثل 1,3) یا 'all' برای همه: ").strip().lower()
     except EOFError:
-        logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 1584 و 14548).")
-        default_ids = [1584, 14548]  # پیش‌فرض: پاوربانک و ساعت هوشمند (احتمالاً محصول دارند)
+        logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 959 و 1394).")
+        default_ids = [959, 1394]  # پیش‌فرض: قاب و گلس و رم/فلش/هارد (احتمالاً محصول دارند)
         selected = [c for c in source_categories if c['id'] in default_ids]
         logger.info(f"✅ دسته‌بندی‌های پیش‌فرض انتخاب‌شده: {[c['name'] for c in selected]}")
         return selected
@@ -188,6 +188,8 @@ def get_products_from_category_page(session, category_id, max_pages=50):
             if response.status_code != 200: break
                 
             soup = BeautifulSoup(response.text, 'lxml')
+            logger.debug(f"    - بخشی از HTML صفحه: {str(soup.prettify()[:1000])}...")  # لاگ بخشی از HTML برای دیباگ
+            
             product_blocks = soup.select(".goods_item.goods-record")
             logger.info(f"    - تعداد بلاک‌های محصول پیدا شده: {len(product_blocks)}")
             if not product_blocks:
@@ -199,26 +201,21 @@ def get_products_from_category_page(session, category_id, max_pages=50):
                 try:
                     classes = block.get('class', [])
                     is_available = 'noCount' not in classes
-                    if not is_available:
-                        logger.debug("      - محصول موجود نیست (کلاس noCount). رد شدن.")
-                        continue
+                    logger.debug(f"      - کلاس‌های بلاک: {classes}, موجود؟ {is_available}")
+                    if not is_available: continue
 
                     id_tag = block.select_one("a[data-productid]")
                     product_id = id_tag['data-productid'] if id_tag else None
-                    if not product_id:
-                        logger.debug("      - product_id پیدا نشد. رد شدن.")
-                        continue
-                    if product_id in seen_product_ids:
-                        logger.debug(f"      - product_id {product_id} تکراری است. رد شدن.")
-                        continue
+                    logger.debug(f"      - product_id: {product_id}")
+                    if not product_id or product_id in seen_product_ids: continue
 
                     seen_product_ids.add(product_id)
                     current_page_product_ids.append(product_id)
                     
-                    name = (block.select_one(".goods-record-title").text.strip() if block.select_one(".goods-record-title") else None)
-                    if not name:
-                        logger.debug("      - نام محصول پیدا نشد. رد شدن.")
-                        continue
+                    name_tag = block.select_one(".goods-record-title")
+                    name = name_tag.text.strip() if name_tag else None
+                    logger.debug(f"      - نام: {name}")
+                    if not name: continue
                     
                     price_tag = block.select_one(".goods-record-price")
                     price = "0"
@@ -226,24 +223,25 @@ def get_products_from_category_page(session, category_id, max_pages=50):
                         if price_tag.find('del'): price_tag.find('del').decompose()
                         price_text = price_tag.text.strip()
                         price = re.sub(r'[^\d]', '', price_text) or "0"
+                    logger.debug(f"      - قیمت خام: {price_text}, پردازش‌شده: {price}")
                     
-                    if int(price) <= 0:
-                        logger.debug(f"      - قیمت نامعتبر ({price}). رد شدن.")
-                        continue
+                    if int(price) <= 0: continue
                     
                     img_tag = block.select_one("img.goods-record-image")
                     image_url = (img_tag['data-src'] if img_tag and 'data-src' in img_tag.attrs else "")
                     if image_url and not image_url.startswith('http'):
                         image_url = "https://staticcontent.eways.co" + image_url
+                    logger.debug(f"      - تصویر: {image_url}")
                     
                     stock_tag = block.select_one(".goods-record-count span")
                     stock = int(stock_tag.text.strip()) if stock_tag else 1
+                    logger.debug(f"      - موجودی: {stock}")
                     
                     all_products_in_category.append({
                         "id": product_id, "name": name, "price": price, "stock": stock,
                         "image": image_url, "category_id": category_id
                     })
-                    logger.debug(f"      - محصول {product_id} ({name}) اضافه شد.")
+                    logger.info(f"      - محصول {product_id} ({name}) اضافه شد.")
                 except Exception as e:
                     logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
 
