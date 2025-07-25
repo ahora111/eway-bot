@@ -143,7 +143,7 @@ def get_and_parse_categories(session):
         return None
 
 def get_selected_categories_flexible(source_categories):
-    """اجازه می‌دهد کاربر دسته‌بندی‌های مورد نظر را انتخاب کند."""
+    """اجازه می‌دهد کاربر دسته‌بندی‌های مورد نظر را انتخاب کند. در محیط غیرتعاملی، پیش‌فرض را انتخاب می‌کند."""
     if not source_categories:
         logger.warning("⚠️ هیچ دسته‌بندی برای انتخاب موجود نیست.")
         return []
@@ -152,7 +152,15 @@ def get_selected_categories_flexible(source_categories):
     for i, cat in enumerate(source_categories):
         logger.info(f"{i+1}: {cat['name']} (ID: {cat['id']})")
     
-    selected_input = input("شماره‌های مورد نظر را با کاما وارد کنید (مثل 1,3) یا 'all' برای همه: ").strip().lower()
+    try:
+        selected_input = input("شماره‌های مورد نظر را با کاما وارد کنید (مثل 1,3) یا 'all' برای همه: ").strip().lower()
+    except EOFError:
+        logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 4285 و 16778).")
+        default_ids = [4285, 16778]  # پیش‌فرض: گوشی/تبلت/لپ‌تاپ و لپ‌تاپ
+        selected = [c for c in source_categories if c['id'] in default_ids]
+        logger.info(f"✅ دسته‌بندی‌های پیش‌فرض انتخاب‌شده: {[c['name'] for c in selected]}")
+        return selected
+    
     if selected_input == 'all':
         return source_categories
     
