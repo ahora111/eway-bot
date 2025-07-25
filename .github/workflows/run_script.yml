@@ -1,46 +1,31 @@
-name: Run Python Scraper
+name: Run Eways Bot
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 */6 * * *'
   push:
-    branches:
-      - main
-    paths:
-      - 'main.py'
+    branches: [ main ]
+  workflow_dispatch:
+
 jobs:
-  sync-products:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      # 1. کد مخزن را دانلود می‌کند
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v3
 
-      # 2. پایتون را آماده می‌کند
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-        
-      # 3. کتابخانه‌های مورد نیاز را از requirements.txt نصب می‌کند
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 tqdm concurrent.futures selenium webdriver-manager
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests beautifulsoup4 tqdm selenium webdriver-manager
 
-      # 4. اسکریپت اصلی را اجرا می‌کند
-      - name: Run Eways Sync Script
-        env:
-          # خواندن اطلاعات حساس از Secrets گیت‌هاب
-          WC_API_URL: ${{ secrets.WC_API_URL }}
-          WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
-          WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
-          EWAYS_AUTH_TOKEN: ${{ secrets.EWAYS_AUTH_TOKEN }}
-          SELECTED_CATEGORIES: "4285,16778,iPhone,گوشی موبایل"
-        run: python main.py
+    - name: Run script
+      env:
+        WC_API_URL: ${{ secrets.WC_API_URL }}
+        WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
+        WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
+        SELECTED_CATEGORIES: "4285,16778,iPhone,گوشی موبایل"
+      run: python main.py
