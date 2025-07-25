@@ -35,5 +35,7 @@ jobs:
         WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
         WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
         EWAYS_AUTH_TOKEN: ${{ secrets.EWAYS_AUTH_TOKEN }}
+        EWAYS_USERNAME: ${{ secrets.EWAYS_USERNAME }}
+        EWAYS_PASSWORD: ${{ secrets.EWAYS_PASSWORD }}
         SELECTED_CATEGORIES: "4285,16778,iPhone,گوشی موبایل"
       run: python main.py
