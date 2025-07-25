@@ -171,6 +171,29 @@ def get_all_category_ids(categories, all_cats, selected_ids):
                 to_process.append(cat['id'])
     return list(all_ids)
 
+def get_product_details(session, cat_id, product_id):
+    url = PRODUCT_DETAIL_URL_TEMPLATE.format(cat_id=cat_id, product_id=product_id)
+    try:
+        response = session.get(url, timeout=30)
+        if response.status_code != 200:
+            logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: status {response.status_code}")
+            return {}
+        soup = BeautifulSoup(response.text, 'lxml')
+        specs_table = soup.select_one(".table-responsive table tbody")
+        specs = {}
+        if specs_table:
+            for row in specs_table.find_all("tr"):
+                cells = row.find_all("td")
+                if len(cells) == 2:
+                    key = cells[0].text.strip()
+                    value = cells[1].text.strip()
+                    specs[key] = value
+        logger.debug(f"      - مشخصات استخراج‌شده برای {product_id}: {specs}")
+        return specs
+    except Exception as e:
+        logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
+        return {}
+
 def get_products_from_category_page(session, category_id, max_pages=10):
     all_products_in_category = []
     seen_product_ids = set()
@@ -225,19 +248,24 @@ def get_products_from_category_page(session, category_id, max_pages=10):
                     # موجودی: اگر قیمت وجود دارد، فرض موجود
                     stock = 1
 
+                    # استخراج مشخصات فنی از صفحه جزئیات
+                    specs = get_product_details(session, category_id, product_id)
+                    time.sleep(1)  # تأخیر برای جلوگیری از بلاک
+
                     product = {
                         "id": product_id,
                         "name": name,
                         "price": price,
                         "stock": stock,
                         "image": image_url,
-                        "category_id": category_id
+                        "category_id": category_id,
+                        "specs": specs  # دیکشنری مشخصات فنی
                     }
 
                     seen_product_ids.add(product_id)
                     current_page_product_ids.append(product_id)
                     all_products_in_category.append(product)
-                    logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']}.")
+                    logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']} و {len(specs)} مشخصه فنی.")
                 except Exception as e:
                     logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
             if not current_page_product_ids:
@@ -362,13 +390,22 @@ def process_product_wrapper(args):
     try:
         wc_cat_id = category_mapping.get(product.get('category_id'))
         if not wc_cat_id: return
+        attributes = []
+        for key, value in product.get('specs', {}).items():
+            attributes.append({
+                "name": key,
+                "options": [value],
+                "visible": True,
+                "variation": False
+            })
         wc_data = {
             "name": product.get('name', 'بدون نام'), "type": "simple", "sku": f"EWAYS-{product.get('id')}",
             "regular_price": process_price(product.get('price', 0)),
             "categories": [{"id": wc_cat_id}],
             "images": [{"src": product.get("image")}] if product.get("image") else [],
             "stock_quantity": product.get('stock', 0), "manage_stock": True,
-            "stock_status": "instock" if product.get('stock', 0) > 0 else "outofstock"
+            "stock_status": "instock" if product.get('stock', 0) > 0 else "outofstock",
+            "attributes": attributes  # اضافه کردن مشخصات فنی
         }
         _send_to_woocommerce(wc_data['sku'], wc_data, stats)
     except Exception as e:
