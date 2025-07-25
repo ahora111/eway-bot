@@ -20,7 +20,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 # ==============================================================================
 # --- تنظیمات لاگینگ ---
@@ -59,8 +59,7 @@ def login_and_get_session():
     options = webdriver.ChromeOptions()
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    # For debugging, comment out the next line to see the browser
-    options.add_argument('--headless')  # اگر می‌خواهید ببینید، این خط را کامنت کنید
+    options.add_argument('--headless')  # برای دیباگ، این را کامنت کنید
 
     driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
     
@@ -68,15 +67,14 @@ def login_and_get_session():
     driver.get(LOGIN_URL)
     
     try:
-        # افزایش زمان انتظار به 30 ثانیه
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "Username")))
+        username_field = WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "UserName")))
+        username_field.send_keys(USERNAME)
         
-        # اضافه کردن تاخیر کوتاه برای اطمینان از بارگذاری کامل
-        time.sleep(2)  # 2 ثانیه تاخیر
+        password_field = WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "Password")))
+        password_field.send_keys(PASSWORD)
         
-        driver.find_element(By.ID, "Username").send_keys(USERNAME)
-        driver.find_element(By.ID, "Password").send_keys(PASSWORD)
-        driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+        login_button = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']")))
+        login_button.click()
         
         WebDriverWait(driver, 30).until(EC.url_contains("/Dashboard"))
         logger.info("✅ لاگین موفق.")
@@ -102,6 +100,10 @@ def login_and_get_session():
         return session
     except TimeoutException:
         logger.error("❌ زمان انتظار برای عنصر تمام شد. صفحه ممکن است بارگذاری نشود.")
+        driver.quit()
+        sys.exit(1)
+    except NoSuchElementException as e:
+        logger.error(f"❌ عنصر پیدا نشد: {e}")
         driver.quit()
         sys.exit(1)
     except Exception as e:
