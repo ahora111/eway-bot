@@ -305,10 +305,10 @@ def process_price(price_value):
         price_value = float(re.sub(r'[^\d.]', '', str(price_value))) * 1000
     except (ValueError, TypeError): return "0"
     if price_value <= 1: return "0"
-    elif price_value <= 7000000: new_price = price_value + 260000
-    elif price_value <= 10000000: new_price = price_value * 1.035
-    elif price_value <= 20000000: new_price = price_value * 1.025
-    elif price_value <= 30000000: new_price = price_value * 1.02
+    elif price_value <= 70000000: new_price = price_value + 2600000
+    elif price_value <= 100000000: new_price = price_value * 1.035
+    elif price_value <= 200000000: new_price = price_value * 1.025
+    elif price_value <= 300000000: new_price = price_value * 1.02
     else: new_price = price_value * 1.015
     return str(int(round(new_price, -4)))
 
