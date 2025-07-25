@@ -47,7 +47,7 @@ def login_eways(username, password):
     })
     session.verify = False
 
-    login_url = f"{BASE_URL}/Account/Login"
+    login_url = f"{BASE_URL}/User/Login"
     payload = {
         "UserName": username,
         "Password": password,
