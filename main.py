@@ -179,25 +179,31 @@ def get_product_details(session, cat_id, product_id):
             logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: status {response.status_code}")
             return {}
         soup = BeautifulSoup(response.text, 'lxml')
-        specs_table = soup.select_one('#link1 .table-responsive table tbody')  # سلکتور دقیق برای تب مشخصات
+        
+        # سلکتور بروزشده: بدون tbody، مستقیماً جدول را انتخاب کنید
+        specs_table = soup.select_one('#link1 .table-responsive table')
         specs = {}
         if specs_table:
-            for row in specs_table.find_all("tr"):
+            rows = specs_table.find_all("tr")
+            for row in rows:
                 cells = row.find_all("td")
                 if len(cells) == 2:
-                    key = cells[0].text.strip()  # کلید (مثل "ساختار بدنه")
-                    value = cells[1].text.strip()  # مقدار
+                    key = cells[0].text.strip()
+                    value = cells[1].text.strip()
                     if key and value:
                         specs[key] = value
+            if not specs:
+                logger.debug(f"      - هیچ ردیفی در جدول برای {product_id} پیدا نشد. HTML خام جدول: {specs_table.prettify()}")
         else:
             logger.debug(f"      - جدول مشخصات برای {product_id} پیدا نشد. HTML خام تب: {soup.select_one('#link1').prettify() if soup.select_one('#link1') else 'تب link1 پیدا نشد'}")
+        
         logger.debug(f"      - مشخصات استخراج‌شده برای {product_id}: {specs}")
         return specs
     except Exception as e:
         logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
         return {}
 
-def get_products_from_category_page(session, category_id, max_pages=10):
+def get_products_from_category_page(session, category_id, max_pages=20):  # افزایش max_pages برای دسته‌های بزرگ
     all_products_in_category = []
     seen_product_ids = set()
     page_num = 1
@@ -253,7 +259,7 @@ def get_products_from_category_page(session, category_id, max_pages=10):
 
                     # استخراج مشخصات فنی از صفحه جزئیات
                     specs = get_product_details(session, category_id, product_id)
-                    time.sleep(0.5)  # تأخیر برای جلوگیری از بلاک
+                    time.sleep(random.uniform(0.5, 1.5))  # تأخیر تصادفی برای جلوگیری از بلاک
 
                     product = {
                         "id": product_id,
@@ -275,7 +281,7 @@ def get_products_from_category_page(session, category_id, max_pages=10):
                 logger.info("    - محصول جدیدی در این صفحه یافت نشد، توقف صفحه‌بندی.")
                 break
             page_num += 1
-            time.sleep(random.uniform(2, 3))
+            time.sleep(random.uniform(2, 4))  # تأخیر بیشتر بین صفحات
         except requests.RequestException as e:
             logger.error(f"    - خطای شبکه در پردازش صفحه محصولات: {e}")
             break
@@ -320,26 +326,33 @@ def get_wc_categories():
 def transfer_categories_to_wc(source_categories):
     logger.info("\n⏳ انتقال دسته‌بندی‌ها به ووکامرس...")
     wc_cats = get_wc_categories()
-    wc_cats_map = {cat["name"].strip(): cat["id"] for cat in wc_cats}
+    wc_cats_map = {}  # استفاده از tuple (name, parent) برای چک دقیق‌تر
+    for cat in wc_cats:
+        key = (cat["name"].strip(), cat.get("parent", 0))
+        wc_cats_map[key] = cat["id"]
+    
     source_to_wc_id_map = {}
     for cat in source_categories:
         name = cat["name"].strip()
-        if name in wc_cats_map:
-            wc_id = wc_cats_map[name]
+        parent_id = cat.get("parent_id") or 0
+        wc_parent = source_to_wc_id_map.get(parent_id, 0)
+        lookup_key = (name, wc_parent)
+        
+        if lookup_key in wc_cats_map:
+            wc_id = wc_cats_map[lookup_key]
             source_to_wc_id_map[cat["id"]] = wc_id
+            logger.debug(f"✅ دسته '{name}' (parent: {wc_parent}) قبلاً وجود دارد (ID: {wc_id}). استفاده از موجود.")
         else:
-            data = {"name": name}
-            parent_id = cat.get("parent_id")
-            if parent_id and parent_id in source_to_wc_id_map:
-                data["parent"] = source_to_wc_id_map[parent_id]
+            data = {"name": name, "parent": wc_parent}
             try:
                 res = requests.post(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
                 if res.status_code in [200, 201]:
                     new_id = res.json()["id"]
                     source_to_wc_id_map[cat["id"]] = new_id
-                    wc_cats_map[name] = new_id
+                    wc_cats_map[lookup_key] = new_id
+                    logger.debug(f"✅ دسته '{name}' (parent: {wc_parent}) ساخته شد (ID: {new_id}).")
                 else:
-                    logger.error(f"❌ خطا در ساخت دسته‌بندی '{name}': {res.text}")
+                    logger.error(f"❌ خطا در ساخت دسته‌بندی '{name}' (parent: {wc_parent}): {res.text}")
             except Exception as e:
                 logger.error(f"❌ خطای شبکه در ساخت دسته‌بندی '{name}': {e}")
     logger.info("✅ انتقال دسته‌بندی‌ها کامل شد.")
