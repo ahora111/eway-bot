@@ -230,6 +230,16 @@ def process_product_wrapper(args):
     except Exception as e:
         print(f"   ❌ خطای جدی در پردازش محصول {product.get('id', '')}: {e}")
 
+def get_all_products(session, categories):
+    all_products = {}
+    print("\n⏳ شروع فرآیند جمع‌آوری تمام محصولات...")
+    for category in tqdm(categories, desc="پردازش دسته‌بندی‌ها"):
+        products_in_cat = get_products_from_category_page(session, category['id'])
+        for product in products_in_cat:
+            all_products[product['id']] = product
+    print(f"\n✅ فرآیند جمع‌آوری کامل شد. تعداد کل محصولات یکتا و موجود: {len(all_products)}")
+    return list(all_products.values())
+    
 def main():
     print("برای انتخاب دسته‌بندی‌ها می‌توانید یکی از این روش‌ها را استفاده کنید:")
     print("- متغیر محیطی SELECTED_CATEGORIES (مثلاً: 4285,لیستموبایل,16778)")
