@@ -199,6 +199,7 @@ def get_product_detail(session, cat_id, product_id):
             image_url = "https://staticcontent.eways.co" + image_url
         
         if name and int(price) > 0 and stock > 0:
+            logger.debug(f"      - جزئیات استخراج‌شده: نام={name}, قیمت={price}, موجودی={stock}, تصویر={image_url}")
             return {"id": product_id, "name": name, "price": price, "stock": stock, "image": image_url, "category_id": cat_id}
         else:
             logger.debug(f"      - محصول {product_id} موجود نیست یا قیمت/نام نامعتبر (قیمت: {price}, موجودی: {stock}).")
@@ -207,7 +208,7 @@ def get_product_detail(session, cat_id, product_id):
         logger.warning(f"      - خطا در پارس جزئیات محصول {product_id}: {e}")
         return None
 
-def get_products_from_category_page(session, category_id, max_pages=10):  # کاهش برای تست سریع‌تر
+def get_products_from_category_page(session, category_id, max_pages=5):  # برای تست سریع‌تر
     """محصولات را از صفحات HTML یک دسته‌بندی استخراج می‌کند و صفحه‌بندی را هوشمندانه مدیریت می‌کند."""
     all_products_in_category = []
     seen_product_ids = set()
@@ -235,14 +236,19 @@ def get_products_from_category_page(session, category_id, max_pages=10):  # کا
                 logger.debug(f"      - بلاک کامل: {str(block)}")  # لاگ کامل بلاک برای دیباگ
                 try:
                     classes = block.get('class', [])
-                    is_available = 'soldOut' not in classes  # اصلاح شرط: فقط soldOut رو چک کن، noCount رو نادیده بگیر
+                    is_available = 'soldOut' not in classes  # شرط اصلاح‌شده: فقط soldOut رو چک کن
                     logger.debug(f"      - کلاس‌های بلاک: {classes}, موجود؟ {is_available}")
                     if not is_available: continue
 
-                    id_tag = block.select_one("a[data-productid]")
-                    product_id = id_tag.get('data-productid') if id_tag else None
+                    # استخراج product_id از href
+                    a_tag = block.select_one("a")
+                    href = a_tag['href'] if a_tag else None
+                    product_id = None
+                    if href:
+                        match = re.search(r'/Store/Detail/\d+/(\d+)', href)
+                        product_id = match.group(1) if match else None
                     logger.debug(f"      - product_id: {product_id}")
-                    if not product_id or product_id in seen_product_ids or product_id.startswith('##'):  # Skip placeholder
+                    if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
                         logger.debug(f"      - رد کردن product_id نامعتبر یا تکراری: {product_id}")
                         continue
 
@@ -263,7 +269,7 @@ def get_products_from_category_page(session, category_id, max_pages=10):  # کا
                 break
 
             page_num += 1
-            time.sleep(random.uniform(1, 2))  # افزایش sleep برای جلوگیری از بلاک
+            time.sleep(random.uniform(2, 3))  # افزایش sleep برای جلوگیری از بلاک
         except requests.RequestException as e:
             logger.error(f"    - خطای شبکه در پردازش صفحه محصولات: {e}")
             break
