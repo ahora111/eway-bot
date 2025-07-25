@@ -55,7 +55,7 @@ def login_eways(username, password):
     }
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(login_url, data=payload, timeout=30)
-    if resp.status_code not in [200, 302]:
+    if resp.status_code != 200:
         logger.error(f"❌ لاگین ناموفق! کد وضعیت: {resp.status_code}")
         return None
 
@@ -160,58 +160,6 @@ def get_selected_categories_flexible(source_categories):
         logger.error("❌ ورودی نامعتبر. هیچ دسته‌ای انتخاب نشد.")
         return []
 
-def get_product_detail(session, cat_id, product_id):
-    if not product_id or product_id.startswith('##'):
-        logger.debug(f"      - رد کردن product_id نامعتبر: {product_id}")
-        return None
-    url = PRODUCT_DETAIL_URL_TEMPLATE.format(cat_id=cat_id, product_id=product_id)
-    logger.debug(f"      - دریافت جزئیات محصول از: {url}")
-    try:
-        response = session.get(url, timeout=30)
-        with open(f"product_detail_{product_id}.html", "w", encoding="utf-8") as f:
-            f.write(response.text)
-        if response.status_code != 200:
-            logger.warning(f"      - خطا در دریافت جزئیات: status {response.status_code}")
-            return None
-        soup = BeautifulSoup(response.text, 'lxml')
-
-        # نام محصول
-        name_tag = soup.select_one("span.goods-record-title")
-        name = name_tag.text.strip() if name_tag else None
-
-        # قیمت
-        price_tag = soup.select_one("span.goods-record-price")
-        price = re.sub(r'[^\d]', '', price_tag.text.strip()) if price_tag else "0"
-
-        # موجودی
-        stock_tag = soup.select_one("div.goods-item-desc-count")
-        if stock_tag:
-            stock_match = re.search(r'(\d+)', stock_tag.text)
-            stock = int(stock_match.group(1)) if stock_match else 1
-        else:
-            stock = 1
-
-        # تصویر
-        img_tag = soup.select_one("img.goods-record-image")
-        image_url = img_tag['src'] if img_tag and img_tag.has_attr('src') else ""
-
-        if name and int(price) > 0:
-            logger.debug(f"      - جزئیات استخراج‌شده: نام={name}, قیمت={price}, موجودی={stock}, تصویر={image_url}")
-            return {
-                "id": product_id,
-                "name": name,
-                "price": price,
-                "stock": stock,
-                "image": image_url,
-                "category_id": cat_id
-            }
-        else:
-            logger.debug(f"      - محصول {product_id} موجود نیست یا قیمت/نام نامعتبر (قیمت: {price}, موجودی: {stock}).")
-            return None
-    except Exception as e:
-        logger.warning(f"      - خطا در پارس جزئیات محصول {product_id}: {e}")
-        return None
-
 def get_products_from_category_page(session, category_id, max_pages=5):
     all_products_in_category = []
     seen_product_ids = set()
@@ -231,9 +179,12 @@ def get_products_from_category_page(session, category_id, max_pages=5):
             current_page_product_ids = []
             for block in product_blocks:
                 try:
-                    classes = block.get('class', [])
-                    is_available = 'soldOut' not in classes
-                    if not is_available: continue
+                    # چک کردن اگر محصول ناموجود است
+                    unavailable = block.select_one(".goods-record-unavailable")
+                    if unavailable:
+                        continue  # ناموجود، رد کردن
+
+                    # استخراج لینک و ID محصول
                     a_tag = block.select_one("a")
                     href = a_tag['href'] if a_tag else None
                     product_id = None
@@ -242,12 +193,40 @@ def get_products_from_category_page(session, category_id, max_pages=5):
                         product_id = match.group(1) if match else None
                     if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
                         continue
-                    product = get_product_detail(session, category_id, product_id)
-                    if product:
-                        seen_product_ids.add(product_id)
-                        current_page_product_ids.append(product_id)
-                        all_products_in_category.append(product)
-                        logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']}.")
+
+                    # استخراج نام
+                    name_tag = block.select_one("span.goods-record-title")
+                    name = name_tag.text.strip() if name_tag else None
+
+                    # استخراج قیمت
+                    price_tag = block.select_one("span.goods-record-price")
+                    price = re.sub(r'[^\d]', '', price_tag.text.strip()) if price_tag else None
+
+                    # استخراج تصویر
+                    image_tag = block.select_one("img.goods-record-image")
+                    image_url = image_tag.get('data-src', '') if image_tag else ''
+
+                    # اگر نام یا قیمت نامعتبر، رد کردن
+                    if not name or not price or int(price) <= 0:
+                        logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name}, قیمت: {price})")
+                        continue
+
+                    # موجودی: اگر قیمت وجود دارد، فرض موجود
+                    stock = 1
+
+                    product = {
+                        "id": product_id,
+                        "name": name,
+                        "price": price,
+                        "stock": stock,
+                        "image": image_url,
+                        "category_id": category_id
+                    }
+
+                    seen_product_ids.add(product_id)
+                    current_page_product_ids.append(product_id)
+                    all_products_in_category.append(product)
+                    logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']}.")
                 except Exception as e:
                     logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
             if not current_page_product_ids:
