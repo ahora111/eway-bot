@@ -172,33 +172,46 @@ def get_all_category_ids(categories, all_cats, selected_ids):
                 to_process.append(cat['id'])
     return list(all_ids)
 
+@retry(
+    retry=retry_if_exception_type(requests.exceptions.RequestException),
+    stop=stop_after_attempt(3),
+    wait=wait_random_exponential(multiplier=1, max=5),
+    reraise=True
+)
 def get_product_details(session, cat_id, product_id):
     url = PRODUCT_DETAIL_URL_TEMPLATE.format(cat_id=cat_id, product_id=product_id)
     try:
         response = session.get(url, timeout=60)
-        if response.status_code != 200:
-            logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: status {response.status_code}")
-            return {}
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, 'lxml')
         
+        # تلاش اول: سلکتور اصلی برای تب #link1
         specs_table = soup.select_one('#link1 .table-responsive table')
+        if not specs_table:
+            # تلاش دوم: جستجو برای هر جدول در صفحه (اگر تب پیدا نشد)
+            logger.debug(f"      - تب #link1 پیدا نشد. جستجو برای جدول در کل صفحه...")
+            specs_table = soup.select_one('.table-responsive table')
+            if not specs_table:
+                logger.debug(f"      - هیچ جدولی پیدا نشد. HTML خام صفحه: {soup.prettify()[:500]}...")  # بخشی از HTML برای دیباگ
+                return {}
+
         specs = {}
-        if specs_table:
-            rows = specs_table.find_all("tr")
-            for row in rows:
-                cells = row.find_all("td")
-                if len(cells) == 2:
-                    key = cells[0].text.strip()
-                    value = cells[1].text.strip()
-                    if key and value:
-                        specs[key] = value
-            if not specs:
-                logger.debug(f"      - هیچ ردیفی در جدول برای {product_id} پیدا نشد. HTML خام جدول: {specs_table.prettify()}")
-        else:
-            logger.debug(f"      - جدول مشخصات برای {product_id} پیدا نشد. HTML خام تب: {soup.select_one('#link1').prettify() if soup.select_one('#link1') else 'تب link1 پیدا نشد'}")
+        rows = specs_table.find_all("tr")
+        for row in rows:
+            cells = row.find_all("td")
+            if len(cells) == 2:
+                key = cells[0].text.strip()
+                value = cells[1].text.strip()
+                if key and value:
+                    specs[key] = value
+        if not specs:
+            logger.debug(f"      - هیچ ردیفی در جدول پیدا نشد. HTML خام جدول: {specs_table.prettify()}")
         
         logger.debug(f"      - مشخصات استخراج‌شده برای {product_id}: {specs}")
         return specs
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: {e}. Retry...")
+        raise
     except Exception as e:
         logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
         return {}
