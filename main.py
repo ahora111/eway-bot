@@ -33,7 +33,9 @@ def get_session():
     return session
 
 def extract_real_id_from_link(link):
-    m = re.search(r'/Store/List/(\d+)', link)
+    if not link:
+        return None
+    m = re.search(r'/Store/List/(\d+)', str(link))
     if m:
         return int(m.group(1))
     return None
@@ -57,6 +59,7 @@ def extract_categories_from_html(html):
                 name = a.get_text(strip=True)
                 link = a.get('href')
                 real_id = extract_real_id_from_link(link)
+                print(f"DEBUG: name={name} | link={link} | real_id={real_id}")
                 if not name or not link or not real_id:
                     continue
                 cat = {
@@ -81,6 +84,7 @@ def extract_categories_from_html(html):
             name = a.get_text(strip=True)
             link = a.get('href')
             real_id = extract_real_id_from_link(link)
+            print(f"DEBUG: name={name} | link={link} | real_id={real_id}")
             if not name or not link or not real_id:
                 continue
             cat = {
@@ -97,7 +101,7 @@ def extract_categories_from_html(html):
                 cat['children'] = recursive_extract(sub_ul, parent_id=real_id, level=1)
             all_categories.append(cat)
     return flat_list, all_categories
-
+    
 def get_and_parse_categories(session):
     print(f"⏳ دریافت دسته‌بندی‌ها از: {SOURCE_CATS_API_URL}")
     response = session.get(SOURCE_CATS_API_URL)
