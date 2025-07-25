@@ -174,7 +174,7 @@ def get_all_category_ids(categories, all_cats, selected_ids):
 
 @retry(
     retry=retry_if_exception_type(requests.exceptions.RequestException),
-    stop=stop_after_attempt(3),
+    stop=stop_after_attempt(5),  # افزایش به 5 برای موارد سخت
     wait=wait_random_exponential(multiplier=1, max=5),
     reraise=True
 )
@@ -192,8 +192,11 @@ def get_product_details(session, cat_id, product_id):
             logger.debug(f"      - تب #link1 پیدا نشد. جستجو برای جدول در کل صفحه...")
             specs_table = soup.select_one('.table-responsive table')
             if not specs_table:
-                logger.debug(f"      - هیچ جدولی پیدا نشد. HTML خام صفحه: {soup.prettify()[:500]}...")  # بخشی از HTML برای دیباگ
-                return {}
+                # تلاش سوم: تمام <table>ها را چک کنید
+                specs_table = soup.find('table', class_='table')
+                if not specs_table:
+                    logger.debug(f"      - هیچ جدولی پیدا نشد. HTML خام صفحه: {soup.prettify()[:1000]}...")  # لاگ بیشتر HTML برای دیباگ
+                    return {}
 
         specs = {}
         rows = specs_table.find_all("tr")
@@ -207,7 +210,8 @@ def get_product_details(session, cat_id, product_id):
         if not specs:
             logger.debug(f"      - هیچ ردیفی در جدول پیدا نشد. HTML خام جدول: {specs_table.prettify()}")
         
-        logger.debug(f"      - مشخصات استخراج‌شده برای {product_id}: {specs}")
+        # لاگ کامل specs به فایل (برای جلوگیری از قطع در کنسول)
+        logger.debug(f"      - مشخصات استخراج‌شده برای {product_id} (کامل): {json.dumps(specs, ensure_ascii=False, indent=4)}")
         return specs
     except requests.exceptions.RequestException as e:
         logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: {e}. Retry...")
