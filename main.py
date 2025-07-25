@@ -35,7 +35,8 @@ def get_session():
 def extract_real_id_from_link(link):
     if not link:
         return None
-    m = re.search(r'/Store/List/(\d+)', str(link))
+    # پشتیبانی از هر دو حالت /Store/List/ و /store/list/ و /store/categorylist/
+    m = re.search(r'/store/(?:list|categorylist)/(\d+)', link, re.IGNORECASE)
     if m:
         return int(m.group(1))
     return None
