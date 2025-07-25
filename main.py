@@ -145,7 +145,7 @@ def get_selected_categories_flexible(source_categories):
         selected_input = input("شماره‌های مورد نظر را با کاما وارد کنید (مثل 1,3) یا 'all' برای همه: ").strip().lower()
     except EOFError:
         logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 1582 و 16777).")
-        default_ids = [16777]
+        default_ids = [1582, 16777]
         selected = [c for c in source_categories if c['id'] in default_ids]
         logger.info(f"✅ دسته‌بندی‌های پیش‌فرض انتخاب‌شده: {[c['name'] for c in selected]}")
         return selected
@@ -180,7 +180,6 @@ def get_product_details(session, cat_id, product_id):
             return {}
         soup = BeautifulSoup(response.text, 'lxml')
         
-        # سلکتور بروزشده: بدون tbody، مستقیماً جدول را انتخاب کنید
         specs_table = soup.select_one('#link1 .table-responsive table')
         specs = {}
         if specs_table:
@@ -203,7 +202,7 @@ def get_product_details(session, cat_id, product_id):
         logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
         return {}
 
-def get_products_from_category_page(session, category_id, max_pages=20):  # افزایش max_pages برای دسته‌های بزرگ
+def get_products_from_category_page(session, category_id, max_pages=50):
     all_products_in_category = []
     seen_product_ids = set()
     page_num = 1
@@ -222,12 +221,10 @@ def get_products_from_category_page(session, category_id, max_pages=20):  # اف
             current_page_product_ids = []
             for block in product_blocks:
                 try:
-                    # چک کردن اگر محصول ناموجود است
                     unavailable = block.select_one(".goods-record-unavailable")
                     if unavailable:
-                        continue  # ناموجود، رد کردن
+                        continue
 
-                    # استخراج لینک و ID محصول
                     a_tag = block.select_one("a")
                     href = a_tag['href'] if a_tag else None
                     product_id = None
@@ -237,29 +234,23 @@ def get_products_from_category_page(session, category_id, max_pages=20):  # اف
                     if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
                         continue
 
-                    # استخراج نام
                     name_tag = block.select_one("span.goods-record-title")
                     name = name_tag.text.strip() if name_tag else None
 
-                    # استخراج قیمت
                     price_tag = block.select_one("span.goods-record-price")
                     price = re.sub(r'[^\d]', '', price_tag.text.strip()) if price_tag else None
 
-                    # استخراج تصویر
                     image_tag = block.select_one("img.goods-record-image")
                     image_url = image_tag.get('data-src', '') if image_tag else ''
 
-                    # اگر نام یا قیمت نامعتبر، رد کردن
                     if not name or not price or int(price) <= 0:
                         logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name}, قیمت: {price})")
                         continue
 
-                    # موجودی: اگر قیمت وجود دارد، فرض موجود
                     stock = 1
 
-                    # استخراج مشخصات فنی از صفحه جزئیات
                     specs = get_product_details(session, category_id, product_id)
-                    time.sleep(random.uniform(0.5, 1.5))  # تأخیر تصادفی برای جلوگیری از بلاک
+                    time.sleep(random.uniform(0.5, 1.5))
 
                     product = {
                         "id": product_id,
@@ -268,7 +259,7 @@ def get_products_from_category_page(session, category_id, max_pages=20):  # اف
                         "stock": stock,
                         "image": image_url,
                         "category_id": category_id,
-                        "specs": specs  # دیکشنری مشخصات فنی
+                        "specs": specs
                     }
 
                     seen_product_ids.add(product_id)
@@ -281,7 +272,7 @@ def get_products_from_category_page(session, category_id, max_pages=20):  # اف
                 logger.info("    - محصول جدیدی در این صفحه یافت نشد، توقف صفحه‌بندی.")
                 break
             page_num += 1
-            time.sleep(random.uniform(2, 4))  # تأخیر بیشتر بین صفحات
+            time.sleep(random.uniform(2, 4))
         except requests.RequestException as e:
             logger.error(f"    - خطای شبکه در پردازش صفحه محصولات: {e}")
             break
@@ -323,47 +314,67 @@ def get_wc_categories():
             break
     return wc_cats
 
+def check_existing_category(name, parent):
+    try:
+        res = requests.get(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), params={
+            "search": name, "per_page": 1, "parent": parent
+        }, verify=False)
+        res.raise_for_status()
+        data = res.json()
+        if data and data[0]["name"].strip() == name and data[0]["parent"] == parent:
+            return data[0]["id"]
+        return None
+    except Exception as e:
+        logger.debug(f"⚠️ خطا در چک وجود دسته '{name}' (parent: {parent}): {e}")
+        return None
+
 def transfer_categories_to_wc(source_categories):
     logger.info("\n⏳ انتقال دسته‌بندی‌ها به ووکامرس...")
     wc_cats = get_wc_categories()
-    wc_cats_map = {}  # استفاده از tuple (name, parent) برای چک دقیق‌تر
+    wc_cats_map = {}  # tuple (name, parent) -> id
     for cat in wc_cats:
         key = (cat["name"].strip(), cat.get("parent", 0))
         wc_cats_map[key] = cat["id"]
     
     source_to_wc_id_map = {}
-    for cat in source_categories:
+    for cat in tqdm(source_categories, desc="انتقال دسته‌ها"):
         name = cat["name"].strip()
         parent_id = cat.get("parent_id") or 0
         wc_parent = source_to_wc_id_map.get(parent_id, 0)
         lookup_key = (name, wc_parent)
         
-        if lookup_key in wc_cats_map:
-            wc_id = wc_cats_map[lookup_key]
-            source_to_wc_id_map[cat["id"]] = wc_id
-            logger.debug(f"✅ دسته '{name}' (parent: {wc_parent}) قبلاً وجود دارد (ID: {wc_id}). استفاده از موجود.")
-        else:
-            data = {"name": name, "parent": wc_parent}
-            try:
-                res = requests.post(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
-                if res.status_code in [200, 201]:
-                    new_id = res.json()["id"]
-                    source_to_wc_id_map[cat["id"]] = new_id
-                    wc_cats_map[lookup_key] = new_id
-                    logger.debug(f"✅ دسته '{name}' (parent: {wc_parent}) ساخته شد (ID: {new_id}).")
+        existing_id = check_existing_category(name, wc_parent)
+        if existing_id:
+            source_to_wc_id_map[cat["id"]] = existing_id
+            logger.debug(f"✅ دسته '{name}' (parent: {wc_parent}) قبلاً وجود دارد (ID: {existing_id}). استفاده از موجود.")
+            continue
+        
+        data = {"name": name, "parent": wc_parent}
+        try:
+            res = requests.post(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False)
+            if res.status_code in [200, 201]:
+                new_id = res.json()["id"]
+                source_to_wc_id_map[cat["id"]] = new_id
+                wc_cats_map[lookup_key] = new_id
+                logger.debug(f"✅ دسته '{name}' (parent: {wc_parent}) ساخته شد (ID: {new_id}).")
+            else:
+                error_data = res.json()
+                if error_data.get("code") == "term_exists" and "data" in error_data and "resource_id" in error_data["data"]:
+                    existing_id = error_data["data"]["resource_id"]
+                    source_to_wc_id_map[cat["id"]] = existing_id
+                    wc_cats_map[lookup_key] = existing_id
+                    logger.info(f"✅ دسته '{name}' (parent: {wc_parent}) وجود داشت (ID: {existing_id}). استفاده از resource_id موجود.")
                 else:
                     logger.error(f"❌ خطا در ساخت دسته‌بندی '{name}' (parent: {wc_parent}): {res.text}")
-            except Exception as e:
-                logger.error(f"❌ خطای شبکه در ساخت دسته‌بندی '{name}': {e}")
+        except Exception as e:
+            logger.error(f"❌ خطای شبکه در ساخت دسته‌بندی '{name}': {e}")
     logger.info("✅ انتقال دسته‌بندی‌ها کامل شد.")
     return source_to_wc_id_map
 
 def process_price(price_value):
     try:
-        # استخراج عدد خام و تبدیل به float
         price_value = float(re.sub(r'[^\d.]', '', str(price_value)))
-        # تبدیل ریال به تومان (فعال‌شده بر اساس درخواست شما)
-        price_value /= 10  # 893000000 ریال -> 89300000 تومان
+        price_value /= 10
     except (ValueError, TypeError): return "0"
     if price_value <= 1: return "0"
     elif price_value <= 7000000: new_price = price_value + 260000
@@ -421,7 +432,7 @@ def process_product_wrapper(args):
             "images": [{"src": product.get("image")}] if product.get("image") else [],
             "stock_quantity": product.get('stock', 0), "manage_stock": True,
             "stock_status": "instock" if product.get('stock', 0) > 0 else "outofstock",
-            "attributes": attributes  # اضافه کردن مشخصات فنی
+            "attributes": attributes
         }
         _send_to_woocommerce(wc_data['sku'], wc_data, stats)
     except Exception as e:
@@ -445,7 +456,15 @@ def main():
         logger.info("✅ هیچ دسته‌بندی انتخاب نشد. برنامه خاتمه می‌یابد.")
         return
 
-    category_mapping = transfer_categories_to_wc(all_cats)  # تمام دسته‌ها را انتقال می‌دهیم تا زیرمجموعه‌ها هم پشتیبانی شوند
+    # استخراج IDهای مرتبط (انتخاب‌شده + زیرمجموعه‌ها)
+    selected_ids = [cat['id'] for cat in filtered_categories]
+    all_relevant_ids = get_all_category_ids(filtered_categories, all_cats, selected_ids)
+    
+    # استخراج فقط دسته‌های مرتبط برای انتقال
+    relevant_cats = [cat for cat in all_cats if cat['id'] in all_relevant_ids]
+    logger.info(f"✅ تعداد {len(relevant_cats)} دسته‌بندی مرتبط (انتخاب‌شده + زیرمجموعه‌ها) برای انتقال آماده شد.")
+
+    category_mapping = transfer_categories_to_wc(relevant_cats)
     if not category_mapping:
         logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
         return
@@ -457,7 +476,7 @@ def main():
 
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'lock': Lock()}
     logger.info(f"\n🚀 شروع پردازش و ارسال {len(products)} محصول به ووکامرس...")
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         args_list = [(p, stats, category_mapping) for p in products]
         list(tqdm(executor.map(process_product_wrapper, args_list), total=len(products), desc="ارسال محصولات"))
 
