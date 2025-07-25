@@ -55,7 +55,7 @@ def login_eways(username, password):
     }
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(login_url, data=payload, timeout=30)
-    if resp.status_code != 200:
+    if resp.status_code not in [200, 302]:
         logger.error(f"❌ لاگین ناموفق! کد وضعیت: {resp.status_code}")
         return None
 
@@ -168,21 +168,33 @@ def get_product_detail(session, cat_id, product_id):
     logger.debug(f"      - دریافت جزئیات محصول از: {url}")
     try:
         response = session.get(url, timeout=30)
-        # ذخیره HTML کامل صفحه جزئیات محصول برای بررسی دستی
         with open(f"product_detail_{product_id}.html", "w", encoding="utf-8") as f:
             f.write(response.text)
         if response.status_code != 200:
             logger.warning(f"      - خطا در دریافت جزئیات: status {response.status_code}")
             return None
         soup = BeautifulSoup(response.text, 'lxml')
-        # سلکتورهای زیر را بر اساس ساختار HTML واقعی صفحه محصول تنظیم کن
-        name = soup.select_one("span.goods-record-title")
-        name = name.text.strip() if name else None
+
+        # نام محصول
+        name_tag = soup.select_one("span.goods-record-title")
+        name = name_tag.text.strip() if name_tag else None
+
+        # قیمت
         price_tag = soup.select_one("span.goods-record-price")
         price = re.sub(r'[^\d]', '', price_tag.text.strip()) if price_tag else "0"
-        stock = 1  # اگر سایت فقط محصولات موجود را نمایش می‌دهد
-        image_tag = soup.select_one("img.goods-record-image")
-        image_url = image_tag['data-src'] if image_tag and image_tag.has_attr('data-src') else ""
+
+        # موجودی
+        stock_tag = soup.select_one("div.goods-item-desc-count")
+        if stock_tag:
+            stock_match = re.search(r'(\d+)', stock_tag.text)
+            stock = int(stock_match.group(1)) if stock_match else 1
+        else:
+            stock = 1
+
+        # تصویر
+        img_tag = soup.select_one("img.goods-record-image")
+        image_url = img_tag['src'] if img_tag and img_tag.has_attr('src') else ""
+
         if name and int(price) > 0:
             logger.debug(f"      - جزئیات استخراج‌شده: نام={name}, قیمت={price}, موجودی={stock}, تصویر={image_url}")
             return {
