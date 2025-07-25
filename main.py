@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 from threading import Lock
 import logging
 from logging.handlers import RotatingFileHandler
+from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
 
 # ==============================================================================
 # --- تنظیمات لاگینگ ---
@@ -384,9 +385,16 @@ def process_price(price_value):
     else: new_price = price_value * 1.015
     return str(int(round(new_price, -4)))
 
+@retry(
+    retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)),
+    stop=stop_after_attempt(3),
+    wait=wait_random_exponential(multiplier=1, max=10),
+    reraise=True
+)
 def _send_to_woocommerce(sku, data, stats):
     try:
         auth = (WC_CONSUMER_KEY, WC_CONSUMER_SECRET)
+        logger.debug(f"   - چک SKU {sku}...")
         check_url = f"{WC_API_URL}/products?sku={sku}"
         r_check = requests.get(check_url, auth=auth, verify=False, timeout=20)
         r_check.raise_for_status()
@@ -396,45 +404,64 @@ def _send_to_woocommerce(sku, data, stats):
             update_data = {
                 "regular_price": data["regular_price"],
                 "stock_quantity": data["stock_quantity"],
-                "stock_status": data["stock_status"]
+                "stock_status": data["stock_status"],
+                "attributes": data["attributes"]  # اضافه کردن attributes به آپدیت
             }
+            logger.debug(f"   - آپدیت محصول {product_id} با {len(update_data['attributes'])} مشخصه فنی...")
             res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=update_data, verify=False, timeout=20)
-            if res.status_code == 200: 
-                with stats['lock']: stats['updated'] += 1
-            else: 
-                logger.error(f"   ❌ خطا در آپدیت '{data['name']}'. Status: {res.status_code}")
+            res.raise_for_status()
+            response_json = res.json()
+            logger.debug(f"   ✅ آپدیت موفق برای {sku}. Attributes ذخیره‌شده در پاسخ: {response_json.get('attributes', 'خالی')} (تعداد: {len(response_json.get('attributes', []))})")
+            with stats['lock']: stats['updated'] += 1
         else:
+            logger.debug(f"   - ایجاد محصول جدید با {sku} و {len(data['attributes'])} مشخصه فنی...")
             res = requests.post(f"{WC_API_URL}/products", auth=auth, json=data, verify=False, timeout=20)
-            if res.status_code == 201: 
-                with stats['lock']: stats['created'] += 1
-            else: 
-                logger.error(f"   ❌ خطا در ایجاد '{data['name']}'. Status: {res.status_code}")
+            res.raise_for_status()
+            response_json = res.json()
+            logger.debug(f"   ✅ ایجاد موفق برای {sku}. Attributes ذخیره‌شده در پاسخ: {response_json.get('attributes', 'خالی')} (تعداد: {len(response_json.get('attributes', []))})")
+            with stats['lock']: stats['created'] += 1
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"   ❌ HTTP خطا برای SKU {sku}: {e.response.status_code} - Response: {e.response.text}")
+        raise
     except Exception as e:
         logger.error(f"   ❌ خطای کلی در ارتباط با ووکامرس برای SKU {sku}: {e}")
+        raise
 
 def process_product_wrapper(args):
     product, stats, category_mapping = args
     try:
         wc_cat_id = category_mapping.get(product.get('category_id'))
-        if not wc_cat_id: return
+        if not wc_cat_id:
+            logger.warning(f"   ⚠️ دسته برای محصول {product.get('id')} پیدا نشد. رد کردن...")
+            return
+        specs = product.get('specs', {})
+        if not specs:
+            logger.warning(f"   ⚠️ مشخصات برای محصول {product.get('id')} خالی است. ارسال بدون attributes.")
         attributes = []
-        for key, value in product.get('specs', {}).items():
+        position = 0
+        for key, value in specs.items():
             attributes.append({
                 "name": key,
                 "options": [value],
+                "position": position,
                 "visible": True,
                 "variation": False
             })
+            position += 1
         wc_data = {
-            "name": product.get('name', 'بدون نام'), "type": "simple", "sku": f"EWAYS-{product.get('id')}",
+            "name": product.get('name', 'بدون نام'),
+            "type": "simple",
+            "sku": f"EWAYS-{product.get('id')}",
             "regular_price": process_price(product.get('price', 0)),
             "categories": [{"id": wc_cat_id}],
             "images": [{"src": product.get("image")}] if product.get("image") else [],
-            "stock_quantity": product.get('stock', 0), "manage_stock": True,
+            "stock_quantity": product.get('stock', 0),
+            "manage_stock": True,
             "stock_status": "instock" if product.get('stock', 0) > 0 else "outofstock",
             "attributes": attributes
         }
         _send_to_woocommerce(wc_data['sku'], wc_data, stats)
+        time.sleep(random.uniform(0.5, 1.5))
     except Exception as e:
         logger.error(f"   ❌ خطای جدی در پردازش محصول {product.get('id', '')}: {e}")
         with stats['lock']: stats['failed'] += 1
@@ -456,11 +483,9 @@ def main():
         logger.info("✅ هیچ دسته‌بندی انتخاب نشد. برنامه خاتمه می‌یابد.")
         return
 
-    # استخراج IDهای مرتبط (انتخاب‌شده + زیرمجموعه‌ها)
     selected_ids = [cat['id'] for cat in filtered_categories]
     all_relevant_ids = get_all_category_ids(filtered_categories, all_cats, selected_ids)
     
-    # استخراج فقط دسته‌های مرتبط برای انتقال
     relevant_cats = [cat for cat in all_cats if cat['id'] in all_relevant_ids]
     logger.info(f"✅ تعداد {len(relevant_cats)} دسته‌بندی مرتبط (انتخاب‌شده + زیرمجموعه‌ها) برای انتقال آماده شد.")
 
@@ -476,7 +501,7 @@ def main():
 
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'lock': Lock()}
     logger.info(f"\n🚀 شروع پردازش و ارسال {len(products)} محصول به ووکامرس...")
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         args_list = [(p, stats, category_mapping) for p in products]
         list(tqdm(executor.map(process_product_wrapper, args_list), total=len(products), desc="ارسال محصولات"))
 
