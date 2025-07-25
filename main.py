@@ -174,20 +174,23 @@ def get_all_category_ids(categories, all_cats, selected_ids):
 def get_product_details(session, cat_id, product_id):
     url = PRODUCT_DETAIL_URL_TEMPLATE.format(cat_id=cat_id, product_id=product_id)
     try:
-        response = session.get(url, timeout=30)
+        response = session.get(url, timeout=60)
         if response.status_code != 200:
             logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: status {response.status_code}")
             return {}
         soup = BeautifulSoup(response.text, 'lxml')
-        specs_table = soup.select_one(".table-responsive table tbody")
+        specs_table = soup.select_one('#link1 .table-responsive table tbody')  # سلکتور دقیق برای تب مشخصات
         specs = {}
         if specs_table:
             for row in specs_table.find_all("tr"):
                 cells = row.find_all("td")
                 if len(cells) == 2:
-                    key = cells[0].text.strip()
-                    value = cells[1].text.strip()
-                    specs[key] = value
+                    key = cells[0].text.strip()  # کلید (مثل "ساختار بدنه")
+                    value = cells[1].text.strip()  # مقدار
+                    if key and value:
+                        specs[key] = value
+        else:
+            logger.debug(f"      - جدول مشخصات برای {product_id} پیدا نشد. HTML خام تب: {soup.select_one('#link1').prettify() if soup.select_one('#link1') else 'تب link1 پیدا نشد'}")
         logger.debug(f"      - مشخصات استخراج‌شده برای {product_id}: {specs}")
         return specs
     except Exception as e:
@@ -250,7 +253,7 @@ def get_products_from_category_page(session, category_id, max_pages=10):
 
                     # استخراج مشخصات فنی از صفحه جزئیات
                     specs = get_product_details(session, category_id, product_id)
-                    time.sleep(1)  # تأخیر برای جلوگیری از بلاک
+                    time.sleep(0.5)  # تأخیر برای جلوگیری از بلاک
 
                     product = {
                         "id": product_id,
