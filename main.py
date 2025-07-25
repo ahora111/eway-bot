@@ -2,6 +2,7 @@ import requests
 import os
 import re
 import time
+import json
 import random
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
@@ -25,6 +26,7 @@ logger.addHandler(handler)
 BASE_URL = "https://panel.eways.co"
 SOURCE_CATS_API_URL = f"{BASE_URL}/Store/GetCategories"
 PRODUCT_LIST_URL_TEMPLATE = f"{BASE_URL}/Store/List/{{category_id}}/2/2/0/0/0/10000000000?page={{page}}"
+PRODUCT_DETAIL_URL_TEMPLATE = f"{BASE_URL}/Store/Detail/{{cat_id}}/{{product_id}}"
 
 WC_API_URL = os.environ.get("WC_API_URL") or "https://your-woocommerce-site.com/wp-json/wc/v3"
 WC_CONSUMER_KEY = os.environ.get("WC_CONSUMER_KEY") or "ck_xxx"
@@ -53,7 +55,7 @@ def login_eways(username, password):
     }
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(login_url, data=payload, timeout=30)
-    if resp.status_code not in [200, 302]:
+    if resp.status_code != 200:
         logger.error(f"❌ لاگین ناموفق! کد وضعیت: {resp.status_code}")
         return None
 
@@ -86,7 +88,7 @@ def get_and_parse_categories(session):
                 })
             logger.info(f"✅ تعداد {len(final_cats)} دسته‌بندی از JSON استخراج شد.")
             return final_cats
-        except Exception:
+        except json.JSONDecodeError:
             logger.warning("⚠️ پاسخ JSON نیست. تلاش برای پارس HTML...")
 
         soup = BeautifulSoup(response.text, 'lxml')
@@ -142,8 +144,8 @@ def get_selected_categories_flexible(source_categories):
     try:
         selected_input = input("شماره‌های مورد نظر را با کاما وارد کنید (مثل 1,3) یا 'all' برای همه: ").strip().lower()
     except EOFError:
-        logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 1582 و 2541).")
-        default_ids = [1582, 2541]
+        logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 1582 و 16777).")
+        default_ids = [16777]
         selected = [c for c in source_categories if c['id'] in default_ids]
         logger.info(f"✅ دسته‌بندی‌های پیش‌فرض انتخاب‌شده: {[c['name'] for c in selected]}")
         return selected
@@ -158,7 +160,18 @@ def get_selected_categories_flexible(source_categories):
         logger.error("❌ ورودی نامعتبر. هیچ دسته‌ای انتخاب نشد.")
         return []
 
-def get_products_from_category_page(session, category_id, max_pages=5):
+def get_all_category_ids(categories, all_cats, selected_ids):
+    all_ids = set(selected_ids)
+    to_process = list(selected_ids)
+    while to_process:
+        current_id = to_process.pop()
+        for cat in all_cats:
+            if cat['parent_id'] == current_id:
+                all_ids.add(cat['id'])
+                to_process.append(cat['id'])
+    return list(all_ids)
+
+def get_products_from_category_page(session, category_id, max_pages=10):
     all_products_in_category = []
     seen_product_ids = set()
     page_num = 1
@@ -177,10 +190,12 @@ def get_products_from_category_page(session, category_id, max_pages=5):
             current_page_product_ids = []
             for block in product_blocks:
                 try:
-                    # رد محصولات ناموجود
-                    if block.select_one("div.goods-record-unavailable"):
-                        continue
+                    # چک کردن اگر محصول ناموجود است
+                    unavailable = block.select_one(".goods-record-unavailable")
+                    if unavailable:
+                        continue  # ناموجود، رد کردن
 
+                    # استخراج لینک و ID محصول
                     a_tag = block.select_one("a")
                     href = a_tag['href'] if a_tag else None
                     product_id = None
@@ -190,41 +205,39 @@ def get_products_from_category_page(session, category_id, max_pages=5):
                     if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
                         continue
 
-                    # نام
+                    # استخراج نام
                     name_tag = block.select_one("span.goods-record-title")
                     name = name_tag.text.strip() if name_tag else None
 
-                    # قیمت
+                    # استخراج قیمت
                     price_tag = block.select_one("span.goods-record-price")
-                    price = re.sub(r'[^\d]', '', price_tag.text.strip()) if price_tag else "0"
+                    price = re.sub(r'[^\d]', '', price_tag.text.strip()) if price_tag else None
 
-                    # موجودی (در لیست نیست، پس 1 بگذار)
+                    # استخراج تصویر
+                    image_tag = block.select_one("img.goods-record-image")
+                    image_url = image_tag.get('data-src', '') if image_tag else ''
+
+                    # اگر نام یا قیمت نامعتبر، رد کردن
+                    if not name or not price or int(price) <= 0:
+                        logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name}, قیمت: {price})")
+                        continue
+
+                    # موجودی: اگر قیمت وجود دارد، فرض موجود
                     stock = 1
 
-                    # تصویر
-                    img_tag = block.select_one("img.goods-record-image")
-                    image_url = ""
-                    if img_tag:
-                        if img_tag.has_attr('data-src') and img_tag['data-src']:
-                            image_url = img_tag['data-src']
-                        elif img_tag.has_attr('src') and img_tag['src'] and not img_tag['src'].startswith('/images/none'):
-                            image_url = img_tag['src']
+                    product = {
+                        "id": product_id,
+                        "name": name,
+                        "price": price,
+                        "stock": stock,
+                        "image": image_url,
+                        "category_id": category_id
+                    }
 
-                    if name and int(price) > 0:
-                        product = {
-                            "id": product_id,
-                            "name": name,
-                            "price": price,
-                            "stock": stock,
-                            "image": image_url,
-                            "category_id": category_id
-                        }
-                        seen_product_ids.add(product_id)
-                        current_page_product_ids.append(product_id)
-                        all_products_in_category.append(product)
-                        logger.info(f"      - محصول {product_id} ({name}) اضافه شد با قیمت {price}.")
-                    else:
-                        logger.debug(f"      - محصول {product_id} موجود نیست یا قیمت/نام نامعتبر (قیمت: {price}, موجودی: {stock}).")
+                    seen_product_ids.add(product_id)
+                    current_page_product_ids.append(product_id)
+                    all_products_in_category.append(product)
+                    logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']}.")
                 except Exception as e:
                     logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
             if not current_page_product_ids:
@@ -241,11 +254,14 @@ def get_products_from_category_page(session, category_id, max_pages=5):
     logger.info(f"    - تعداد کل محصولات استخراج‌شده از دسته {category_id}: {len(all_products_in_category)}")
     return all_products_in_category
 
-def get_all_products(session, categories):
+def get_all_products(session, categories, all_cats):
     all_products = {}
-    logger.info("\n⏳ شروع فرآیند جمع‌آوری تمام محصولات از همه دسته‌بندی‌های انتخابی...")
-    for category in tqdm(categories, desc="پردازش دسته‌بندی‌ها"):
-        products_in_cat = get_products_from_category_page(session, category['id'])
+    selected_ids = [cat['id'] for cat in categories]
+    all_relevant_ids = get_all_category_ids(categories, all_cats, selected_ids)
+    logger.info(f"📂 IDهای دسته و زیرمجموعه‌های استخراج‌شده: {all_relevant_ids}")
+    logger.info("\n⏳ شروع فرآیند جمع‌آوری تمام محصولات از همه دسته‌بندی‌های انتخابی و زیرمجموعه‌ها...")
+    for cat_id in tqdm(all_relevant_ids, desc="پردازش دسته‌بندی‌ها و زیرمجموعه‌ها"):
+        products_in_cat = get_products_from_category_page(session, cat_id)
         for product in products_in_cat:
             all_products[product['id']] = product
     logger.info(f"\n✅ فرآیند جمع‌آوری کامل شد. تعداد کل محصولات یکتا و موجود: {len(all_products)}")
@@ -365,20 +381,20 @@ def main():
         logger.error("❌ لاگین به پنل eways انجام نشد. برنامه خاتمه می‌یابد.")
         return
 
-    source_categories = get_and_parse_categories(session)
-    if not source_categories: return
+    all_cats = get_and_parse_categories(session)
+    if not all_cats: return
 
-    filtered_categories = get_selected_categories_flexible(source_categories)
+    filtered_categories = get_selected_categories_flexible(all_cats)
     if not filtered_categories:
         logger.info("✅ هیچ دسته‌بندی انتخاب نشد. برنامه خاتمه می‌یابد.")
         return
 
-    category_mapping = transfer_categories_to_wc(filtered_categories)
+    category_mapping = transfer_categories_to_wc(all_cats)  # تمام دسته‌ها را انتقال می‌دهیم تا زیرمجموعه‌ها هم پشتیبانی شوند
     if not category_mapping:
         logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
         return
 
-    products = get_all_products(session, filtered_categories)
+    products = get_all_products(session, filtered_categories, all_cats)
     if not products:
         logger.info("✅ هیچ محصولی برای پردازش یافت نشد. برنامه با موفقیت خاتمه می‌یابد.")
         return
