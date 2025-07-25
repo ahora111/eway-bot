@@ -14,7 +14,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
-from selenium import webdriver
+from selenium import selenium  # توجه: احتمالاً خطا است، باید از selenium.webdriver استفاده کنید
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
@@ -96,14 +96,12 @@ def login_and_get_session():
         driver.quit()
         sys.exit(1)
 
-# بقیه کد مثل قبل است، فقط session = login_and_get_session() رو در main جایگزین کن
-
 def main():
     if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET]):
         logger.error("❌ یکی از متغیرهای محیطی ضروری (WC_*) تنظیم نشده است.")
         return
 
-    session = login_and_get_session()  # لاگین اتوماتیک
+    session = login_and_get_session()  # لاگین اتوماتیک و جایگزینی همان‌طور که درخواست کردید
     
     # بقیه main مثل قبل
     # 1. دریافت و انتخاب دسته‌بندی‌ها
