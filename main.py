@@ -6,7 +6,7 @@ import time
 import sys
 import random
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 from threading import Lock
 
@@ -18,6 +18,7 @@ WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET")
 BASE_URL = "https://panel.eways.co"
 AUT_COOKIE_VALUE = os.environ.get("EWAYS_AUTH_TOKEN")
 SOURCE_CATS_API_URL = f"{BASE_URL}/Store/GetCategories"
+CATEGORY_PAGE_URL_TEMPLATE = f"{BASE_URL}/store/categorylist/{{cat_id}}/"
 PRODUCT_LIST_URL_TEMPLATE = f"{BASE_URL}/Store/List/{{category_id}}/2/2/0/0/0/10000000000?page={{page}}"
 
 def get_session():
@@ -33,26 +34,15 @@ def get_session():
     return session
 
 def extract_real_id_from_link(link):
-    if not link:
-        return None
-    # پشتیبانی از هر دو حالت /Store/List/ و /store/list/ و /store/categorylist/
-    m = re.search(r'/store/(?:list|categorylist)/(\d+)', link, re.IGNORECASE)
+    m = re.search(r'/store/(?:list|categorylist)/(\d+)', str(link), re.IGNORECASE)
     if m:
         return int(m.group(1))
     return None
 
-def extract_categories_from_html(html):
+def extract_subcategories_from_html(html, parent_id=None, level=0):
     soup = BeautifulSoup(html, 'lxml')
-    root_ul = soup.find('ul', id='kanivmm-menu-id')
-    if not root_ul:
-        root_ul = soup.find('ul', class_='kanivmm-menu-class')
-    if not root_ul:
-        print("❌ منوی دسته‌بندی در HTML پیدا نشد!")
-        return []
-
     flat_list = []
-
-    def recursive_extract(ul_tag, parent_id=None, level=0):
+    def recursive_extract(ul_tag, parent_id, level):
         categories = []
         for li in ul_tag.find_all('li', recursive=False):
             a = li.find('a', recursive=False)
@@ -60,7 +50,6 @@ def extract_categories_from_html(html):
                 name = a.get_text(strip=True)
                 link = a.get('href')
                 real_id = extract_real_id_from_link(link)
-                print(f"DEBUG: name={name} | link={link} | real_id={real_id}")
                 if not name or not link or not real_id:
                     continue
                 cat = {
@@ -74,134 +63,150 @@ def extract_categories_from_html(html):
                 flat_list.append(cat)
                 sub_ul = li.find('ul', class_='sub-menu')
                 if sub_ul:
-                    cat['children'] = recursive_extract(sub_ul, parent_id=real_id, level=level+1)
+                    cat['children'] = recursive_extract(sub_ul, real_id, level+1)
                 categories.append(cat)
         return categories
 
-    all_categories = []
-    for li in root_ul.find_all('li', recursive=False):
-        a = li.find('a', recursive=False)
-        if a:
-            name = a.get_text(strip=True)
-            link = a.get('href')
-            real_id = extract_real_id_from_link(link)
-            print(f"DEBUG: name={name} | link={link} | real_id={real_id}")
-            if not name or not link or not real_id:
-                continue
-            cat = {
-                'id': real_id,
-                'name': name,
-                'link': link,
-                'parent_id': None,
-                'level': 0,
-                'children': []
-            }
-            flat_list.append(cat)
-            sub_ul = li.find('ul', class_='sub-menu')
-            if sub_ul:
-                cat['children'] = recursive_extract(sub_ul, parent_id=real_id, level=1)
-            all_categories.append(cat)
-    return flat_list, all_categories
-    
-def get_and_parse_categories(session):
-    print(f"⏳ دریافت دسته‌بندی‌ها از: {SOURCE_CATS_API_URL}")
-    response = session.get(SOURCE_CATS_API_URL)
-    if response.status_code != 200:
-        print(f"❌ خطای وضعیت {response.status_code} در دریافت دسته‌بندی‌ها.")
-        print("پاسخ سرور:", response.text[:500])
-        response.raise_for_status()
-    print("✅ HTML دسته‌بندی‌ها با موفقیت دریافت شد.")
-    flat_list, all_categories = extract_categories_from_html(response.text)
-    if not flat_list:
-        print("❌ هیچ دسته‌بندی معتبری پیدا نشد!")
-    else:
-        print(f"✅ تعداد {len(flat_list)} دسته‌بندی استخراج شد.")
-    return flat_list, all_categories
+    # پیدا کردن ریشه منو
+    root_ul = soup.find('ul', id='kanivmm-menu-id')
+    if not root_ul:
+        root_ul = soup.find('ul', class_='kanivmm-menu-class')
+    if root_ul:
+        recursive_extract(root_ul, parent_id, level)
+    return flat_list
 
-def get_selected_categories_flexible(source_categories):
-    def print_tree(categories, all_cats, indent=0):
-        for cat in categories:
-            print('  ' * indent + f"[{cat['id']}] {cat['name']}")
-            children = [c for c in all_cats if c.get('parent_id') == cat['id']]
-            if children:
-                print_tree(children, all_cats, indent+1)
+def get_all_categories_recursive(session, start_cat_ids):
+    """بازگشتی و موازی همه زیرشاخه‌های هر دسته‌بندی را استخراج می‌کند."""
+    all_cats = {}
+    visited = set()
+    lock = Lock()
 
-    roots = [cat for cat in source_categories if not cat.get('parent_id')]
-    print("\nلیست دسته‌بندی‌ها (ساختار درختی):\n")
-    print_tree(roots, source_categories)
+    def fetch_and_extract(cat_id, parent_id=None, level=0):
+        url = CATEGORY_PAGE_URL_TEMPLATE.format(cat_id=cat_id)
+        try:
+            resp = session.get(url, timeout=30)
+            if resp.status_code != 200:
+                print(f"❌ خطا در دریافت دسته‌بندی {cat_id}: {resp.status_code}")
+                return []
+            subcats = extract_subcategories_from_html(resp.text, parent_id, level)
+            with lock:
+                for cat in subcats:
+                    if cat['id'] not in all_cats:
+                        all_cats[cat['id']] = cat
+            # بازگشتی برای هر زیرشاخه
+            futures = []
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                for cat in subcats:
+                    if cat['id'] not in visited:
+                        visited.add(cat['id'])
+                        futures.append(executor.submit(fetch_and_extract, cat['id'], cat['parent_id'], cat['level']))
+                for f in as_completed(futures):
+                    pass
+            return subcats
+        except Exception as e:
+            print(f"❌ خطا در دریافت زیرشاخه‌های دسته {cat_id}: {e}")
+            return []
 
-    selected_env = os.environ.get("SELECTED_CATEGORIES")
-    if selected_env:
-        selected_raw = [x.strip() for x in selected_env.split(",") if x.strip()]
-        print(f"\n✅ دسته‌بندی‌های انتخاب‌شده از متغیر محیطی: {selected_raw}")
-    elif os.path.exists("selected_categories.txt"):
-        with open("selected_categories.txt") as f:
-            selected_raw = [x.strip() for x in f.read().strip().split(",") if x.strip()]
-        print(f"\n✅ دسته‌بندی‌های انتخاب‌شده از فایل: {selected_raw}")
-    elif sys.stdin.isatty():
-        print("\nلطفاً نام یا ID واقعی دسته‌بندی‌هایی که می‌خواهید منتقل شوند را با کاما جدا وارد کنید (مثلاً: 4949,گوشی موبایل,344):")
-        selected_raw = input("نام یا ID ها: ").strip().split(",")
-        selected_raw = [x.strip() for x in selected_raw if x.strip()]
-    else:
-        print("❌ هیچ ورودی معتبری برای انتخاب دسته‌بندی پیدا نشد (نه متغیر محیطی، نه فایل، نه محیط تعاملی). برنامه خاتمه می‌یابد.")
-        exit(1)
+    # شروع از دسته‌بندی‌های انتخابی
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = []
+        for cat_id in start_cat_ids:
+            if cat_id not in visited:
+                visited.add(cat_id)
+                futures.append(executor.submit(fetch_and_extract, cat_id, None, 0))
+        for f in as_completed(futures):
+            pass
 
-    if not selected_raw:
-        print("❌ هیچ دسته‌بندی انتخاب نشد. برنامه خاتمه می‌یابد.")
-        exit(1)
+    print(f"✅ تعداد کل دسته‌بندی (با زیرشاخه): {len(all_cats)}")
+    return list(all_cats.values())
 
-    def collect_with_children(cat, all_cats, result):
-        result.add(cat['id'])
-        for c in all_cats:
-            if c.get('parent_id') == cat['id']:
-                collect_with_children(c, all_cats, result)
+def get_products_from_category_page(session, category_id):
+    all_products_in_category = []
+    seen_product_ids = set()
+    page_num = 1
+    while True:
+        url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id, page=page_num)
+        print(f"  - در حال دریافت محصولات از: {url}")
+        try:
+            response = session.get(url, timeout=30)
+            if response.status_code != 200: break
+            soup = BeautifulSoup(response.text, 'lxml')
+            product_blocks = soup.select(".goods_item.goods-record")
+            if not product_blocks:
+                print("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی.")
+                break
+            current_page_product_ids = []
+            for block in product_blocks:
+                try:
+                    if 'noCount' in block.get('class', []): continue
+                    id_tag = block.select_one("a[data-productid]")
+                    product_id = id_tag['data-productid'] if id_tag else None
+                    if not product_id or product_id in seen_product_ids: continue
+                    seen_product_ids.add(product_id)
+                    current_page_product_ids.append(product_id)
+                    name = (block.select_one(".goods-record-title").text.strip() if block.select_one(".goods-record-title") else None)
+                    price_tag = block.select_one(".goods-record-price")
+                    price = "0"
+                    if price_tag:
+                        if price_tag.find('del'): price_tag.find('del').decompose()
+                        price = re.sub(r'[^\d]', '', price_tag.text.strip()) or "0"
+                    img_tag = block.select_one("img.goods-record-image")
+                    image_url = (img_tag['data-src'] if img_tag and 'data-src' in img_tag.attrs else "")
+                    if image_url and not image_url.startswith('http'):
+                        image_url = "https://staticcontent.eways.co" + image_url
+                    stock_tag = block.select_one(".goods-record-count span")
+                    stock = int(stock_tag.text.strip()) if stock_tag else 1
+                    if name and int(price) > 0:
+                        all_products_in_category.append({
+                            "id": product_id, "name": name, "price": price, "stock": stock,
+                            "image": image_url, "category_id": category_id
+                        })
+                except Exception as e:
+                    print(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
+            if not current_page_product_ids:
+                print("    - محصول جدیدی در این صفحه یافت نشد، توقف صفحه‌بندی.")
+                break
+            page_num += 1
+            time.sleep(random.uniform(0.5, 1.5))
+        except Exception as e:
+            print(f"    - خطای کلی در پردازش صفحه محصولات: {e}")
+            break
+    return all_products_in_category
 
-    final_ids = set()
-    for item in selected_raw:
-        if item.isdigit():
-            matched = [cat for cat in source_categories if cat['id'] == int(item)]
-        else:
-            matched = [cat for cat in source_categories if cat['name'] == item]
-        if not matched:
-            print(f"⚠️ هشدار: هیچ دسته‌ای با '{item}' پیدا نشد.")
-        for cat in matched:
-            collect_with_children(cat, source_categories, final_ids)
-    filtered_cats = [cat for cat in source_categories if cat['id'] in final_ids]
-    print(f"\n✅ تعداد {len(filtered_cats)} دسته‌بندی برای انتقال انتخاب شد.")
-    return filtered_cats
+def get_all_products(session, categories):
+    all_products = {}
+    print("\n⏳ شروع فرآیند جمع‌آوری تمام محصولات...")
+    for category in tqdm(categories, desc="پردازش دسته‌بندی‌ها"):
+        products_in_cat = get_products_from_category_page(session, category['id'])
+        for product in products_in_cat:
+            all_products[product['id']] = product
+    print(f"\n✅ فرآیند جمع‌آوری کامل شد. تعداد کل محصولات یکتا و موجود: {len(all_products)}")
+    return list(all_products.values())
 
 def sort_cats_for_creation(flat_cats):
-    sorted_cats = []
-    id_to_cat = {cat["id"]: cat for cat in flat_cats}
-    visited = set()
+    sorted_cats, id_to_cat, visited = [], {cat["id"]: cat for cat in flat_cats}, set()
     def visit(cat):
-        if cat["id"] in visited:
-            return
+        if cat["id"] in visited: return
         parent_id = cat.get("parent_id")
         if parent_id and parent_id in id_to_cat:
             visit(id_to_cat[parent_id])
         sorted_cats.append(cat)
         visited.add(cat["id"])
-    for cat in flat_cats:
-        visit(cat)
+    for cat in flat_cats: visit(cat)
     return sorted_cats
 
 def get_wc_categories():
-    wc_cats = []
-    page = 1
+    wc_cats, page = [], 1
     while True:
-        url = f"{WC_API_URL}/products/categories"
-        params = {"per_page": 100, "page": page}
-        res = requests.get(url, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), params=params, verify=False)
-        if res.status_code != 200:
-            break
-        data = res.json()
-        if not data:
-            break
-        wc_cats.extend(data)
-        if len(data) < 100:
-            break
-        page += 1
+        try:
+            res = requests.get(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), params={"per_page": 100, "page": page}, verify=False)
+            res.raise_for_status()
+            data = res.json()
+            if not data: break
+            wc_cats.extend(data)
+            if len(data) < 100: break
+            page += 1
+        except Exception as e: break
     return wc_cats
 
 def transfer_categories_to_wc(source_categories):
@@ -229,63 +234,6 @@ def transfer_categories_to_wc(source_categories):
             except Exception as e: print(f"❌ خطای شبکه در ساخت '{name}': {e}")
     print("✅ انتقال دسته‌بندی‌ها کامل شد.")
     return source_to_wc_id_map
-
-def get_products_from_category_page(session, category_id):
-    products = []
-    page_num = 1
-    while True:
-        url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id, page=page_num)
-        print(f"  - در حال دریافت محصولات از: {url}")
-        response = session.get(url)
-        if response.status_code != 200:
-            print(f"    - خطای وضعیت {response.status_code}, توقف برای این دسته‌بندی.")
-            break
-        soup = BeautifulSoup(response.text, 'lxml')
-        product_blocks = soup.select(".goods_item.goods-record")
-        if not product_blocks:
-            print("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی برای این دسته.")
-            break
-        for block in product_blocks:
-            is_available = 'noCount' not in block.get('class', [])
-            if not is_available:
-                continue
-            name_tag = block.select_one(".goods-record-title")
-            name = name_tag.text.strip() if name_tag else None
-            price_tag = block.select_one(".goods-record-price")
-            price_text = price_tag.text.strip() if price_tag else "0"
-            price = re.sub(r'[^\d]', '', price_text)
-            if not price: price = "0"
-            img_tag = block.select_one("img.goods-record-image")
-            image_url = ""
-            if img_tag and 'data-src' in img_tag.attrs:
-                image_url = img_tag['data-src']
-                if not image_url.startswith('http'):
-                    image_url = "https://staticcontent.eways.co" + image_url
-            id_tag = block.select_one("a[data-productid]")
-            product_id = id_tag['data-productid'] if id_tag else None
-            stock = 1
-            if product_id and name and int(price) > 0 and is_available:
-                products.append({
-                    "id": product_id,
-                    "name": name,
-                    "price": price.replace(",", ""),
-                    "stock": stock,
-                    "image": image_url,
-                    "category_id": category_id
-                })
-        page_num += 1
-        time.sleep(random.uniform(0.5, 1.5))
-    return products
-
-def get_all_products(session, categories):
-    all_products = {}
-    print("\n⏳ شروع فرآیند جمع‌آوری تمام محصولات از همه دسته‌بندی‌های انتخابی...")
-    for category in tqdm(categories, desc="پردازش دسته‌بندی‌ها"):
-        products_in_cat = get_products_from_category_page(session, category['id'])
-        for product in products_in_cat:
-            all_products[product['id']] = product
-    print(f"\n✅ فرآیند جمع‌آوری کامل شد. تعداد کل محصولات یکتا و موجود: {len(all_products)}")
-    return list(all_products.values())
 
 def process_price(price_value):
     try:
@@ -344,8 +292,8 @@ def process_product_wrapper(args):
 
 def main():
     print("برای انتخاب دسته‌بندی‌ها می‌توانید یکی از این روش‌ها را استفاده کنید:")
-    print("- متغیر محیطی SELECTED_CATEGORIES (مثلاً: 4949,گوشی موبایل,344)")
-    print("- فایل selected_categories.txt (مثلاً: 4949,گوشی موبایل,344)")
+    print("- متغیر محیطی SELECTED_CATEGORIES (مثلاً: 4285,لیستموبایل,16778)")
+    print("- فایل selected_categories.txt (مثلاً: 4285,لیستموبایل,16778)")
     print("- یا در محیط تعاملی، به صورت دستی وارد کنید.\n")
 
     if not all([WC_API_URL, WC_CONSUMER_KEY, WC_CONSUMER_SECRET, AUT_COOKIE_VALUE]):
@@ -353,26 +301,64 @@ def main():
         return
 
     session = get_session()
-    source_categories, all_categories_tree = get_and_parse_categories(session)
-    if not source_categories:
-        print("❌ هیچ دسته‌بندی دریافت نشد. برنامه خاتمه می‌یابد.")
+    # مرحله ۱: دریافت منوی اصلی و انتخاب دسته‌بندی‌های ریشه
+    main_menu_html = session.get(SOURCE_CATS_API_URL).text
+    main_cats, _ = extract_categories_from_html(main_menu_html), None
+    if not main_cats:
+        print("❌ هیچ دسته‌بندی اصلی پیدا نشد.")
         return
 
-    filtered_categories = get_selected_categories_flexible(source_categories)
-    if not filtered_categories:
-        print("❌ هیچ دسته‌بندی برای انتقال انتخاب نشد. برنامه خاتمه می‌یابد.")
+    # انتخاب دسته‌بندی‌های ریشه (مثلاً با نام یا ID)
+    selected_env = os.environ.get("SELECTED_CATEGORIES")
+    if selected_env:
+        selected_raw = [x.strip() for x in selected_env.split(",") if x.strip()]
+    elif os.path.exists("selected_categories.txt"):
+        with open("selected_categories.txt") as f:
+            selected_raw = [x.strip() for x in f.read().strip().split(",") if x.strip()]
+    elif sys.stdin.isatty():
+        print("\nلطفاً نام یا ID واقعی دسته‌بندی‌های اصلی را وارد کنید (مثلاً: 4285,لیستموبایل,16778):")
+        selected_raw = input("نام یا ID ها: ").strip().split(",")
+        selected_raw = [x.strip() for x in selected_raw if x.strip()]
+    else:
+        print("❌ هیچ ورودی معتبری برای انتخاب دسته‌بندی پیدا نشد.")
         return
 
-    category_mapping = transfer_categories_to_wc(filtered_categories)
+    selected_ids = set()
+    for item in selected_raw:
+        if item.isdigit():
+            matched = [cat for cat in main_cats if cat['id'] == int(item)]
+        else:
+            matched = [cat for cat in main_cats if cat['name'] == item]
+        for cat in matched:
+            selected_ids.add(cat['id'])
+    if not selected_ids:
+        print("❌ هیچ دسته‌بندی اصلی انتخاب نشد.")
+        return
+
+    print(f"\n✅ دسته‌بندی‌های ریشه انتخاب‌شده: {selected_ids}")
+
+    # مرحله ۲: بازگشتی و موازی همه زیرشاخه‌ها را استخراج کن
+    all_cats = get_all_categories_recursive(session, list(selected_ids))
+    if not all_cats:
+        print("❌ هیچ زیرشاخه‌ای پیدا نشد.")
+        return
+
+    # مرحله ۳: انتقال دسته‌بندی‌ها به ووکامرس
+    category_mapping = transfer_categories_to_wc(all_cats)
     if not category_mapping:
-        print("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
+        print("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد.")
         return
 
-    products = get_all_products(session, filtered_categories)
+    # مرحله ۴: جمع‌آوری محصولات فقط از دسته‌بندی‌های نهایی (Leaf)
+    parent_ids = set(cat['parent_id'] for cat in all_cats if cat['parent_id'])
+    leaf_cats = [cat for cat in all_cats if cat['id'] not in parent_ids]
+    print(f"\n✅ تعداد دسته‌بندی نهایی (Leaf): {len(leaf_cats)}")
+    products = get_all_products(session, leaf_cats)
     if not products:
-        print("✅ هیچ محصولی برای پردازش یافت نشد. برنامه با موفقیت خاتمه می‌یابد.")
+        print("✅ هیچ محصولی برای پردازش یافت نشد.")
         return
 
+    # مرحله ۵: ارسال محصولات به ووکامرس
     stats = {'created': 0, 'updated': 0, 'lock': Lock()}
     print(f"\n🚀 شروع پردازش و ارسال {len(products)} محصول به ووکامرس...")
     with ThreadPoolExecutor(max_workers=5) as executor:
