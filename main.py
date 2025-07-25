@@ -18,7 +18,7 @@ from requests.packages.urllib3.util.retry import Retry
 # ==============================================================================
 # --- تنظیمات لاگینگ ---
 # ==============================================================================
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')  # تغییر به DEBUG برای جزئیات بیشتر
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')  # سطح DEBUG برای جزئیات بیشتر
 logger = logging.getLogger(__name__)
 handler = RotatingFileHandler('app.log', maxBytes=1024*1024, backupCount=5)  # 1MB per file, 5 backups
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
@@ -155,8 +155,8 @@ def get_selected_categories_flexible(source_categories):
     try:
         selected_input = input("شماره‌های مورد نظر را با کاما وارد کنید (مثل 1,3) یا 'all' برای همه: ").strip().lower()
     except EOFError:
-        logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 959 و 1394).")
-        default_ids = [959, 1394]  # پیش‌فرض: قاب و گلس و رم/فلش/هارد (احتمالاً محصول دارند)
+        logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 1582 و 2541).")
+        default_ids = [1582, 2541]  # پیش‌فرض: جانبی موبایل و جانبی رایانه (احتمالاً محصول دارند)
         selected = [c for c in source_categories if c['id'] in default_ids]
         logger.info(f"✅ دسته‌بندی‌های پیش‌فرض انتخاب‌شده: {[c['name'] for c in selected]}")
         return selected
@@ -198,6 +198,7 @@ def get_products_from_category_page(session, category_id, max_pages=50):
 
             current_page_product_ids = []
             for block in product_blocks:
+                logger.debug(f"      - بلاک کامل: {str(block)}")  # لاگ کامل بلاک برای دیباگ
                 try:
                     classes = block.get('class', [])
                     is_available = 'noCount' not in classes
