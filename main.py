@@ -14,12 +14,13 @@ import logging
 from logging.handlers import RotatingFileHandler
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
-from selenium import selenium  # توجه: احتمالاً خطا است، باید از selenium.webdriver استفاده کنید
+from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 # ==============================================================================
 # --- تنظیمات لاگینگ ---
@@ -56,22 +57,30 @@ PRODUCT_DETAIL_URL_TEMPLATE = f"{BASE_URL}/Store/Detail/{{cat_id}}/{{product_id}
 def login_and_get_session():
     """با Selenium لاگین می‌کند و session با کوکی‌ها برمی‌گرداند."""
     options = webdriver.ChromeOptions()
-    options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+    # For debugging, comment out the next line to see the browser
+    options.add_argument('--headless')  # اگر می‌خواهید ببینید، این خط را کامنت کنید
+
     driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
     
     logger.info("⏳ لاگین به سایت...")
     driver.get(LOGIN_URL)
+    
     try:
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "Username")))
+        # افزایش زمان انتظار به 30 ثانیه
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.ID, "Username")))
+        
+        # اضافه کردن تاخیر کوتاه برای اطمینان از بارگذاری کامل
+        time.sleep(2)  # 2 ثانیه تاخیر
+        
         driver.find_element(By.ID, "Username").send_keys(USERNAME)
         driver.find_element(By.ID, "Password").send_keys(PASSWORD)
         driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-        WebDriverWait(driver, 10).until(EC.url_contains("/Dashboard"))
+        
+        WebDriverWait(driver, 30).until(EC.url_contains("/Dashboard"))
         logger.info("✅ لاگین موفق.")
         
-        # استخراج کوکی‌ها
         cookies = driver.get_cookies()
         session = requests.Session()
         for cookie in cookies:
@@ -91,6 +100,10 @@ def login_and_get_session():
         
         driver.quit()
         return session
+    except TimeoutException:
+        logger.error("❌ زمان انتظار برای عنصر تمام شد. صفحه ممکن است بارگذاری نشود.")
+        driver.quit()
+        sys.exit(1)
     except Exception as e:
         logger.error(f"❌ خطا در لاگین: {e}")
         driver.quit()
@@ -101,10 +114,9 @@ def main():
         logger.error("❌ یکی از متغیرهای محیطی ضروری (WC_*) تنظیم نشده است.")
         return
 
-    session = login_and_get_session()  # لاگین اتوماتیک و جایگزینی همان‌طور که درخواست کردید
+    session = login_and_get_session()  # لاگین اتوماتیک
     
     # بقیه main مثل قبل
-    # 1. دریافت و انتخاب دسته‌بندی‌ها
     source_categories = get_and_parse_categories(session)
     if not source_categories: return
 
@@ -113,19 +125,16 @@ def main():
         logger.info("✅ هیچ دسته‌بندی انتخاب نشد. برنامه خاتمه می‌یابد.")
         return
 
-    # 2. انتقال دسته‌بندی‌ها به ووکامرس و ساخت نقشه
     category_mapping = transfer_categories_to_wc(filtered_categories)
     if not category_mapping:
         logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
         return
 
-    # 3. دریافت تمام محصولات
     products = get_all_products(session, filtered_categories)
     if not products:
         logger.info("✅ هیچ محصولی برای پردازش یافت نشد. برنامه با موفقیت خاتمه می‌یابد.")
         return
 
-    # 4. پردازش و ارسال محصولات به ووکامرس
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'lock': Lock()}
     logger.info(f"\n🚀 شروع پردازش و ارسال {len(products)} محصول به ووکامرس...")
     with ThreadPoolExecutor(max_workers=10) as executor:
