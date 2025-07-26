@@ -11,7 +11,6 @@ from threading import Lock
 import logging
 from logging.handlers import RotatingFileHandler
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
-from apscheduler.schedulers.background import BackgroundScheduler
 
 # ==============================================================================
 # --- تنظیمات لاگینگ ---
@@ -150,7 +149,7 @@ def get_selected_categories_flexible(source_categories):
         selected_input = input("شماره‌های مورد نظر را با کاما وارد کنید (مثل 1,3) یا 'all' برای همه: ").strip().lower()
     except EOFError:
         logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 1582 و 16777).")
-        default_ids = [16777]
+        default_ids = [1582, 16777]
         selected = [c for c in source_categories if c['id'] in default_ids]
         logger.info(f"✅ دسته‌بندی‌های پیش‌فرض انتخاب‌شده: {[c['name'] for c in selected]}")
         return selected
@@ -323,12 +322,15 @@ def get_all_products(session, categories, all_cats):
 def load_cache():
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, 'r') as f:
+            logger.info(f"✅ کش بارگذاری شد. تعداد محصولات در کش: {len(json.load(f))}")
             return json.load(f)
+    logger.info("⚠️ کش پیدا نشد. استخراج کامل انجام می‌شود.")
     return {}
 
 def save_cache(products):
     with open(CACHE_FILE, 'w') as f:
         json.dump(products, f, ensure_ascii=False, indent=4)
+    logger.info(f"✅ کش ذخیره شد. تعداد محصولات: {len(products)}")
 
 # ==============================================================================
 # --- توابع ووکامرس ---
@@ -347,6 +349,7 @@ def get_wc_categories():
         except Exception as e:
             logger.error(f"❌ خطا در دریافت دسته‌بندی‌های ووکامرس: {e}")
             break
+    logger.info(f"✅ تعداد دسته‌بندی‌های ووکامرس بارگذاری‌شده: {len(wc_cats)}")
     return wc_cats
 
 def check_existing_category(name, parent):
@@ -364,7 +367,7 @@ def check_existing_category(name, parent):
         return None
 
 def transfer_categories_to_wc(source_categories):
-    logger.info("\n⏳ انتقال دسته‌بندی‌ها به ووکامرس...")
+    logger.info("\n⏳ شروع انتقال دسته‌بندی‌ها به ووکامرس...")
     wc_cats = get_wc_categories()
     wc_cats_map = {}  # tuple (name, parent) -> id
     for cat in wc_cats:
@@ -372,6 +375,7 @@ def transfer_categories_to_wc(source_categories):
         wc_cats_map[key] = cat["id"]
     
     source_to_wc_id_map = {}
+    transferred = 0
     for cat in tqdm(source_categories, desc="انتقال دسته‌ها"):
         name = cat["name"].strip()
         parent_id = cat.get("parent_id") or 0
@@ -382,6 +386,7 @@ def transfer_categories_to_wc(source_categories):
         if existing_id:
             source_to_wc_id_map[cat["id"]] = existing_id
             logger.debug(f"✅ دسته '{name}' (parent: {wc_parent}) قبلاً وجود دارد (ID: {existing_id}). استفاده از موجود.")
+            transferred += 1
             continue
         
         data = {"name": name, "parent": wc_parent}
@@ -392,6 +397,7 @@ def transfer_categories_to_wc(source_categories):
                 source_to_wc_id_map[cat["id"]] = new_id
                 wc_cats_map[lookup_key] = new_id
                 logger.debug(f"✅ دسته '{name}' (parent: {wc_parent}) ساخته شد (ID: {new_id}).")
+                transferred += 1
             else:
                 error_data = res.json()
                 if error_data.get("code") == "term_exists" and "data" in error_data and "resource_id" in error_data["data"]:
@@ -399,11 +405,12 @@ def transfer_categories_to_wc(source_categories):
                     source_to_wc_id_map[cat["id"]] = existing_id
                     wc_cats_map[lookup_key] = existing_id
                     logger.info(f"✅ دسته '{name}' (parent: {wc_parent}) وجود داشت (ID: {existing_id}). استفاده از resource_id موجود.")
+                    transferred += 1
                 else:
                     logger.error(f"❌ خطا در ساخت دسته‌بندی '{name}' (parent: {wc_parent}): {res.text}")
         except Exception as e:
             logger.error(f"❌ خطای شبکه در ساخت دسته‌بندی '{name}': {e}")
-    logger.info("✅ انتقال دسته‌بندی‌ها کامل شد.")
+    logger.info(f"✅ انتقال دسته‌بندی‌ها کامل شد. تعداد منتقل‌شده: {transferred}/{len(source_categories)}")
     return source_to_wc_id_map
 
 def process_price(price_value):
@@ -501,64 +508,92 @@ def process_product_wrapper(args):
         with stats['lock']: stats['failed'] += 1
 
 # ==============================================================================
-# --- تابع اصلی بروزرسانی (بهینه‌شده) ---
+# --- کش برای محصولات ---
 # ==============================================================================
-def update_products():
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, 'r') as f:
+            cache = json.load(f)
+            logger.info(f"✅ کش بارگذاری شد. تعداد محصولات در کش: {len(cache)}")
+            return cache
+    logger.info("⚠️ کش پیدا نشد. استخراج کامل انجام می‌شود.")
+    return {}
+
+def save_cache(products):
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(products, f, ensure_ascii=False, indent=4)
+    logger.info(f"✅ کش ذخیره شد. تعداد محصولات: {len(products)}")
+
+# ==============================================================================
+# --- تابع اصلی (بدون زمان‌بندی) ---
+# ==============================================================================
+def main():
     session = login_eways(EWAYS_USERNAME, EWAYS_PASSWORD)
     if not session:
+        logger.error("❌ لاگین به پنل eways انجام نشد. برنامه خاتمه می‌یابد.")
         return
 
     all_cats = get_and_parse_categories(session)
-    if not all_cats: return
+    if not all_cats:
+        logger.error("❌ دسته‌بندی‌ها بارگذاری نشد.")
+        return
+    logger.info(f"✅ مرحله 1: بارگذاری دسته‌بندی‌ها کامل شد. تعداد: {len(all_cats)}")
 
     filtered_categories = get_selected_categories_flexible(all_cats)
     if not filtered_categories:
+        logger.info("✅ هیچ دسته‌بندی انتخاب نشد. برنامه خاتمه می‌یابد.")
         return
+    logger.info(f"✅ مرحله 2: انتخاب دسته‌بندی‌ها کامل شد. تعداد انتخاب‌شده: {len(filtered_categories)}")
 
     selected_ids = [cat['id'] for cat in filtered_categories]
     all_relevant_ids = get_all_category_ids(filtered_categories, all_cats, selected_ids)
-    
+    logger.info(f"✅ مرحله 3: استخراج IDهای مرتبط کامل شد. تعداد: {len(all_relevant_ids)}")
+
     relevant_cats = [cat for cat in all_cats if cat['id'] in all_relevant_ids]
+    logger.info(f"✅ مرحله 4: استخراج دسته‌های مرتبط کامل شد. تعداد: {len(relevant_cats)}")
+
     category_mapping = transfer_categories_to_wc(relevant_cats)
     if not category_mapping:
+        logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
         return
+    logger.info(f"✅ مرحله 5: انتقال دسته‌بندی‌ها کامل شد. تعداد نگاشت‌شده: {len(category_mapping)}")
 
     # بارگذاری کش
     cached_products = load_cache()
 
     # استخراج محصولات جدید
     new_products = get_all_products(session, filtered_categories, all_cats)
+    logger.info(f"✅ مرحله 6: استخراج محصولات کامل شد. تعداد استخراج‌شده: {len(new_products)}")
 
-    # ادغام با کش و بروزرسانی
+    # ادغام با کش و شناسایی تغییرات
     updated_products = {}
+    changed_count = 0
     for p in new_products:
         pid = p['id']
         if pid in cached_products and cached_products[pid]['price'] == p['price'] and cached_products[pid]['stock'] == p['stock'] and cached_products[pid]['specs'] == p['specs']:
-            # بدون تغییر، از کش استفاده کنید
+            # بدون تغییر
             updated_products[pid] = cached_products[pid]
         else:
-            # تغییر کرده یا جدید، بروزرسانی
+            # تغییر کرده یا جدید
             updated_products[pid] = p
+            changed_count += 1
+    logger.info(f"✅ مرحله 7: ادغام با کش کامل شد. تعداد محصولات تغییرشده/جدید برای ارسال: {changed_count}")
 
     # ذخیره کش جدید
     save_cache(updated_products)
 
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'lock': Lock()}
-    logger.info(f"\n🚀 شروع پردازش و ارسال {len(updated_products)} محصول (تغییرشده/جدید) به ووکامرس...")
+    logger.info(f"\n🚀 شروع پردازش و ارسال {changed_count} محصول (تغییرشده/جدید) به ووکامرس...")
     with ThreadPoolExecutor(max_workers=3) as executor:
-        args_list = [(p, stats, category_mapping) for p in updated_products.values()]
-        list(tqdm(executor.map(process_product_wrapper, args_list), total=len(updated_products), desc="ارسال محصولات"))
+        args_list = [(p, stats, category_mapping) for p in updated_products.values() if p['id'] not in cached_products or updated_products[p['id']] != cached_products.get(p['id'])]
+        list(tqdm(executor.map(process_product_wrapper, args_list), total=changed_count, desc="ارسال محصولات"))
 
     logger.info("\n===============================")
-    logger.info(f"📦 محصولات پردازش شده: {len(updated_products)}")
+    logger.info(f"📦 محصولات پردازش شده: {changed_count}")
     logger.info(f"🟢 ایجاد شده: {stats['created']}")
     logger.info(f"🔵 آپدیت شده: {stats['updated']}")
     logger.info(f"🔴 شکست‌خورده: {stats['failed']}")
     logger.info("===============================\nتمام!")
 
-# ==============================================================================
-# --- زمان‌بندی اجرا ---
-# ==============================================================================
-
-    except (KeyboardInterrupt, SystemExit):
-        scheduler.shutdown()
+if __name__ == "__main__":
+    main()
