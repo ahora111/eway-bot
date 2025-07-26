@@ -36,7 +36,7 @@ WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET") or "cs_xxx"
 EWAYS_USERNAME = os.environ.get("EWAYS_USERNAME") or "شماره موبایل یا یوزرنیم"
 EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
 
-CACHE_FILE = 'products_cache.json'  # فایل کش برای ذخیره محصولات
+CACHE_FILE = 'products_cache.json'  # فایل کش
 
 # ==============================================================================
 # --- تابع لاگین اتوماتیک به eways ---
@@ -149,7 +149,7 @@ def get_selected_categories_flexible(source_categories):
         selected_input = input("شماره‌های مورد نظر را با کاما وارد کنید (مثل 1,3) یا 'all' برای همه: ").strip().lower()
     except EOFError:
         logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 1582 و 16777).")
-        default_ids = [16777]
+        default_ids = [1582, 16777]
         selected = [c for c in source_categories if c['id'] in default_ids]
         logger.info(f"✅ دسته‌بندی‌های پیش‌فرض انتخاب‌شده: {[c['name'] for c in selected]}")
         return selected
@@ -322,8 +322,9 @@ def get_all_products(session, categories, all_cats):
 def load_cache():
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, 'r') as f:
-            logger.info(f"✅ کش بارگذاری شد. تعداد محصولات در کش: {len(json.load(f))}")
-            return json.load(f)
+            cache = json.load(f)
+            logger.info(f"✅ کش بارگذاری شد. تعداد محصولات در کش: {len(cache)}")
+            return cache
     logger.info("⚠️ کش پیدا نشد. استخراج کامل انجام می‌شود.")
     return {}
 
@@ -506,23 +507,6 @@ def process_product_wrapper(args):
     except Exception as e:
         logger.error(f"   ❌ خطای جدی در پردازش محصول {product.get('id', '')}: {e}")
         with stats['lock']: stats['failed'] += 1
-
-# ==============================================================================
-# --- کش برای محصولات ---
-# ==============================================================================
-def load_cache():
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, 'r') as f:
-            cache = json.load(f)
-            logger.info(f"✅ کش بارگذاری شد. تعداد محصولات در کش: {len(cache)}")
-            return cache
-    logger.info("⚠️ کش پیدا نشد. استخراج کامل انجام می‌شود.")
-    return {}
-
-def save_cache(products):
-    with open(CACHE_FILE, 'w') as f:
-        json.dump(products, f, ensure_ascii=False, indent=4)
-    logger.info(f"✅ کش ذخیره شد. تعداد محصولات: {len(products)}")
 
 # ==============================================================================
 # --- تابع اصلی (بدون زمان‌بندی) ---
