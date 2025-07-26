@@ -149,7 +149,7 @@ def get_selected_categories_flexible(source_categories):
         selected_input = input("شماره‌های مورد نظر را با کاما وارد کنید (مثل 1,3) یا 'all' برای همه: ").strip().lower()
     except EOFError:
         logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 1582 و 16777).")
-        default_ids = [16777]
+        default_ids = [1582, 16777]
         selected = [c for c in source_categories if c['id'] in default_ids]
         logger.info(f"✅ دسته‌بندی‌های پیش‌فرض انتخاب‌شده: {[c['name'] for c in selected]}")
         return selected
