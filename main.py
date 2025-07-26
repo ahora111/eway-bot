@@ -44,7 +44,8 @@ def login_eways(username, password):
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': f"{BASE_URL}/",
-        'X-Requested-With': 'XMLHttpRequest'
+        'X-Requested-With': 'XMLHttpRequest',
+        'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'  # اضافه برای شبیه‌سازی مرورگر
     })
     session.verify = False
 
@@ -174,7 +175,7 @@ def get_all_category_ids(categories, all_cats, selected_ids):
 
 @retry(
     retry=retry_if_exception_type(requests.exceptions.RequestException),
-    stop=stop_after_attempt(5),  # افزایش به 5 برای موارد سخت
+    stop=stop_after_attempt(5),
     wait=wait_random_exponential(multiplier=1, max=5),
     reraise=True
 )
@@ -192,10 +193,10 @@ def get_product_details(session, cat_id, product_id):
             logger.debug(f"      - تب #link1 پیدا نشد. جستجو برای جدول در کل صفحه...")
             specs_table = soup.select_one('.table-responsive table')
             if not specs_table:
-                # تلاش سوم: تمام <table>ها را چک کنید
+                # تلاش سوم: تمام <table class="table"> در صفحه
                 specs_table = soup.find('table', class_='table')
                 if not specs_table:
-                    logger.debug(f"      - هیچ جدولی پیدا نشد. HTML خام صفحه: {soup.prettify()[:1000]}...")  # لاگ بیشتر HTML برای دیباگ
+                    logger.debug(f"      - هیچ جدولی پیدا نشد. HTML خام صفحه: {soup.prettify()[:1000]}...")  # لاگ بیشتر HTML
                     return {}
 
         specs = {}
@@ -210,7 +211,7 @@ def get_product_details(session, cat_id, product_id):
         if not specs:
             logger.debug(f"      - هیچ ردیفی در جدول پیدا نشد. HTML خام جدول: {specs_table.prettify()}")
         
-        # لاگ کامل specs به فایل (برای جلوگیری از قطع در کنسول)
+        # لاگ کامل specs به فایل
         logger.debug(f"      - مشخصات استخراج‌شده برای {product_id} (کامل): {json.dumps(specs, ensure_ascii=False, indent=4)}")
         return specs
     except requests.exceptions.RequestException as e:
