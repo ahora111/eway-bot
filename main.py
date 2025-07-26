@@ -559,14 +559,6 @@ def update_products():
 # ==============================================================================
 # --- زمان‌بندی اجرا ---
 # ==============================================================================
-if __name__ == "__main__":
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(update_products, 'interval', minutes=5)  # هر 5 دقیقه (تغییر دهید)
-    scheduler.start()
-    logger.info("✅ زمان‌بندی شروع شد. کد هر 5 دقیقه اجرا می‌شود. برای توقف Ctrl+C بزنید.")
-    try:
-        # نگه داشتن اسکریپت در حال اجرا
-        while True:
-            time.sleep(2)
+
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
