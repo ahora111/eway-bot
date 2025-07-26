@@ -11,6 +11,7 @@ from threading import Lock
 import logging
 from logging.handlers import RotatingFileHandler
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # ==============================================================================
 # --- تنظیمات لاگینگ ---
@@ -36,6 +37,8 @@ WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET") or "cs_xxx"
 EWAYS_USERNAME = os.environ.get("EWAYS_USERNAME") or "شماره موبایل یا یوزرنیم"
 EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
 
+CACHE_FILE = 'products_cache.json'  # فایل کش برای ذخیره محصولات
+
 # ==============================================================================
 # --- تابع لاگین اتوماتیک به eways ---
 # ==============================================================================
@@ -45,7 +48,7 @@ def login_eways(username, password):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Referer': f"{BASE_URL}/",
         'X-Requested-With': 'XMLHttpRequest',
-        'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'  # اضافه برای شبیه‌سازی مرورگر
+        'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'
     })
     session.verify = False
 
@@ -221,7 +224,7 @@ def get_product_details(session, cat_id, product_id):
         logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
         return {}
 
-def get_products_from_category_page(session, category_id, max_pages=50):
+def get_products_from_category_page(session, category_id, max_pages=10):  # کاهش برای سرعت
     all_products_in_category = []
     seen_product_ids = set()
     page_num = 1
@@ -269,7 +272,7 @@ def get_products_from_category_page(session, category_id, max_pages=50):
                     stock = 1
 
                     specs = get_product_details(session, category_id, product_id)
-                    time.sleep(random.uniform(0.5, 1.5))
+                    time.sleep(random.uniform(0.5, 1.0))  # کاهش تأخیر برای سرعت
 
                     product = {
                         "id": product_id,
@@ -291,7 +294,7 @@ def get_products_from_category_page(session, category_id, max_pages=50):
                 logger.info("    - محصول جدیدی در این صفحه یافت نشد، توقف صفحه‌بندی.")
                 break
             page_num += 1
-            time.sleep(random.uniform(2, 4))
+            time.sleep(random.uniform(1, 2))  # کاهش تأخیر بین صفحات
         except requests.RequestException as e:
             logger.error(f"    - خطای شبکه در پردازش صفحه محصولات: {e}")
             break
@@ -313,6 +316,19 @@ def get_all_products(session, categories, all_cats):
             all_products[product['id']] = product
     logger.info(f"\n✅ فرآیند جمع‌آوری کامل شد. تعداد کل محصولات یکتا و موجود: {len(all_products)}")
     return list(all_products.values())
+
+# ==============================================================================
+# --- کش برای محصولات ---
+# ==============================================================================
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_cache(products):
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(products, f, ensure_ascii=False, indent=4)
 
 # ==============================================================================
 # --- توابع ووکامرس ---
@@ -485,12 +501,11 @@ def process_product_wrapper(args):
         with stats['lock']: stats['failed'] += 1
 
 # ==============================================================================
-# --- تابع اصلی ---
+# --- تابع اصلی بروزرسانی (بهینه‌شده) ---
 # ==============================================================================
-def main():
+def update_products():
     session = login_eways(EWAYS_USERNAME, EWAYS_PASSWORD)
     if not session:
-        logger.error("❌ لاگین به پنل eways انجام نشد. برنامه خاتمه می‌یابد.")
         return
 
     all_cats = get_and_parse_categories(session)
@@ -498,37 +513,60 @@ def main():
 
     filtered_categories = get_selected_categories_flexible(all_cats)
     if not filtered_categories:
-        logger.info("✅ هیچ دسته‌بندی انتخاب نشد. برنامه خاتمه می‌یابد.")
         return
 
     selected_ids = [cat['id'] for cat in filtered_categories]
     all_relevant_ids = get_all_category_ids(filtered_categories, all_cats, selected_ids)
     
     relevant_cats = [cat for cat in all_cats if cat['id'] in all_relevant_ids]
-    logger.info(f"✅ تعداد {len(relevant_cats)} دسته‌بندی مرتبط (انتخاب‌شده + زیرمجموعه‌ها) برای انتقال آماده شد.")
-
     category_mapping = transfer_categories_to_wc(relevant_cats)
     if not category_mapping:
-        logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
         return
 
-    products = get_all_products(session, filtered_categories, all_cats)
-    if not products:
-        logger.info("✅ هیچ محصولی برای پردازش یافت نشد. برنامه با موفقیت خاتمه می‌یابد.")
-        return
+    # بارگذاری کش
+    cached_products = load_cache()
+
+    # استخراج محصولات جدید
+    new_products = get_all_products(session, filtered_categories, all_cats)
+
+    # ادغام با کش و بروزرسانی
+    updated_products = {}
+    for p in new_products:
+        pid = p['id']
+        if pid in cached_products and cached_products[pid]['price'] == p['price'] and cached_products[pid]['stock'] == p['stock'] and cached_products[pid]['specs'] == p['specs']:
+            # بدون تغییر، از کش استفاده کنید
+            updated_products[pid] = cached_products[pid]
+        else:
+            # تغییر کرده یا جدید، بروزرسانی
+            updated_products[pid] = p
+
+    # ذخیره کش جدید
+    save_cache(updated_products)
 
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'lock': Lock()}
-    logger.info(f"\n🚀 شروع پردازش و ارسال {len(products)} محصول به ووکامرس...")
+    logger.info(f"\n🚀 شروع پردازش و ارسال {len(updated_products)} محصول (تغییرشده/جدید) به ووکامرس...")
     with ThreadPoolExecutor(max_workers=3) as executor:
-        args_list = [(p, stats, category_mapping) for p in products]
-        list(tqdm(executor.map(process_product_wrapper, args_list), total=len(products), desc="ارسال محصولات"))
+        args_list = [(p, stats, category_mapping) for p in updated_products.values()]
+        list(tqdm(executor.map(process_product_wrapper, args_list), total=len(updated_products), desc="ارسال محصولات"))
 
     logger.info("\n===============================")
-    logger.info(f"📦 محصولات پردازش شده: {len(products)}")
+    logger.info(f"📦 محصولات پردازش شده: {len(updated_products)}")
     logger.info(f"🟢 ایجاد شده: {stats['created']}")
     logger.info(f"🔵 آپدیت شده: {stats['updated']}")
     logger.info(f"🔴 شکست‌خورده: {stats['failed']}")
     logger.info("===============================\nتمام!")
 
+# ==============================================================================
+# --- زمان‌بندی اجرا ---
+# ==============================================================================
 if __name__ == "__main__":
-    main()
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(update_products, 'interval', minutes=5)  # هر 5 دقیقه (تغییر دهید)
+    scheduler.start()
+    logger.info("✅ زمان‌بندی شروع شد. کد هر 5 دقیقه اجرا می‌شود. برای توقف Ctrl+C بزنید.")
+    try:
+        # نگه داشتن اسکریپت در حال اجرا
+        while True:
+            time.sleep(2)
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
