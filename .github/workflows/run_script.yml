@@ -4,33 +4,32 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
-  # اگر زمان‌بندی می‌خواهید، این بخش را uncomment کنید
-  # schedule:
-  #   - cron: '*/5 * * * *'  # هر 5 دقیقه
+  schedule:
+    - cron: '*/5 * * * *'  # هر 5 دقیقه (اگر نخواید، comment کنید)
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4  # بروزرسانی به v4
 
     - name: Cache products JSON
-      uses: actions/cache@v3
+      uses: actions/cache@v4  # بروزرسانی به v4
       with:
         key: products-cache-${{ hashFiles('products_cache.json') }}  # کلید بر اساس محتوای فایل
         restore-keys: products-cache-  # برای بازیابی اگر کلید دقیق نبود
         path: products_cache.json  # فایلی که کش می‌شود
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5  # بروزرسانی به v5
       with:
         python-version: '3.x'
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 tqdm selenium webdriver-manager tenacity lxml
+        pip install requests beautifulsoup4 tqdm tenacity lxml
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
     - name: Run script
@@ -41,5 +40,9 @@ jobs:
         EWAYS_AUTH_TOKEN: ${{ secrets.EWAYS_AUTH_TOKEN }}
         EWAYS_USERNAME: ${{ secrets.EWAYS_USERNAME }}
         EWAYS_PASSWORD: ${{ secrets.EWAYS_PASSWORD }}
-        SELECTED_CATEGORIES: "16777"
+        SELECTED_TREE: "1582:21151-allz,1584-allz;16777:all-allz;4882-allz;16778:22570-allz"  # فرمت جدید برای درخت – ویرایش کنید
       run: python main.py
+
+    - name: Print logs for debugging
+      if: always()  # حتی اگر شکست بخوره، لاگ‌ها رو نشون بده
+      run: cat app.log || true  # چاپ محتوای app.log در output Actions
