@@ -148,7 +148,7 @@ def get_subcategories(all_cats, parent_id, allz=False):
         return all_subs
     return subs
 
-# تابع پارس فرمت جدید SELECTED_TREE
+# تابع پارس فرمت جدید SELECTED_TREE (فیکس‌شده برای جلوگیری از ValueError)
 def parse_selected_tree(tree_str, source_categories):
     selected = []
     selected_ids = set()
@@ -157,12 +157,14 @@ def parse_selected_tree(tree_str, source_categories):
     for part in parts:
         part = part.strip()
         if not part: continue
-        # پارس "mother_id:son_configs-sub_configs"
-        mother_parts = part.split(':')
-        if len(mother_parts) < 2: continue
-        mid = int(mother_parts[0].strip())
-        son_configs = mother_parts[1].strip() if len(mother_parts) > 1 else 'all'
-        sub_configs = mother_parts[2].strip() if len(mother_parts) > 2 else 'all-allz'
+        # پارس با re برای جدا کردن mother_id:son_configs-sub_configs
+        match = re.match(r'(\d+):(.+?)-(.*)', part)
+        if not match:
+            logger.error(f"❌ فرمت نامعتبر: {part}")
+            continue
+        mid = int(match.group(1))
+        son_configs = match.group(2).strip()
+        sub_configs = match.group(3).strip()
 
         mother_cat = next((cat for cat in source_categories if cat['id'] == mid), None)
         if not mother_cat:
@@ -176,8 +178,12 @@ def parse_selected_tree(tree_str, source_categories):
         if son_configs.lower() == 'all':
             chosen_sons = get_subcategories(source_categories, mid)
         else:
-            son_ids = [int(s.strip()) for s in son_configs.split(',') if s.strip()]
-            chosen_sons = [cat for cat in source_categories if cat['id'] in son_ids and cat['parent_id'] == mid]
+            try:
+                son_ids = [int(s.strip()) for s in son_configs.split(',') if s.strip()]
+                chosen_sons = [cat for cat in source_categories if cat['id'] in son_ids and cat['parent_id'] == mid]
+            except ValueError as e:
+                logger.error(f"❌ خطا در پارس فرزندان {son_configs}: {e}")
+                chosen_sons = []
 
         selected.extend(chosen_sons)
         selected_ids.update(son['id'] for son in chosen_sons)
@@ -195,7 +201,11 @@ def parse_selected_tree(tree_str, source_categories):
                     sub_part = sub_part.strip()
                     if '-' in sub_part:
                         sub_id_str, sub_type = sub_part.split('-', 1)
-                        sub_id = int(sub_id_str.strip())
+                        try:
+                            sub_id = int(sub_id_str.strip())
+                        except ValueError:
+                            logger.error(f"❌ خطا در پارس زیرمجموعه ID {sub_id_str}")
+                            continue
                         allz = sub_type.lower() == 'allz'
                         sub_cat = next((cat for cat in source_categories if cat['id'] == sub_id), None)
                         if sub_cat:
@@ -209,7 +219,11 @@ def parse_selected_tree(tree_str, source_categories):
             else:
                 if '-' in group:
                     sub_id_str, sub_type = group.split('-', 1)
-                    sub_id = int(sub_id_str.strip())
+                    try:
+                        sub_id = int(sub_id_str.strip())
+                    except ValueError:
+                        logger.error(f"❌ خطا در پارس زیرمجموعه ID {sub_id_str}")
+                        continue
                     allz = sub_type.lower() == 'allz'
                     sub_cat = next((cat for cat in source_categories if cat['id'] == sub_id), None)
                     if sub_cat:
@@ -231,7 +245,7 @@ def get_selected_categories_flexible(source_categories):
     selected = []
 
     try:
-        # حالت تعاملی (local) – ورودی از کاربر
+        # حالت تعاملی (local) – ورودی از کاربر (برای کامل بودن، کد قبلی رو نگه داشتم – می‌تونید با فرمت جدید تطبیق بدید)
         main_categories = [cat for cat in source_categories if cat['parent_id'] is None or cat['parent_id'] == 0]
         logger.info("📋 لیست شاخه‌های مادر:")
         for i, cat in enumerate(main_categories):
@@ -288,7 +302,7 @@ def get_selected_categories_flexible(source_categories):
         # حالت غیرتعاملی (GitHub Actions) – استفاده از SELECTED_TREE یا پیش‌فرض
         logger.warning("⚠️ محیط غیرتعاملی. استفاده از SELECTED_TREE یا پیش‌فرض.")
 
-        default_tree = "16777:all"  # پیش‌فرض مثال شما
+        default_tree = "16777:all-allz"  # پیش‌فرض مثال شما
         tree_str = os.environ.get('SELECTED_TREE', default_tree)
         logger.info(f"استفاده از SELECTED_TREE: {tree_str}")
 
@@ -298,7 +312,7 @@ def get_selected_categories_flexible(source_categories):
         logger.error("❌ هیچ دسته‌ای انتخاب نشد.")
         return []
 
-    selected_ids = [cat['id'] for cat in selected]  # استخراج IDها از selected
+    selected_ids = [cat['id'] for cat in selected]
     logger.info(f"✅ دسته‌بندی‌های نهایی انتخاب‌شده: {[c['name'] for c in selected]} (تعداد: {len(selected)})")
     return selected
 
