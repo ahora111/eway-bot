@@ -138,43 +138,176 @@ def get_and_parse_categories(session):
         logger.error(f"❌ خطای ناشناخته در پردازش دسته‌بندی‌ها: {e}")
         return None
 
+# تابع استخراج زیرمجموعه‌ها (مستقیم یا allz)
+def get_subcategories(all_cats, parent_id, allz=False):
+    subs = [cat for cat in all_cats if cat['parent_id'] == parent_id]
+    if allz:
+        all_subs = subs.copy()
+        for sub in subs:
+            all_subs.extend(get_subcategories(all_cats, sub['id'], allz=True))
+        return all_subs
+    return subs
+
+# تابع پارس فرمت جدید SELECTED_TREE
+def parse_selected_tree(tree_str, source_categories):
+    selected = []
+    selected_ids = set()
+
+    parts = tree_str.split(';')
+    for part in parts:
+        part = part.strip()
+        if not part: continue
+        # پارس "mother_id:son_configs-sub_configs"
+        mother_parts = part.split(':')
+        if len(mother_parts) < 2: continue
+        mid = int(mother_parts[0].strip())
+        son_configs = mother_parts[1].strip() if len(mother_parts) > 1 else 'all'
+        sub_configs = mother_parts[2].strip() if len(mother_parts) > 2 else 'all-allz'
+
+        mother_cat = next((cat for cat in source_categories if cat['id'] == mid), None)
+        if not mother_cat:
+            logger.error(f"❌ ID مادر {mid} معتبر نیست.")
+            continue
+        selected.append(mother_cat)
+        selected_ids.add(mid)
+        logger.info(f"✅ شاخه مادر انتخاب‌شده: {mother_cat['name']} (ID: {mid})")
+
+        # فرزندان
+        if son_configs.lower() == 'all':
+            chosen_sons = get_subcategories(source_categories, mid)
+        else:
+            son_ids = [int(s.strip()) for s in son_configs.split(',') if s.strip()]
+            chosen_sons = [cat for cat in source_categories if cat['id'] in son_ids and cat['parent_id'] == mid]
+
+        selected.extend(chosen_sons)
+        selected_ids.update(son['id'] for son in chosen_sons)
+        logger.info(f"✅ فرزندان انتخاب‌شده برای {mother_cat['name']}: {[son['name'] for son in chosen_sons]} (تعداد: {len(chosen_sons)})")
+
+        # زیرمجموعه‌ها (پارس گروه‌بندی با ( ) و +)
+        sub_groups = re.split(r',(?![^(]*KATEX_INLINE_CLOSE)', sub_configs)
+        for group in sub_groups:
+            group = group.strip()
+            if not group: continue
+            if group.startswith('(') and group.endswith(')'):
+                group = group[1:-1]
+                sub_parts = group.split('+')
+                for sub_part in sub_parts:
+                    sub_part = sub_part.strip()
+                    if '-' in sub_part:
+                        sub_id_str, sub_type = sub_part.split('-', 1)
+                        sub_id = int(sub_id_str.strip())
+                        allz = sub_type.lower() == 'allz'
+                        sub_cat = next((cat for cat in source_categories if cat['id'] == sub_id), None)
+                        if sub_cat:
+                            selected.append(sub_cat)
+                            selected_ids.add(sub_id)
+                            if allz:
+                                allz_subs = get_subcategories(source_categories, sub_id, allz=True)
+                                selected.extend(allz_subs)
+                                selected_ids.update(s['id'] for s in allz_subs)
+                                logger.info(f"✅ زیرمجموعه {sub_cat['name']} با allz: {len(allz_subs)} مورد اضافه شد.")
+            else:
+                if '-' in group:
+                    sub_id_str, sub_type = group.split('-', 1)
+                    sub_id = int(sub_id_str.strip())
+                    allz = sub_type.lower() == 'allz'
+                    sub_cat = next((cat for cat in source_categories if cat['id'] == sub_id), None)
+                    if sub_cat:
+                        selected.append(sub_cat)
+                        selected_ids.add(sub_id)
+                        if allz:
+                            allz_subs = get_subcategories(source_categories, sub_id, allz=True)
+                            selected.extend(allz_subs)
+                            selected_ids.update(s['id'] for s in allz_subs)
+                            logger.info(f"✅ زیرمجموعه {sub_cat['name']} با allz: {len(allz_subs)} مورد اضافه شد.")
+
+    return selected
+
 def get_selected_categories_flexible(source_categories):
     if not source_categories:
         logger.warning("⚠️ هیچ دسته‌بندی برای انتخاب موجود نیست.")
         return []
-    logger.info("📋 لیست دسته‌بندی‌ها:")
-    for i, cat in enumerate(source_categories):
-        logger.info(f"{i+1}: {cat['name']} (ID: {cat['id']})")
+
+    selected = []
+
     try:
-        selected_input = input("شماره‌های مورد نظر را با کاما وارد کنید (مثل 1,3) یا 'all' برای همه: ").strip().lower()
+        # حالت تعاملی (local) – ورودی از کاربر
+        main_categories = [cat for cat in source_categories if cat['parent_id'] is None or cat['parent_id'] == 0]
+        logger.info("📋 لیست شاخه‌های مادر:")
+        for i, cat in enumerate(main_categories):
+            logger.info(f"{i+1}: {cat['name']} (ID: {cat['id']})")
+
+        while True:
+            mother_input = input("ID شاخه مادر مورد نظر را وارد کنید (مثل 4285 یا چند تا با کاما مثل 4285,1234) یا 'done' برای پایان: ").strip().lower()
+            if mother_input == 'done':
+                break
+            mother_ids = [int(x.strip()) for x in mother_input.split(',') if x.strip()]
+
+            for mid in mother_ids:
+                mother_cat = next((cat for cat in main_categories if cat['id'] == mid), None)
+                if not mother_cat:
+                    logger.error(f"❌ ID {mid} معتبر نیست.")
+                    continue
+
+                logger.info(f"✅ شاخه مادر انتخاب‌شده: {mother_cat['name']} (ID: {mid})")
+                selected.append(mother_cat)
+
+                # انتخاب فرزندان (تمام یا بعضی)
+                son_input = input(f"برای {mother_cat['name']}: 'all' برای تمام فرزندان، یا ID فرزندان با کاما (مثل 16777,5678) یا خالی برای هیچ: ").strip().lower()
+                if son_input == 'all':
+                    chosen_sons = get_subcategories(source_categories, mid)
+                elif son_input:
+                    son_ids = [int(x.strip()) for x in son_input.split(',') if x.strip()]
+                    chosen_sons = [cat for cat in source_categories if cat['id'] in son_ids and cat['parent_id'] == mid]
+                else:
+                    chosen_sons = []
+
+                selected.extend(chosen_sons)
+                logger.info(f"✅ فرزندان انتخاب‌شده برای {mother_cat['name']}: {[son['name'] for son in chosen_sons]}")
+
+                # برای هر فرزند، انتخاب زیرمجموعه‌ها (تمام/بعضی + allz)
+                for son in chosen_sons:
+                    sub_input = input(f"برای فرزند {son['name']}: 'all:allz' برای تمام زیرمجموعه‌ها با عمق، 'all' برای تمام مستقیم، IDها با کاما (مثل sub1,sub2:allz) یا خالی برای هیچ: ").strip().lower()
+                    allz = ':allz' in sub_input
+                    sub_input = sub_input.replace(':allz', '')
+
+                    if sub_input == 'all':
+                        chosen_subs = get_subcategories(source_categories, son['id'], allz=allz)
+                    elif sub_input:
+                        sub_ids = [int(x.strip()) for x in sub_input.split(',') if x.strip()]
+                        chosen_subs = [cat for cat in source_categories if cat['id'] in sub_ids and cat['parent_id'] == son['id']]
+                        if allz:
+                            for sub in chosen_subs.copy():
+                                chosen_subs.extend(get_subcategories(source_categories, sub['id'], allz=True))
+                    else:
+                        chosen_subs = []
+
+                    selected.extend(chosen_subs)
+                    logger.info(f"✅ زیرمجموعه‌های انتخاب‌شده برای {son['name']}: {[sub['name'] for sub in chosen_subs]} (allz: {allz})")
     except EOFError:
-        logger.warning("⚠️ ورودی کاربر در دسترس نیست (EOF). استفاده از دسته‌بندی‌های پیش‌فرض (IDهای 1582 و 16777).")
-        default_ids = [16777]
-        selected = [c for c in source_categories if c['id'] in default_ids]
-        logger.info(f"✅ دسته‌بندی‌های پیش‌فرض انتخاب‌شده: {[c['name'] for c in selected]}")
-        return selected
-    if selected_input == 'all':
-        return source_categories
-    try:
-        indices = [int(x.strip()) - 1 for x in selected_input.split(',')]
-        selected = [source_categories[i] for i in indices if 0 <= i < len(source_categories)]
-        logger.info(f"✅ دسته‌بندی‌های انتخاب‌شده: {[c['name'] for c in selected]}")
-        return selected
-    except ValueError:
-        logger.error("❌ ورودی نامعتبر. هیچ دسته‌ای انتخاب نشد.")
+        # حالت غیرتعاملی (GitHub Actions) – استفاده از SELECTED_TREE یا پیش‌فرض
+        logger.warning("⚠️ محیط غیرتعاملی. استفاده از SELECTED_TREE یا پیش‌فرض.")
+
+        default_tree = "16777:all"  # پیش‌فرض مثال شما
+        tree_str = os.environ.get('SELECTED_TREE', default_tree)
+        logger.info(f"استفاده از SELECTED_TREE: {tree_str}")
+
+        selected = parse_selected_tree(tree_str, source_categories)
+
+    if not selected:
+        logger.error("❌ هیچ دسته‌ای انتخاب نشد.")
         return []
 
-def get_all_category_ids(categories, all_cats, selected_ids):
-    all_ids = set(selected_ids)
-    to_process = list(selected_ids)
-    while to_process:
-        current_id = to_process.pop()
-        for cat in all_cats:
-            if cat['parent_id'] == current_id:
-                all_ids.add(cat['id'])
-                to_process.append(cat['id'])
-    return list(all_ids)
+    selected_ids = [cat['id'] for cat in selected]  # استخراج IDها از selected
+    logger.info(f"✅ دسته‌بندی‌های نهایی انتخاب‌شده: {[c['name'] for c in selected]} (تعداد: {len(selected)})")
+    return selected
 
+def get_all_category_ids(categories, all_cats, selected_ids):
+    return selected_ids  # IDها از selected استخراج شدن
+
+# ==============================================================================
+# --- بقیه توابع (کامل) ---
+# ==============================================================================
 @retry(
     retry=retry_if_exception_type(requests.exceptions.RequestException),
     stop=stop_after_attempt(5),
@@ -188,17 +321,14 @@ def get_product_details(session, cat_id, product_id):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'lxml')
         
-        # تلاش اول: سلکتور اصلی برای تب #link1
         specs_table = soup.select_one('#link1 .table-responsive table')
         if not specs_table:
-            # تلاش دوم: جستجو برای هر جدول در صفحه (اگر تب پیدا نشد)
             logger.debug(f"      - تب #link1 پیدا نشد. جستجو برای جدول در کل صفحه...")
             specs_table = soup.select_one('.table-responsive table')
             if not specs_table:
-                # تلاش سوم: تمام <table class="table"> در صفحه
                 specs_table = soup.find('table', class_='table')
                 if not specs_table:
-                    logger.debug(f"      - هیچ جدولی پیدا نشد. HTML خام صفحه: {soup.prettify()[:1000]}...")  # لاگ بیشتر HTML
+                    logger.debug(f"      - هیچ جدولی پیدا نشد. HTML خام صفحه: {soup.prettify()[:1000]}...")
                     return {}
 
         specs = {}
@@ -213,7 +343,6 @@ def get_product_details(session, cat_id, product_id):
         if not specs:
             logger.debug(f"      - هیچ ردیفی در جدول پیدا نشد. HTML خام جدول: {specs_table.prettify()}")
         
-        # لاگ کامل specs به فایل
         logger.debug(f"      - مشخصات استخراج‌شده برای {product_id} (کامل): {json.dumps(specs, ensure_ascii=False, indent=4)}")
         return specs
     except requests.exceptions.RequestException as e:
@@ -223,7 +352,7 @@ def get_product_details(session, cat_id, product_id):
         logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
         return {}
 
-def get_products_from_category_page(session, category_id, max_pages=10):  # کاهش برای سرعت
+def get_products_from_category_page(session, category_id, max_pages=10):
     all_products_in_category = []
     seen_product_ids = set()
     page_num = 1
@@ -271,7 +400,7 @@ def get_products_from_category_page(session, category_id, max_pages=10):  # کا
                     stock = 1
 
                     specs = get_product_details(session, category_id, product_id)
-                    time.sleep(random.uniform(0.5, 1.0))  # کاهش تأخیر برای سرعت
+                    time.sleep(random.uniform(0.5, 1.0))
 
                     product = {
                         "id": product_id,
@@ -293,7 +422,7 @@ def get_products_from_category_page(session, category_id, max_pages=10):  # کا
                 logger.info("    - محصول جدیدی در این صفحه یافت نشد، توقف صفحه‌بندی.")
                 break
             page_num += 1
-            time.sleep(random.uniform(1, 2))  # کاهش تأخیر بین صفحات
+            time.sleep(random.uniform(1, 2))
         except requests.RequestException as e:
             logger.error(f"    - خطای شبکه در پردازش صفحه محصولات: {e}")
             break
