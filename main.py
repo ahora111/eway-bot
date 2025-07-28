@@ -302,7 +302,7 @@ def get_selected_categories_flexible(source_categories):
         # حالت غیرتعاملی (GitHub Actions) – استفاده از SELECTED_TREE یا پیش‌فرض
         logger.warning("⚠️ محیط غیرتعاملی. استفاده از SELECTED_TREE یا پیش‌فرض.")
 
-        default_tree = ""  # پیش‌فرض مثال شما
+        default_tree = "4285:all-allz;1234:far1-all-allz;5678:far3-zir1-allz,far4-(zir2-allz+zir3-allz+zir5-allz)"  # پیش‌فرض مثال شما
         tree_str = os.environ.get('SELECTED_TREE', default_tree)
         logger.info(f"استفاده از SELECTED_TREE: {tree_str}")
 
