@@ -67,7 +67,22 @@ def get_selected_category_ids(parsed_selection, all_cats):
                 selected_ids.update(subcats)
                 for sub_id in subcats:
                     selected_ids.update(get_all_subcategories(sub_id, all_cats))
+    # همچنین خود parent_idها (دسته‌هایی که کاربر مستقیماً انتخاب کرده) را هم اضافه کن
+    for block in parsed_selection:
+        selected_ids.add(block['parent_id'])
     return list(selected_ids)
+
+def get_selected_categories_and_children(selected_ids, all_cats):
+    """
+    فقط دسته‌هایی که انتخاب کردی و زیرشاخه‌هایشان (طبق انتخاب)، بدون والدهای غیرانتخابی
+    """
+    id_set = set(selected_ids)
+    result = []
+    for cat in all_cats:
+        # اگر خودش انتخاب شده یا والدش در انتخاب‌هاست
+        if cat['id'] in id_set or (cat['parent_id'] in id_set):
+            result.append(cat)
+    return result
 
 # ==============================================================================
 # --- تنظیمات لاگینگ ---
@@ -542,7 +557,7 @@ def main():
     logger.info(f"✅ انتخاب‌های دلخواه: {parsed_selection}")
 
     selected_ids = get_selected_category_ids(parsed_selection, all_cats)
-    filtered_categories = [cat for cat in all_cats if cat['id'] in selected_ids]
+    filtered_categories = get_selected_categories_and_children(selected_ids, all_cats)
     logger.info(f"✅ دسته‌بندی‌های نهایی: {[cat['name'] for cat in filtered_categories]}")
 
     category_mapping = transfer_categories_to_wc(filtered_categories)
