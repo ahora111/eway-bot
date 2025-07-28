@@ -96,45 +96,46 @@ def get_and_parse_categories(session):
                     "parent_id": c.get('parent_id')
                 })
             logger.info(f"✅ تعداد {len(final_cats)} دسته‌بندی از JSON استخراج شد.")
-            return final_cats
         except json.JSONDecodeError:
             logger.warning("⚠️ پاسخ JSON نیست. تلاش برای پارس HTML...")
-
-        soup = BeautifulSoup(response.text, 'lxml')
-        all_menu_items = soup.select("li[id^='menu-item-']")
-        if not all_menu_items:
-            logger.error("❌ هیچ آیتم دسته‌بندی در HTML پیدا نشد.")
-            return []
-        logger.info(f"🔎 تعداد {len(all_menu_items)} آیتم منو پیدا شد. در حال پردازش...")
-
-        cats_map = {}
-        for item in all_menu_items:
-            cat_id_raw = item.get('id', '')
-            match = re.search(r'(\d+)', cat_id_raw)
-            if not match: continue
-            cat_menu_id = int(match.group(1))
-            a_tag = item.find('a', recursive=False) or item.select_one("a")
-            if not a_tag or not a_tag.get('href'): continue
-            name = a_tag.text.strip()
-            real_id_match = re.search(r'/Store/List/(\d+)', a_tag['href'])
-            real_id = int(real_id_match.group(1)) if real_id_match else None
-            if name and real_id and name != "#":
-                cats_map[cat_menu_id] = {"id": real_id, "name": name, "parent_id": None}
-        for item in all_menu_items:
-            cat_id_raw = item.get('id', '')
-            match = re.search(r'(\d+)', cat_id_raw)
-            if not match: continue
-            cat_menu_id = int(match.group(1))
-            parent_li = item.find_parent("li", class_="menu-item-has-children")
-            if parent_li:
-                parent_id_raw = parent_li.get('id', '')
-                parent_match = re.search(r'(\d+)', parent_id_raw)
-                if parent_match:
-                    parent_menu_id = int(parent_match.group(1))
-                    if cat_menu_id in cats_map and parent_menu_id in cats_map:
-                        cats_map[cat_menu_id]['parent_id'] = cats_map[parent_menu_id]['id']
-        final_cats = list(cats_map.values())
-        logger.info(f"✅ تعداد {len(final_cats)} دسته‌بندی معتبر استخراج شد.")
+            soup = BeautifulSoup(response.text, 'lxml')
+            all_menu_items = soup.select("li[id^='menu-item-']")
+            if not all_menu_items:
+                logger.error("❌ هیچ آیتم دسته‌بندی در HTML پیدا نشد.")
+                return []
+            logger.info(f"🔎 تعداد {len(all_menu_items)} آیتم منو پیدا شد. در حال پردازش...")
+            cats_map = {}
+            for item in all_menu_items:
+                cat_id_raw = item.get('id', '')
+                match = re.search(r'(\d+)', cat_id_raw)
+                if not match: continue
+                cat_menu_id = int(match.group(1))
+                a_tag = item.find('a', recursive=False) or item.select_one("a")
+                if not a_tag or not a_tag.get('href'): continue
+                name = a_tag.text.strip()
+                real_id_match = re.search(r'/Store/List/(\d+)', a_tag['href'])
+                real_id = int(real_id_match.group(1)) if real_id_match else None
+                if name and real_id and name != "#":
+                    cats_map[cat_menu_id] = {"id": real_id, "name": name, "parent_id": None}
+            for item in all_menu_items:
+                cat_id_raw = item.get('id', '')
+                match = re.search(r'(\d+)', cat_id_raw)
+                if not match: continue
+                cat_menu_id = int(match.group(1))
+                parent_li = item.find_parent("li", class_="menu-item-has-children")
+                if parent_li:
+                    parent_id_raw = parent_li.get('id', '')
+                    parent_match = re.search(r'(\d+)', parent_id_raw)
+                    if parent_match:
+                        parent_menu_id = int(parent_match.group(1))
+                        if cat_menu_id in cats_map and parent_menu_id in cats_map:
+                            cats_map[cat_menu_id]['parent_id'] = cats_map[parent_menu_id]['id']
+            final_cats = list(cats_map.values())
+            logger.info(f"✅ تعداد {len(final_cats)} دسته‌بندی معتبر استخراج شد.")
+        # اضافه شده: لاگ کامل لیست دسته‌ها برای چک IDها
+        logger.info("📋 لیست کامل دسته‌بندی‌ها (ID, نام, parent_id):")
+        for cat in final_cats:
+            logger.info(f"ID: {cat['id']}, نام: {cat['name']}, parent_id: {cat.get('parent_id')}")
         return final_cats
     except requests.RequestException as e:
         logger.error(f"❌ خطا در دریافت دسته‌بندی‌ها: {e}")
@@ -193,12 +194,12 @@ def get_selected_categories_flexible(source_categories):
             # چک اگر زیرشاخه parent_id == main_id باشه
             sub_cat = next((c for c in source_categories if c['id'] == sub_id and c['parent_id'] == main_id), None)
             if not sub_cat:
-                logger.warning(f"⚠️ زیر ID {sub_id} زیر {main_id} پیدا نشد.")
+                logger.warning(f"⚠️ زیر ID {sub_id} زیر {main_id} پیدا نشد. (چک parent_id)")
                 continue
             selected.append(sub_cat)
             all_selected_ids.add(sub_id)
             
-            # چک برای تنظیمات مثل allz یا all-allz
+            # چک برای config مثل allz یا all-allz (بدون دیدن به عنوان ID)
             if len(sub_parts) > 1:
                 config = '-'.join(sub_parts[1:]).lower()
                 if 'all' in config or 'allz' in config:
@@ -210,7 +211,7 @@ def get_selected_categories_flexible(source_categories):
                                 selected.append(s_cat)
                                 all_selected_ids.add(s_id)
         
-        # برای main اگر all-allz باشه (بدون پرانتز)
+        # برای main اگر all یا allz باشه
         if 'all' in parts[1].lower() or 'allz' in parts[1].lower():
             main_sub_ids = get_all_category_ids([main_cat], source_categories, [main_id])
             for ms_id in main_sub_ids:
