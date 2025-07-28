@@ -235,8 +235,19 @@ def get_product_details(session, cat_id, product_id):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'lxml')
         specs_table = soup.select_one('#link1 .table-responsive table') or soup.select_one('.table-responsive table') or soup.find('table', class_='table')
-        if not specs_table: return {}
-        specs = {cells[0].text.strip(): cells[1].text.strip() for row in specs_table.find_all("tr") if len(cells := row.find_all("td")) == 2 and cells[0].text.strip()}
+        if not specs_table:
+            return {}
+        
+        # --- نسخه خوانا و مطمئن برای استخراج مشخصات ---
+        specs = {}
+        rows = specs_table.find_all("tr")
+        for row in rows:
+            cells = row.find_all("td")
+            if len(cells) == 2:
+                key = cells[0].text.strip()
+                value = cells[1].text.strip()
+                if key and value:
+                    specs[key] = value
         return specs
     except requests.exceptions.RequestException as e:
         logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: {e}. تلاش مجدد...")
@@ -290,13 +301,7 @@ def save_cache(products):
         with open(CACHE_FILE, 'w', encoding='utf-8') as f: json.dump(products, f, ensure_ascii=False, indent=4)
     except IOError as e: logger.error(f"❌ خطا در ذخیره فایل کش: {e}")
 
-# --- تابع اصلاح شده با ساختار try/except صحیح ---
-@retry(
-    retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)),
-    stop=stop_after_attempt(3),
-    wait=wait_random_exponential(multiplier=1, max=10),
-    reraise=True
-)
+@retry(retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)), stop=stop_after_attempt(3), wait=wait_random_exponential(multiplier=1, max=10), reraise=True)
 def _send_to_woocommerce(sku, data, stats):
     try:
         auth = (WC_CONSUMER_KEY, WC_CONSUMER_SECRET)
@@ -309,18 +314,19 @@ def _send_to_woocommerce(sku, data, stats):
             update_data = {"regular_price": data["regular_price"], "stock_quantity": data["stock_quantity"], "stock_status": data["stock_status"], "attributes": data["attributes"]}
             res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=update_data, verify=False, timeout=30)
             res.raise_for_status()
-            with stats['lock']: stats['updated'] += 1
+            with stats['lock']:
+                stats['updated'] += 1
         else:
             res = requests.post(f"{WC_API_URL}/products", auth=auth, json=data, verify=False, timeout=30)
             res.raise_for_status()
-            with stats['lock']: stats['created'] += 1
+            with stats['lock']:
+                stats['created'] += 1
     except requests.exceptions.HTTPError as e:
         logger.error(f"   ❌ HTTP خطا برای SKU {sku}: {e.response.status_code} - Response: {e.response.text}")
         raise
     except Exception as e:
         logger.error(f"   ❌ خطای کلی در ارتباط با ووکامرس برای SKU {sku}: {e}")
         raise
-
 
 def process_product_wrapper(args):
     product, stats, category_mapping = args
