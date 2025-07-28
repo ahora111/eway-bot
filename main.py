@@ -150,13 +150,10 @@ def get_subcategories(all_cats, parent_id, allz=False):
 
 # تابع جدید برای نمایش درخت در لاگ
 def print_category_tree(selected, all_cats, level=0):
-    tree_log = []
     for cat in selected:
-        tree_log.append('  ' * level + f"- {cat['name']} (ID: {cat['id']})")
+        logger.info('  ' * level + f"- {cat['name']} (ID: {cat['id']})")
         subs = get_subcategories(all_cats, cat['id'], allz=True)  # recursive برای نمایش عمق
         print_category_tree(subs, all_cats, level + 1)
-    for line in tree_log:
-        logger.info(line)
 
 # تابع پارس فرمت جدید SELECTED_TREE (فیکس‌شده)
 def parse_selected_tree(tree_str, source_categories):
@@ -200,7 +197,7 @@ def parse_selected_tree(tree_str, source_categories):
         logger.info(f"✅ فرزندان انتخاب‌شده برای {mother_cat['name']}: {[son['name'] for son in chosen_sons]} (تعداد: {len(chosen_sons)})")
 
         # زیرمجموعه‌ها (پارس گروه‌بندی با ( ) و +)
-        sub_groups = re.split(r',(?![^(]*KATEX_INLINE_CLOSE)', sub_configs)
+        sub_groups = re.split(r',(?![^(]*\))', sub_configs)
         for group in sub_groups:
             group = group.strip()
             if not group: continue
@@ -312,7 +309,7 @@ def get_selected_categories_flexible(source_categories):
         # حالت غیرتعاملی (GitHub Actions) – استفاده از SELECTED_TREE یا پیش‌فرض
         logger.warning("⚠️ محیط غیرتعاملی. استفاده از SELECTED_TREE یا پیش‌فرض.")
 
-        default_tree = "4285:all-allz;1234:far1-all-allz;5678:far3-zir1-allz,far4-(zir2-allz+zir3-allz+zir5-allz)"  # پیش‌فرض مثال شما
+        default_tree = ")"  # پیش‌فرض مثال شما
         tree_str = os.environ.get('SELECTED_TREE', default_tree)
         logger.info(f"استفاده از SELECTED_TREE: {tree_str}")
 
