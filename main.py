@@ -26,10 +26,8 @@ def get_all_descendants(parent_id, all_cats_map):
 
 def process_selection_rules(rule_string, all_cats, logger_instance):
     """رشته قوانین را پردازش کرده و دو لیست ID مجزا برمی‌گرداند."""
-    structure_ids = set()
-    product_ids = set()
+    structure_ids, product_ids = set(), set()
     all_cats_map = {cat['id']: cat for cat in all_cats}
-
     for rule in rule_string.split('|'):
         rule = rule.strip()
         if not rule or ':' not in rule: continue
@@ -64,15 +62,12 @@ def process_selection_rules(rule_string, all_cats, logger_instance):
                         logger_instance.warning(f"⚠️ شناسه فرزند {child_id} در قانون '{rule}' یافت نشد.")
                         continue
                     structure_ids.add(child_id)
-                    if command == 'allz':
-                        product_ids.add(child_id)
+                    if command == 'allz': product_ids.add(child_id)
                     elif command == 'all-allz':
                         product_ids.add(child_id)
                         descendants = get_all_descendants(child_id, all_cats_map)
                         structure_ids.update(descendants)
                         product_ids.update(descendants)
-                    else:
-                        logger_instance.warning(f"⚠️ دستور '{command}' برای فرزند {child_id} نامعتبر است.")
         except Exception as e:
             logger_instance.error(f"❌ خطای جدی در پردازش قانون '{rule}': {e}")
     return list(structure_ids), list(product_ids)
@@ -116,9 +111,8 @@ def login_eways(username, password):
         if 'Aut' in session.cookies:
             logger.info("✅ لاگین موفق!")
             return session
-        else:
-            logger.error("❌ کوکی Aut دریافت نشد. لاگین ناموفق یا کپچا فعال است.")
-            return None
+        logger.error("❌ کوکی Aut دریافت نشد. لاگین ناموفق یا کپچا فعال است.")
+        return None
     except requests.RequestException as e:
         logger.error(f"❌ لاگین ناموفق! خطای شبکه: {e}")
         return None
@@ -130,7 +124,6 @@ def get_and_parse_categories(session):
         response.raise_for_status()
         try:
             data = response.json()
-            logger.debug("پاسخ JSON است. در حال پردازش...")
             final_cats = []
             for c in data:
                 real_id_match = re.search(r'/Store/List/(\d+)', c.get('url', ''))
@@ -147,8 +140,7 @@ def get_and_parse_categories(session):
             return []
         cats_map = {}
         for item in all_menu_items:
-            cat_id_raw = item.get('id', '')
-            match = re.search(r'(\d+)', cat_id_raw)
+            cat_id_raw = item.get('id', ''); match = re.search(r'(\d+)', cat_id_raw)
             if not match: continue
             cat_menu_id = int(match.group(1))
             a_tag = item.find('a', recursive=False) or item.select_one("a")
@@ -159,14 +151,12 @@ def get_and_parse_categories(session):
             if name and real_id and name != "#":
                 cats_map[cat_menu_id] = {"id": real_id, "name": name, "parent_id": None}
         for item in all_menu_items:
-            cat_id_raw = item.get('id', '')
-            match = re.search(r'(\d+)', cat_id_raw)
+            cat_id_raw = item.get('id', ''); match = re.search(r'(\d+)', cat_id_raw)
             if not match: continue
             cat_menu_id = int(match.group(1))
             parent_li = item.find_parent("li", class_="menu-item-has-children")
             if parent_li:
-                parent_id_raw = parent_li.get('id', '')
-                parent_match = re.search(r'(\d+)', parent_id_raw)
+                parent_id_raw = parent_li.get('id', ''); parent_match = re.search(r'(\d+)', parent_id_raw)
                 if parent_match:
                     parent_menu_id = int(parent_match.group(1))
                     if cat_menu_id in cats_map and parent_menu_id in cats_map:
@@ -183,7 +173,7 @@ def check_wc_connection():
     try:
         res = requests.get(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False, timeout=15)
         if res.status_code == 401:
-            logger.error("❌ اتصال به ووکامرس ناموفق: خطای 401 Unauthorized. لطفاً کلیدهای API (Consumer Key/Secret) را بررسی کنید.")
+            logger.error("❌ اتصال به ووکامرس ناموفق: خطای 401 Unauthorized. لطفاً کلیدهای API را بررسی کنید.")
             return False
         res.raise_for_status()
         logger.info("✅ اتصال به ووکامرس موفقیت‌آمیز است.")
@@ -199,53 +189,41 @@ def transfer_categories_to_wc(source_categories, all_cats_from_source):
     logger.info(f"\n⏳ شروع انتقال {len(source_categories)} دسته‌بندی به ووکامرس...")
     source_cat_map = {cat['id']: cat for cat in all_cats_from_source}
     source_to_wc_id_map = {}
-    
     def get_depth(cat_id):
-        depth = 0
-        current_id = cat_id
+        depth = 0; current_id = cat_id
         while current_id and source_cat_map.get(current_id, {}).get('parent_id'):
-            depth += 1
-            current_id = source_cat_map.get(current_id, {}).get('parent_id')
+            depth += 1; current_id = source_cat_map.get(current_id, {}).get('parent_id')
         return depth
-
     sorted_cats = sorted(source_categories, key=lambda c: get_depth(c['id']))
-
     for cat in tqdm(sorted_cats, desc="انتقال دسته‌ها"):
-        name = cat["name"].strip()
-        source_parent_id = cat.get("parent_id")
+        name = cat["name"].strip(); source_parent_id = cat.get("parent_id")
         wc_parent_id = source_to_wc_id_map.get(source_parent_id, 0)
-        logger.debug(f"  - پردازش '{name}' (Source ID: {cat['id']}). والد مورد انتظار در ووکامرس: {wc_parent_id}")
+        logger.debug(f"  - پردازش '{name}' (Source ID: {cat['id']}). والد مورد انتظار در WC: {wc_parent_id}")
         try:
             params = {"search": name, "parent": wc_parent_id, "per_page": 100}
             res_check = requests.get(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), params=params, verify=False, timeout=20)
             res_check.raise_for_status()
             existing_cats = res_check.json()
             exact_match = next((wc_cat for wc_cat in existing_cats if wc_cat['name'].strip() == name and wc_cat['parent'] == wc_parent_id), None)
-            
             if exact_match:
                 source_to_wc_id_map[cat["id"]] = exact_match["id"]
                 logger.debug(f"    -> دسته '{name}' با والد صحیح ({wc_parent_id}) از قبل وجود دارد. WC ID: {exact_match['id']}")
-                continue 
-
+                continue
             logger.debug(f"    -> دسته '{name}' با والد {wc_parent_id} وجود ندارد. تلاش برای ساخت...")
             data = {"name": name, "parent": wc_parent_id}
             res_create = requests.post(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False, timeout=20)
-            
             if res_create.status_code in [200, 201]:
-                new_id = res_create.json()["id"]
-                source_to_wc_id_map[cat["id"]] = new_id
-                logger.debug(f"    -> ✅ دسته با موفقیت ساخته شد. WC ID جدید: {new_id}")
+                source_to_wc_id_map[cat["id"]] = res_create.json()["id"]
+                logger.debug(f"    -> ✅ دسته با موفقیت ساخته شد. WC ID جدید: {res_create.json()['id']}")
             else:
                 error_data = res_create.json()
                 if error_data.get("code") == "term_exists" and error_data.get("data", {}).get("resource_id"):
-                    existing_id = error_data["data"]["resource_id"]
-                    source_to_wc_id_map[cat["id"]] = existing_id
-                    logger.warning(f"    -> دسته '{name}' به دلیل 'term_exists' با ID موجود {existing_id} مپ شد.")
+                    source_to_wc_id_map[cat["id"]] = error_data["data"]["resource_id"]
+                    logger.warning(f"    -> دسته '{name}' به دلیل 'term_exists' با ID موجود {error_data['data']['resource_id']} مپ شد.")
                 else:
                     logger.error(f"❌ خطا در ساخت دسته '{name}' با والد {wc_parent_id}: {res_create.text}")
         except Exception as e:
-            logger.error(f"❌ خطای جدی در حین پردازش دسته '{name}': {e}")
-            return None
+            logger.error(f"❌ خطای جدی در حین پردازش دسته '{name}': {e}"); return None
     logger.info(f"✅ انتقال دسته‌بندی‌ها کامل شد. تعداد نگاشت‌شده: {len(source_to_wc_id_map)}")
     return source_to_wc_id_map
 
@@ -258,12 +236,7 @@ def get_product_details(session, cat_id, product_id):
         soup = BeautifulSoup(response.text, 'lxml')
         specs_table = soup.select_one('#link1 .table-responsive table') or soup.select_one('.table-responsive table') or soup.find('table', class_='table')
         if not specs_table: return {}
-        specs = {}
-        for row in specs_table.find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) == 2:
-                key, value = cells[0].text.strip(), cells[1].text.strip()
-                if key and value: specs[key] = value
+        specs = {cells[0].text.strip(): cells[1].text.strip() for row in specs_table.find_all("tr") if len(cells := row.find_all("td")) == 2 and cells[0].text.strip()}
         return specs
     except requests.exceptions.RequestException as e:
         logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: {e}. تلاش مجدد...")
@@ -273,9 +246,7 @@ def get_product_details(session, cat_id, product_id):
         return {}
 
 def get_products_from_category_page(session, category_id, max_pages=100):
-    all_products_in_category = []
-    seen_product_ids = set()
-    page_num = 1
+    all_products = []; seen_product_ids = set(); page_num = 1
     while page_num <= max_pages:
         url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id, page=page_num)
         logger.info(f"  - دریافت محصولات از دسته {category_id}، صفحه {page_num}...")
@@ -285,34 +256,27 @@ def get_products_from_category_page(session, category_id, max_pages=100):
             soup = BeautifulSoup(response.text, 'lxml')
             product_blocks = soup.select(".goods_item.goods-record")
             if not product_blocks: break
-            page_has_new_products = False
+            page_has_new = False
             for block in product_blocks:
                 try:
                     if block.select_one(".goods-record-unavailable"): continue
-                    a_tag = block.select_one("a")
-                    href = a_tag['href'] if a_tag else None
+                    a_tag = block.select_one("a"); href = a_tag['href'] if a_tag else None
                     match = re.search(r'/Store/Detail/\d+/(\d+)', href) if href else None
                     product_id = match.group(1) if match else None
                     if not product_id or product_id in seen_product_ids: continue
-                    page_has_new_products = True
-                    seen_product_ids.add(product_id)
+                    page_has_new = True; seen_product_ids.add(product_id)
                     name = block.select_one("span.goods-record-title").text.strip()
                     price = re.sub(r'[^\d]', '', block.select_one("span.goods-record-price").text)
                     image_url = block.select_one("img.goods-record-image").get('data-src', '')
                     if not all([name, price, int(price) > 0]): continue
                     specs = get_product_details(session, category_id, product_id)
                     time.sleep(random.uniform(0.3, 0.8))
-                    product = {"id": product_id, "name": name, "price": price, "stock": 1, "image": image_url, "category_id": category_id, "specs": specs}
-                    all_products_in_category.append(product)
-                except Exception as e:
-                    logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}")
-            if not page_has_new_products: break
-            page_num += 1
-            time.sleep(random.uniform(0.5, 1.5))
-        except requests.RequestException as e:
-            logger.error(f"    - خطای شبکه در پردازش صفحه محصولات: {e}")
-            break
-    return all_products_in_category
+                    all_products.append({"id": product_id, "name": name, "price": price, "stock": 1, "image": image_url, "category_id": category_id, "specs": specs})
+                except Exception as e: logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}")
+            if not page_has_new: break
+            page_num += 1; time.sleep(random.uniform(0.5, 1.5))
+        except requests.RequestException as e: logger.error(f"    - خطای شبکه در پردازش صفحه محصولات: {e}"); break
+    return all_products
 
 def load_cache():
     if os.path.exists(CACHE_FILE):
@@ -328,24 +292,25 @@ def save_cache(products):
 
 @retry(retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)), stop=stop_after_attempt(3), wait=wait_random_exponential(multiplier=1, max=10), reraise=True)
 def _send_to_woocommerce(sku, data, stats):
-    auth = (WC_CONSUMER_KEY, WC_CONSUMER_SECRET)
-    check_url = f"{WC_API_URL}/products?sku={sku}"
-    r_check = requests.get(check_url, auth=auth, verify=False, timeout=20)
-    r_check.raise_for_status()
-    existing = r_check.json()
     try:
+        auth = (WC_CONSUMER_KEY, WC_CONSUMER_SECRET)
+        check_url = f"{WC_API_URL}/products?sku={sku}"
+        r_check = requests.get(check_url, auth=auth, verify=False, timeout=20)
+        r_check.raise_for_status()
+        existing = r_check.json()
         if existing:
             product_id = existing[0]['id']
             update_data = {"regular_price": data["regular_price"], "stock_quantity": data["stock_quantity"], "stock_status": data["stock_status"], "attributes": data["attributes"]}
             res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=update_data, verify=False, timeout=30)
-            res.raise_for_status()
-            with stats['lock']: stats['updated'] += 1
+            res.raise_for_status(); with stats['lock']: stats['updated'] += 1
         else:
             res = requests.post(f"{WC_API_URL}/products", auth=auth, json=data, verify=False, timeout=30)
-            res.raise_for_status()
-            with stats['lock']: stats['created'] += 1
+            res.raise_for_status(); with stats['lock']: stats['created'] += 1
     except requests.exceptions.HTTPError as e:
         logger.error(f"   ❌ HTTP خطا برای SKU {sku}: {e.response.status_code} - Response: {e.response.text}")
+        raise
+    except Exception as e:
+        logger.error(f"   ❌ خطای کلی در ارتباط با ووکامرس برای SKU {sku}: {e}")
         raise
 
 def process_product_wrapper(args):
@@ -362,8 +327,7 @@ def process_product_wrapper(args):
         with stats['lock']: stats['failed'] += 1
 
 def process_price(price_value):
-    try:
-        price_value = float(re.sub(r'[^\d.]', '', str(price_value))) / 10
+    try: price_value = float(re.sub(r'[^\d.]', '', str(price_value))) / 10
     except (ValueError, TypeError): return "0"
     if price_value <= 7000000: new_price = price_value + 260000
     elif price_value <= 10000000: new_price = price_value * 1.035
@@ -384,8 +348,7 @@ def main():
     logger.info(f"✅ مرحله ۱: بارگذاری کل دسته‌بندی‌ها کامل شد. تعداد: {len(all_cats)}")
 
     if not check_wc_connection():
-        logger.error("برنامه به دلیل عدم امکان اتصال به ووکامرس خاتمه یافت.")
-        return
+        logger.error("برنامه به دلیل عدم امکان اتصال به ووکامرس خاتمه یافت."); return
 
     SELECTED_IDS_STRING = "1582:14548-allz,1584-all-allz|16777:all-allz|4882:all-allz|16778:22570-all-allz"
     structure_cat_ids, product_cat_ids = process_selection_rules(SELECTED_IDS_STRING, all_cats, logger)
@@ -400,8 +363,7 @@ def main():
     cats_for_wc_transfer = [cat for cat in all_cats if cat['id'] in structure_cat_ids]
     category_mapping = transfer_categories_to_wc(cats_for_wc_transfer, all_cats)
     if not category_mapping:
-        logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
-        return
+        logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد."); return
     logger.info(f"✅ مرحله ۲: انتقال دسته‌بندی‌های ساختاری کامل شد.")
 
     cached_products = load_cache()
@@ -409,8 +371,7 @@ def main():
     logger.info("\n⏳ شروع فرآیند جمع‌آوری محصولات...")
     for cat_id in tqdm(product_cat_ids, desc="دریافت محصولات"):
         products_in_cat = get_products_from_category_page(session, cat_id)
-        for product in products_in_cat:
-            all_products[product['id']] = product
+        for product in products_in_cat: all_products[product['id']] = product
     
     new_products_list = list(all_products.values())
     logger.info(f"\n✅ مرحله ۳: استخراج محصولات کامل شد. تعداد: {len(new_products_list)}")
@@ -428,8 +389,7 @@ def main():
     save_cache(updated_cache_data)
 
     if not products_to_send:
-        logger.info("🎉 هیچ محصول جدید یا تغییرکرده‌ای برای ارسال وجود ندارد!")
-        return
+        logger.info("🎉 هیچ محصول جدید یا تغییرکرده‌ای برای ارسال وجود ندارد!"); return
 
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'lock': Lock()}
     logger.info(f"\n🚀 شروع ارسال {len(products_to_send)} محصول به ووکامرس...")
@@ -437,8 +397,9 @@ def main():
         args_list = [(p, stats, category_mapping) for p in products_to_send]
         list(tqdm(executor.map(process_product_wrapper, args_list), total=len(products_to_send), desc="ارسال محصولات"))
 
+    # --- بخش اصلاح شده برای نمایش مرتب آمار ---
     logger.info("\n===============================")
-    logger.info(f"📦 خلاصه عملیات:")
+    logger.info("📦 خلاصه عملیات:")
     logger.info(f"🟢 ایجاد شده: {stats['created']}")
     logger.info(f"🔵 آپدیت شده: {stats['updated']}")
     logger.info(f"🔴 شکست‌خورده: {stats['failed']}")
