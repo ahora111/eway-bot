@@ -233,7 +233,12 @@ def transfer_categories_to_wc(source_categories, all_cats_from_source):
     logger.info(f"✅ انتقال دسته‌بندی‌ها کامل شد. تعداد نگاشت‌شده: {len(source_to_wc_id_map)}")
     return source_to_wc_id_map
 
-@retry(retry=retry_if_exception_type(requests.exceptions.RequestException), stop=stop_after_attempt=5, wait=wait_random_exponential(multiplier=1, max=5), reraise=True)
+@retry(
+    retry=retry_if_exception_type(requests.exceptions.RequestException),
+    stop=stop_after_attempt(5),
+    wait=wait_random_exponential(multiplier=1, max_value=5),
+    reraise=True
+)
 def get_product_details(session, cat_id, product_id):
     url = PRODUCT_DETAIL_URL_TEMPLATE.format(cat_id=cat_id, product_id=product_id)
     try:
