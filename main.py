@@ -39,9 +39,9 @@ EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
 CACHE_FILE = 'products_cache.json'  # فایل کش
 
 # ==============================================================================
-# --- رشته انتخاب IDها (string واقعی‌ت) ---
+# --- رشته انتخاب IDها (بروزشده بر اساس لاگ و توضیحت) ---
 # ==============================================================================
-SELECTED_IDS_STRING = "1582:(21151-allz+1584-all-allz)|16777:all-allz|4882:all-allz|16778:22570-all-allz"
+SELECTED_IDS_STRING = "1582:14548-allz,1584-all-allz|16777:all-allz|4882:all-allz|16778:22570-all-allz"
 
 # ==============================================================================
 # --- تابع لاگین اتوماتیک به eways ---
@@ -132,7 +132,7 @@ def get_and_parse_categories(session):
                             cats_map[cat_menu_id]['parent_id'] = cats_map[parent_menu_id]['id']
             final_cats = list(cats_map.values())
             logger.info(f"✅ تعداد {len(final_cats)} دسته‌بندی معتبر استخراج شد.")
-        # اضافه شده: لاگ کامل لیست دسته‌ها برای چک IDها
+        # لاگ کامل لیست دسته‌ها برای چک IDها
         logger.info("📋 لیست کامل دسته‌بندی‌ها (ID, نام, parent_id):")
         for cat in final_cats:
             logger.info(f"ID: {cat['id']}, نام: {cat['name']}, parent_id: {cat.get('parent_id')}")
@@ -149,7 +149,7 @@ def get_selected_categories_flexible(source_categories):
         logger.warning("⚠️ هیچ دسته‌بندی برای انتخاب موجود نیست.")
         return []
 
-    # پارس string (با | جدا شده برای گروه‌های اصلی)
+    # پارس string (با | برای گروه‌ها، کاما برای زیرشاخه‌ها)
     groups = SELECTED_IDS_STRING.split('|')
     all_selected_ids = set()
     selected = []
@@ -176,11 +176,8 @@ def get_selected_categories_flexible(source_categories):
         selected.append(main_cat)
         all_selected_ids.add(main_id)
         
-        # پارس تنظیمات (مثل (21151-allz+1584-all-allz))
-        setting = parts[1].strip()
-        if setting.startswith('(') and setting.endswith(')'):
-            setting = setting[1:-1]  # حذف پرانتز
-        sub_settings = setting.split('+')  # جدا کردن با +
+        # پارس زیرشاخه‌ها (با کاما جدا شده، مثل 14548-allz,1584-all-allz)
+        sub_settings = parts[1].split(',')
         for sub_setting in sub_settings:
             sub_parts = sub_setting.split('-')
             if not sub_parts: continue
@@ -199,7 +196,7 @@ def get_selected_categories_flexible(source_categories):
             selected.append(sub_cat)
             all_selected_ids.add(sub_id)
             
-            # چک برای config مثل allz یا all-allz (بدون دیدن به عنوان ID)
+            # چک برای config مثل allz یا all-allz
             if len(sub_parts) > 1:
                 config = '-'.join(sub_parts[1:]).lower()
                 if 'all' in config or 'allz' in config:
@@ -211,8 +208,8 @@ def get_selected_categories_flexible(source_categories):
                                 selected.append(s_cat)
                                 all_selected_ids.add(s_id)
         
-        # برای main اگر all یا allz باشه
-        if 'all' in parts[1].lower() or 'allz' in parts[1].lower():
+        # برای main اگر all یا allz باشه (فقط برای اصلی، نه زیرشاخه)
+        if any(x in parts[1].lower() for x in ['all', 'allz']):
             main_sub_ids = get_all_category_ids([main_cat], source_categories, [main_id])
             for ms_id in main_sub_ids:
                 if ms_id not in all_selected_ids:
