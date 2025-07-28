@@ -290,7 +290,13 @@ def save_cache(products):
         with open(CACHE_FILE, 'w', encoding='utf-8') as f: json.dump(products, f, ensure_ascii=False, indent=4)
     except IOError as e: logger.error(f"❌ خطا در ذخیره فایل کش: {e}")
 
-@retry(retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)), stop=stop_after_attempt(3), wait=wait_random_exponential(multiplier=1, max=10), reraise=True)
+# --- تابع اصلاح شده با ساختار try/except صحیح ---
+@retry(
+    retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)),
+    stop=stop_after_attempt(3),
+    wait=wait_random_exponential(multiplier=1, max=10),
+    reraise=True
+)
 def _send_to_woocommerce(sku, data, stats):
     try:
         auth = (WC_CONSUMER_KEY, WC_CONSUMER_SECRET)
@@ -302,16 +308,19 @@ def _send_to_woocommerce(sku, data, stats):
             product_id = existing[0]['id']
             update_data = {"regular_price": data["regular_price"], "stock_quantity": data["stock_quantity"], "stock_status": data["stock_status"], "attributes": data["attributes"]}
             res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=update_data, verify=False, timeout=30)
-            res.raise_for_status(); with stats['lock']: stats['updated'] += 1
+            res.raise_for_status()
+            with stats['lock']: stats['updated'] += 1
         else:
             res = requests.post(f"{WC_API_URL}/products", auth=auth, json=data, verify=False, timeout=30)
-            res.raise_for_status(); with stats['lock']: stats['created'] += 1
+            res.raise_for_status()
+            with stats['lock']: stats['created'] += 1
     except requests.exceptions.HTTPError as e:
         logger.error(f"   ❌ HTTP خطا برای SKU {sku}: {e.response.status_code} - Response: {e.response.text}")
         raise
     except Exception as e:
         logger.error(f"   ❌ خطای کلی در ارتباط با ووکامرس برای SKU {sku}: {e}")
         raise
+
 
 def process_product_wrapper(args):
     product, stats, category_mapping = args
@@ -397,7 +406,6 @@ def main():
         args_list = [(p, stats, category_mapping) for p in products_to_send]
         list(tqdm(executor.map(process_product_wrapper, args_list), total=len(products_to_send), desc="ارسال محصولات"))
 
-    # --- بخش اصلاح شده برای نمایش مرتب آمار ---
     logger.info("\n===============================")
     logger.info("📦 خلاصه عملیات:")
     logger.info(f"🟢 ایجاد شده: {stats['created']}")
