@@ -39,9 +39,9 @@ EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
 CACHE_FILE = 'products_cache.json'  # فایل کش
 
 # ==============================================================================
-# --- رشته انتخاب IDها (اینجا string واقعی‌ت رو بگذار - مثال از خودت) ---
+# --- رشته انتخاب IDها (string واقعی‌ت) ---
 # ==============================================================================
-SELECTED_IDS_STRING = "1582:(21151-allz+1584-all-allz)|16777:all-allz|4882:all-allz|16778:22570-all-allz" 
+SELECTED_IDS_STRING = "1582:(21151-allz+1584-all-allz)|16777:all-allz|4882:all-allz|16778:22570-all-allz"
 
 # ==============================================================================
 # --- تابع لاگین اتوماتیک به eways ---
@@ -162,9 +162,9 @@ def get_selected_categories_flexible(source_categories):
         
         main_id_str = parts[0].strip()
         try:
-            main_id = int(main_id_str)  # فرض ID عددی
+            main_id = int(main_id_str)
         except ValueError:
-            logger.warning(f"⚠️ ID نامعتبر: {main_id_str}")
+            logger.warning(f"⚠️ ID اصلی نامعتبر: {main_id_str}")
             continue
         
         # پیدا کردن دسته اصلی
@@ -175,15 +175,15 @@ def get_selected_categories_flexible(source_categories):
         selected.append(main_cat)
         all_selected_ids.add(main_id)
         
-        # پارس تنظیمات (مثل far3-zir1-allz,far4-(zir2-allz+zir3-allz+zir5-allz))
-        settings = parts[1].split(',')
-        for setting in settings:
-            setting = setting.strip()
-            if not setting: continue
-            
-            # استخراج زیرشاخه‌ها (مثل far3-zir1-allz)
-            sub_parts = setting.split('-')
-            sub_id_str = sub_parts[0].strip()  # مثل far3
+        # پارس تنظیمات (مثل (21151-allz+1584-all-allz))
+        setting = parts[1].strip()
+        if setting.startswith('(') and setting.endswith(')'):
+            setting = setting[1:-1]  # حذف پرانتز
+        sub_settings = setting.split('+')  # جدا کردن با +
+        for sub_setting in sub_settings:
+            sub_parts = sub_setting.split('-')
+            if not sub_parts: continue
+            sub_id_str = sub_parts[0].strip()
             try:
                 sub_id = int(sub_id_str)
             except ValueError:
@@ -198,50 +198,20 @@ def get_selected_categories_flexible(source_categories):
             selected.append(sub_cat)
             all_selected_ids.add(sub_id)
             
-            # چک برای زیرزیر (مثل zir1-allz یا (zir2-allz+zir3-allz))
+            # چک برای تنظیمات مثل allz یا all-allz
             if len(sub_parts) > 1:
-                zir_str = '-'.join(sub_parts[1:])  # مثل zir1-allz یا (zir2-allz+zir3-allz+zir5-allz)
-                if zir_str.startswith('('):
-                    zir_str = zir_str[1:-1]  # حذف پرانتز
-                zirs = zir_str.split('+')
-                for zir in zirs:
-                    zir_parts = zir.split('-')  # مثل zir2-allz
-                    zir_id_str = zir_parts[0].strip()
-                    try:
-                        zir_id = int(zir_id_str)
-                    except ValueError:
-                        logger.warning(f"⚠️ زیرزیر ID نامعتبر: {zir_id_str}")
-                        continue
-                    
-                    zir_cat = next((c for c in source_categories if c['id'] == zir_id and c['parent_id'] == sub_id), None)
-                    if not zir_cat:
-                        logger.warning(f"⚠️ زیرزیر ID {zir_id} زیر {sub_id} پیدا نشد.")
-                        continue
-                    selected.append(zir_cat)
-                    all_selected_ids.add(zir_id)
-                    
-                    # اگر all یا allz باشه، همه زیرشاخه‌ها رو اضافه کن
-                    if len(zir_parts) > 1 and ('all' in zir_parts[1] or 'allz' in zir_parts[1]):
-                        sub_sub_ids = get_all_category_ids([zir_cat], source_categories, [zir_id])
-                        for ss_id in sub_sub_ids:
-                            if ss_id not in all_selected_ids:
-                                ss_cat = next((c for c in source_categories if c['id'] == ss_id), None)
-                                if ss_cat:
-                                    selected.append(ss_cat)
-                                    all_selected_ids.add(ss_id)
-            
-            # اگر all یا allz در تنظیم باشه (برای زیرشاخه اصلی)
-            if 'all' in setting or 'allz' in setting:
-                sub_ids = get_all_category_ids([sub_cat], source_categories, [sub_id])
-                for s_id in sub_ids:
-                    if s_id not in all_selected_ids:
-                        s_cat = next((c for c in source_categories if c['id'] == s_id), None)
-                        if s_cat:
-                            selected.append(s_cat)
-                            all_selected_ids.add(s_id)
+                config = '-'.join(sub_parts[1:]).lower()
+                if 'all' in config or 'allz' in config:
+                    sub_ids = get_all_category_ids([sub_cat], source_categories, [sub_id])
+                    for s_id in sub_ids:
+                        if s_id not in all_selected_ids:
+                            s_cat = next((c for c in source_categories if c['id'] == s_id), None)
+                            if s_cat:
+                                selected.append(s_cat)
+                                all_selected_ids.add(s_id)
         
-        # برای main اگر all-allz باشه
-        if 'all' in parts[1] or 'allz' in parts[1]:
+        # برای main اگر all-allz باشه (بدون پرانتز)
+        if 'all' in parts[1].lower() or 'allz' in parts[1].lower():
             main_sub_ids = get_all_category_ids([main_cat], source_categories, [main_id])
             for ms_id in main_sub_ids:
                 if ms_id not in all_selected_ids:
