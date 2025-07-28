@@ -54,35 +54,33 @@ def get_all_subcategories(parent_id, all_cats):
         result.extend(get_all_subcategories(sub_id, all_cats))
     return result
 
-def get_selected_category_ids(parsed_selection, all_cats):
+def get_selected_categories_according_to_selection(parsed_selection, all_cats):
+    """
+    فقط دسته‌هایی که کاربر انتخاب کرده و فقط زیرشاخه‌هایی که برای هرکدام انتخاب شده‌اند را برمی‌گرداند.
+    """
     selected_ids = set()
     for block in parsed_selection:
+        parent_id = block['parent_id']
+        selected_ids.add(parent_id)
         for sel in block['selections']:
             if sel['type'] == 'all_subcats':
-                selected_ids.update(get_direct_subcategories(sel['id'], all_cats))
+                # فقط زیرشاخه‌های مستقیم همین دسته
+                selected_ids.update([cat['id'] for cat in all_cats if cat['parent_id'] == parent_id])
+            elif sel['type'] == 'allz':
+                # فقط محصولات همین دسته
+                selected_ids.add(parent_id)
+            elif sel['type'] == 'all_subcats_and_products':
+                # همه زیرشاخه‌های مستقیم همین دسته و همه زیرشاخه‌های آن‌ها (بازگشتی)
+                direct_subs = [cat['id'] for cat in all_cats if cat['parent_id'] == parent_id]
+                selected_ids.update(direct_subs)
+                for sub_id in direct_subs:
+                    selected_ids.update(get_all_subcategories(sub_id, all_cats))
+                # خود parent_id هم باید بیاد (چون محصولات مستقیمش هم باید بیاد)
+                selected_ids.add(parent_id)
             elif sel['type'] == 'only_products':
                 selected_ids.add(sel['id'])
-            elif sel['type'] == 'all_subcats_and_products':
-                subcats = get_direct_subcategories(sel['id'], all_cats)
-                selected_ids.update(subcats)
-                for sub_id in subcats:
-                    selected_ids.update(get_all_subcategories(sub_id, all_cats))
-    # همچنین خود parent_idها (دسته‌هایی که کاربر مستقیماً انتخاب کرده) را هم اضافه کن
-    for block in parsed_selection:
-        selected_ids.add(block['parent_id'])
-    return list(selected_ids)
-
-def get_selected_categories_and_children(selected_ids, all_cats):
-    """
-    فقط دسته‌هایی که انتخاب کردی و زیرشاخه‌هایشان (طبق انتخاب)، بدون والدهای غیرانتخابی
-    """
-    id_set = set(selected_ids)
-    result = []
-    for cat in all_cats:
-        # اگر خودش انتخاب شده یا والدش در انتخاب‌هاست
-        if cat['id'] in id_set or (cat['parent_id'] in id_set):
-            result.append(cat)
-    return result
+    # فقط دسته‌هایی که انتخاب شده‌اند و زیرشاخه‌هایی که طبق انتخاب آمده‌اند
+    return [cat for cat in all_cats if cat['id'] in selected_ids]
 
 # ==============================================================================
 # --- تنظیمات لاگینگ ---
@@ -556,8 +554,7 @@ def main():
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
     logger.info(f"✅ انتخاب‌های دلخواه: {parsed_selection}")
 
-    selected_ids = get_selected_category_ids(parsed_selection, all_cats)
-    filtered_categories = get_selected_categories_and_children(selected_ids, all_cats)
+    filtered_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
     logger.info(f"✅ دسته‌بندی‌های نهایی: {[cat['name'] for cat in filtered_categories]}")
 
     category_mapping = transfer_categories_to_wc(filtered_categories)
