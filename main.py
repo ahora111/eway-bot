@@ -69,25 +69,6 @@ def get_selected_category_ids(parsed_selection, all_cats):
                     selected_ids.update(get_all_subcategories(sub_id, all_cats))
     return list(selected_ids)
 
-def get_all_related_categories(selected_ids, all_cats):
-    """
-    این تابع همه دسته‌بندی‌های انتخاب‌شده و والدهایشان را برمی‌گرداند
-    تا ساختار درختی حفظ شود.
-    """
-    id_set = set(selected_ids)
-    # والدها را هم اضافه کن تا ساختار درختی حفظ شود
-    for cat in all_cats:
-        if cat['id'] in id_set:
-            parent_id = cat.get('parent_id')
-            while parent_id:
-                if parent_id not in id_set:
-                    id_set.add(parent_id)
-                    parent_cat = next((c for c in all_cats if c['id'] == parent_id), None)
-                    parent_id = parent_cat['parent_id'] if parent_cat else None
-                else:
-                    break
-    return [cat for cat in all_cats if cat['id'] in id_set]
-
 # ==============================================================================
 # --- تنظیمات لاگینگ ---
 # ==============================================================================
@@ -333,7 +314,9 @@ def get_all_products(session, categories, all_cats):
     for cat_id in tqdm(selected_ids, desc="پردازش دسته‌بندی‌ها و زیرمجموعه‌ها"):
         products_in_cat = get_products_from_category_page(session, cat_id)
         for product in products_in_cat:
-            all_products[product['id']] = product
+            # هر محصول فقط در دسته خودش ذخیره می‌شود
+            if product['category_id'] == cat_id:
+                all_products[(product['id'], cat_id)] = product
     logger.info(f"\n✅ فرآیند جمع‌آوری کامل شد. تعداد کل محصولات یکتا و موجود: {len(all_products)}")
     return list(all_products.values())
 
@@ -396,7 +379,7 @@ def transfer_categories_to_wc(source_categories):
     for cat in wc_cats:
         key = (cat["name"].strip(), cat.get("parent", 0))
         wc_cats_map[key] = cat["id"]
-    # مرتب‌سازی: والدها قبل از فرزندها
+    # فقط دسته‌هایی که انتخاب کردی (بدون والدهای غیرانتخابی)
     sorted_cats = []
     id_to_cat = {cat['id']: cat for cat in source_categories}
     def add_with_parents(cat):
@@ -554,16 +537,13 @@ def main():
         return
     logger.info(f"✅ مرحله 1: بارگذاری دسته‌بندی‌ها کامل شد. تعداد: {len(all_cats)}")
 
-    # =================== انتخاب منعطف ===================
     SELECTED_IDS_STRING = "1582:14548-allz,1584-all-allz|16777:all-allz|4882:all-allz|16778:22570-all-allz"
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
     logger.info(f"✅ انتخاب‌های دلخواه: {parsed_selection}")
 
     selected_ids = get_selected_category_ids(parsed_selection, all_cats)
-    # والدها را هم اضافه کن تا ساختار درختی حفظ شود
-    filtered_categories = get_all_related_categories(selected_ids, all_cats)
+    filtered_categories = [cat for cat in all_cats if cat['id'] in selected_ids]
     logger.info(f"✅ دسته‌بندی‌های نهایی: {[cat['name'] for cat in filtered_categories]}")
-    # ====================================================
 
     category_mapping = transfer_categories_to_wc(filtered_categories)
     if not category_mapping:
@@ -571,14 +551,10 @@ def main():
         return
     logger.info(f"✅ مرحله 5: انتقال دسته‌بندی‌ها کامل شد. تعداد نگاشت‌شده: {len(category_mapping)}")
 
-    # بارگذاری کش
     cached_products = load_cache()
-
-    # استخراج محصولات جدید
     new_products = get_all_products(session, filtered_categories, all_cats)
     logger.info(f"✅ مرحله 6: استخراج محصولات کامل شد. تعداد استخراج‌شده: {len(new_products)}")
 
-    # ادغام با کش و شناسایی تغییرات
     updated_products = {}
     changed_count = 0
     for p in new_products:
