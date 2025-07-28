@@ -63,22 +63,26 @@ def get_selected_categories_according_to_selection(parsed_selection, all_cats):
         parent_id = block['parent_id']
         selected_ids.add(parent_id)
         for sel in block['selections']:
-            if sel['type'] == 'all_subcats':
-                # فقط زیرشاخه‌های مستقیم همین دسته
-                selected_ids.update([cat['id'] for cat in all_cats if cat['parent_id'] == parent_id])
-            elif sel['type'] == 'allz':
-                # فقط محصولات همین دسته
+            # حالت all: فقط زیرشاخه‌های مستقیم همین دسته
+            if sel['type'] == 'all_subcats' and sel['id'] == parent_id:
+                selected_ids.update(get_direct_subcategories(parent_id, all_cats))
+            # حالت allz: فقط محصولات همین دسته
+            elif sel['type'] == 'only_products' and sel['id'] == parent_id:
                 selected_ids.add(parent_id)
-            elif sel['type'] == 'all_subcats_and_products':
-                # همه زیرشاخه‌های مستقیم همین دسته و همه زیرشاخه‌های آن‌ها (بازگشتی)
-                direct_subs = [cat['id'] for cat in all_cats if cat['parent_id'] == parent_id]
+            # حالت all-allz: همه زیرشاخه‌های مستقیم همین دسته و همه زیرشاخه‌های بازگشتی آن‌ها + خود دسته
+            elif sel['type'] == 'all_subcats_and_products' and sel['id'] == parent_id:
+                direct_subs = get_direct_subcategories(parent_id, all_cats)
                 selected_ids.update(direct_subs)
                 for sub_id in direct_subs:
                     selected_ids.update(get_all_subcategories(sub_id, all_cats))
-                # خود parent_id هم باید بیاد (چون محصولات مستقیمش هم باید بیاد)
                 selected_ids.add(parent_id)
-            elif sel['type'] == 'only_products':
+            # حالت id-allz: فقط محصولات همین زیرشاخه
+            elif sel['type'] == 'only_products' and sel['id'] != parent_id:
                 selected_ids.add(sel['id'])
+            # حالت id-all-allz: فقط همین زیرشاخه و همه زیرشاخه‌های بازگشتی آن
+            elif sel['type'] == 'all_subcats_and_products' and sel['id'] != parent_id:
+                selected_ids.add(sel['id'])
+                selected_ids.update(get_all_subcategories(sel['id'], all_cats))
     # فقط دسته‌هایی که انتخاب شده‌اند و زیرشاخه‌هایی که طبق انتخاب آمده‌اند
     return [cat for cat in all_cats if cat['id'] in selected_ids]
 
