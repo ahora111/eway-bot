@@ -40,7 +40,7 @@ jobs:
         EWAYS_AUTH_TOKEN: ${{ secrets.EWAYS_AUTH_TOKEN }}
         EWAYS_USERNAME: ${{ secrets.EWAYS_USERNAME }}
         EWAYS_PASSWORD: ${{ secrets.EWAYS_PASSWORD }}
-        SELECTED_TREE: "1582:(21151-allz,1584-all-allz);16777:all-allz;4882-all-allz;16778:22570-all-allz"  # فرمت جدید برای درخت – ویرایش کنید
+        SELECTED_TREE: "1582:all-(21151-allz,1584-all-allz);16777:all-allz;4882:all-allz;16778:22570-all-allz"  # فرمت جدید برای درخت – ویرایش کنید
       run: python main.py
 
     - name: Print logs for debugging
