@@ -5,7 +5,7 @@ import time
 import json
 import random
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 from threading import Lock
 import logging
@@ -55,35 +55,26 @@ def get_all_subcategories(parent_id, all_cats):
     return result
 
 def get_selected_categories_according_to_selection(parsed_selection, all_cats):
-    """
-    فقط دسته‌هایی که کاربر انتخاب کرده و فقط زیرشاخه‌هایی که برای هرکدام انتخاب شده‌اند را برمی‌گرداند.
-    """
     selected_ids = set()
     for block in parsed_selection:
         parent_id = block['parent_id']
         selected_ids.add(parent_id)
         for sel in block['selections']:
-            # حالت all: فقط زیرشاخه‌های مستقیم همین دسته
             if sel['type'] == 'all_subcats' and sel['id'] == parent_id:
                 selected_ids.update(get_direct_subcategories(parent_id, all_cats))
-            # حالت allz: فقط محصولات همین دسته
             elif sel['type'] == 'only_products' and sel['id'] == parent_id:
                 selected_ids.add(parent_id)
-            # حالت all-allz: همه زیرشاخه‌های مستقیم همین دسته و همه زیرشاخه‌های بازگشتی آن‌ها + خود دسته
             elif sel['type'] == 'all_subcats_and_products' and sel['id'] == parent_id:
                 direct_subs = get_direct_subcategories(parent_id, all_cats)
                 selected_ids.update(direct_subs)
                 for sub_id in direct_subs:
                     selected_ids.update(get_all_subcategories(sub_id, all_cats))
                 selected_ids.add(parent_id)
-            # حالت id-allz: فقط محصولات همین زیرشاخه
             elif sel['type'] == 'only_products' and sel['id'] != parent_id:
                 selected_ids.add(sel['id'])
-            # حالت id-all-allz: فقط همین زیرشاخه و همه زیرشاخه‌های بازگشتی آن
             elif sel['type'] == 'all_subcats_and_products' and sel['id'] != parent_id:
                 selected_ids.add(sel['id'])
                 selected_ids.update(get_all_subcategories(sel['id'], all_cats))
-    # فقط دسته‌هایی که انتخاب شده‌اند و زیرشاخه‌هایی که طبق انتخاب آمده‌اند
     return [cat for cat in all_cats if cat['id'] in selected_ids]
 
 # ==============================================================================
@@ -147,6 +138,47 @@ def login_eways(username, password):
 # ==============================================================================
 # --- توابع مربوط به سایت مبدا (eways) ---
 # ==============================================================================
+
+@retry(
+    retry=retry_if_exception_type(requests.exceptions.RequestException),
+    stop=stop_after_attempt(5),
+    wait=wait_random_exponential(multiplier=1, max=5),
+    reraise=True
+)
+def get_product_details(session, cat_id, product_id):
+    url = PRODUCT_DETAIL_URL_TEMPLATE.format(cat_id=cat_id, product_id=product_id)
+    try:
+        response = session.get(url, timeout=60)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'lxml')
+        specs_table = soup.select_one('#link1 .table-responsive table')
+        if not specs_table:
+            specs_table = soup.select_one('.table-responsive table')
+            if not specs_table:
+                specs_table = soup.find('table', class_='table')
+                if not specs_table:
+                    logger.debug(f"      - هیچ جدولی پیدا نشد. HTML خام صفحه: {soup.prettify()[:1000]}...")
+                    return {}
+        specs = {}
+        rows = specs_table.find_all("tr")
+        for row in rows:
+            cells = row.find_all("td")
+            if len(cells) == 2:
+                key = cells[0].text.strip()
+                value = cells[1].text.strip()
+                if key and value:
+                    specs[key] = value
+        if not specs:
+            logger.debug(f"      - هیچ ردیفی در جدول پیدا نشد. HTML خام جدول: {specs_table.prettify()}")
+        logger.debug(f"      - مشخصات استخراج‌شده برای {product_id} (کامل): {json.dumps(specs, ensure_ascii=False, indent=4)}")
+        return specs
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: {e}. Retry...")
+        raise
+    except Exception as e:
+        logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
+        return {}
+
 def get_and_parse_categories(session):
     logger.info(f"⏳ دریافت دسته‌بندی‌ها از: {SOURCE_CATS_API_URL}")
     try:
@@ -212,47 +244,7 @@ def get_and_parse_categories(session):
         logger.error(f"❌ خطای ناشناخته در پردازش دسته‌بندی‌ها: {e}")
         return None
 
-@retry(
-    retry=retry_if_exception_type(requests.exceptions.RequestException),
-    stop=stop_after_attempt(5),
-    wait=wait_random_exponential(multiplier=1, max=5),
-    reraise=True
-)
-def get_product_details(session, cat_id, product_id):
-    url = PRODUCT_DETAIL_URL_TEMPLATE.format(cat_id=cat_id, product_id=product_id)
-    try:
-        response = session.get(url, timeout=60)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'lxml')
-        specs_table = soup.select_one('#link1 .table-responsive table')
-        if not specs_table:
-            specs_table = soup.select_one('.table-responsive table')
-            if not specs_table:
-                specs_table = soup.find('table', class_='table')
-                if not specs_table:
-                    logger.debug(f"      - هیچ جدولی پیدا نشد. HTML خام صفحه: {soup.prettify()[:1000]}...")
-                    return {}
-        specs = {}
-        rows = specs_table.find_all("tr")
-        for row in rows:
-            cells = row.find_all("td")
-            if len(cells) == 2:
-                key = cells[0].text.strip()
-                value = cells[1].text.strip()
-                if key and value:
-                    specs[key] = value
-        if not specs:
-            logger.debug(f"      - هیچ ردیفی در جدول پیدا نشد. HTML خام جدول: {specs_table.prettify()}")
-        logger.debug(f"      - مشخصات استخراج‌شده برای {product_id} (کامل): {json.dumps(specs, ensure_ascii=False, indent=4)}")
-        return specs
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: {e}. Retry...")
-        raise
-    except Exception as e:
-        logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
-        return {}
-
-def get_products_from_category_page(session, category_id, max_pages=10):
+def get_products_from_category_page(session, category_id, max_pages=10, delay=0.5):
     all_products_in_category = []
     seen_product_ids = set()
     page_num = 1
@@ -261,6 +253,8 @@ def get_products_from_category_page(session, category_id, max_pages=10):
         logger.info(f"  - در حال دریافت محصولات از: {url}")
         try:
             response = session.get(url, timeout=30)
+            if response.status_code == 429 or response.status_code == 503 or response.status_code == 403:
+                raise requests.exceptions.HTTPError(f"Blocked or rate limited: {response.status_code}", response=response)
             if response.status_code != 200: break
             soup = BeautifulSoup(response.text, 'lxml')
             product_blocks = soup.select(".goods_item.goods-record")
@@ -293,7 +287,7 @@ def get_products_from_category_page(session, category_id, max_pages=10):
                         continue
                     stock = 1
                     specs = get_product_details(session, category_id, product_id)
-                    time.sleep(random.uniform(0.5, 1.0))
+                    time.sleep(random.uniform(delay, delay + 0.2))
                     product = {
                         "id": product_id,
                         "name": name,
@@ -313,29 +307,15 @@ def get_products_from_category_page(session, category_id, max_pages=10):
                 logger.info("    - محصول جدیدی در این صفحه یافت نشد، توقف صفحه‌بندی.")
                 break
             page_num += 1
-            time.sleep(random.uniform(1, 2))
-        except requests.RequestException as e:
+            time.sleep(random.uniform(delay, delay + 0.2))
+        except requests.exceptions.HTTPError as e:
             logger.error(f"    - خطای شبکه در پردازش صفحه محصولات: {e}")
-            break
+            raise
         except Exception as e:
             logger.error(f"    - خطای کلی در پردازش صفحه محصولات: {e}")
             break
     logger.info(f"    - تعداد کل محصولات استخراج‌شده از دسته {category_id}: {len(all_products_in_category)}")
     return all_products_in_category
-
-def get_all_products(session, categories, all_cats):
-    all_products = {}
-    selected_ids = [cat['id'] for cat in categories]
-    logger.info(f"📂 IDهای دسته و زیرمجموعه‌های استخراج‌شده: {selected_ids}")
-    logger.info("\n⏳ شروع فرآیند جمع‌آوری تمام محصولات از همه دسته‌بندی‌های انتخابی و زیرمجموعه‌ها...")
-    for cat_id in tqdm(selected_ids, desc="پردازش دسته‌بندی‌ها و زیرمجموعه‌ها"):
-        products_in_cat = get_products_from_category_page(session, cat_id)
-        for product in products_in_cat:
-            # هر محصول فقط در دسته خودش ذخیره می‌شود
-            if product['category_id'] == cat_id:
-                all_products[(product['id'], cat_id)] = product
-    logger.info(f"\n✅ فرآیند جمع‌آوری کامل شد. تعداد کل محصولات یکتا و موجود: {len(all_products)}")
-    return list(all_products.values())
 
 # ==============================================================================
 # --- کش برای محصولات ---
@@ -396,7 +376,6 @@ def transfer_categories_to_wc(source_categories):
     for cat in wc_cats:
         key = (cat["name"].strip(), cat.get("parent", 0))
         wc_cats_map[key] = cat["id"]
-    # فقط دسته‌هایی که انتخاب کردی (بدون والدهای غیرانتخابی)
     sorted_cats = []
     id_to_cat = {cat['id']: cat for cat in source_categories}
     def add_with_parents(cat):
@@ -554,7 +533,14 @@ def main():
         return
     logger.info(f"✅ مرحله 1: بارگذاری دسته‌بندی‌ها کامل شد. تعداد: {len(all_cats)}")
 
+
+    
+
     SELECTED_IDS_STRING = "1582:14548-allz,1584-all-allz|16777:all-allz|4882:all-allz|16778:22570-all-allz"
+
+    
+
+    
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
     logger.info(f"✅ انتخاب‌های دلخواه: {parsed_selection}")
 
@@ -568,7 +554,51 @@ def main():
     logger.info(f"✅ مرحله 5: انتقال دسته‌بندی‌ها کامل شد. تعداد نگاشت‌شده: {len(category_mapping)}")
 
     cached_products = load_cache()
-    new_products = get_all_products(session, filtered_categories, all_cats)
+
+    # --- کنترل هوشمند سرعت و تاخیر در دریافت محصولات ---
+    max_workers = 3
+    delay = 0.5
+    min_workers = 1
+    max_max_workers = 6
+    min_delay = 0.2
+    max_delay = 2.0
+
+    selected_ids = [cat['id'] for cat in filtered_categories]
+    all_products = {}
+    logger.info(f"\n⏳ شروع فرآیند جمع‌آوری تمام محصولات از همه دسته‌بندی‌های انتخابی و زیرمجموعه‌ها...")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_catid = {}
+        for cat_id in selected_ids:
+            future = executor.submit(get_products_from_category_page, session, cat_id, 10, delay)
+            future_to_catid[future] = cat_id
+
+        pbar = tqdm(total=len(selected_ids), desc="دریافت محصولات دسته‌ها")
+        for future in as_completed(future_to_catid):
+            cat_id = future_to_catid[future]
+            try:
+                products_in_cat = future.result()
+                for product in products_in_cat:
+                    if product['category_id'] == cat_id:
+                        all_products[(product['id'], cat_id)] = product
+                # اگر موفقیت‌آمیز بود، سرعت را کمی زیاد کن (تا سقف)
+                if max_workers < max_max_workers:
+                    max_workers += 1
+                if delay > min_delay:
+                    delay = max(min_delay, delay - 0.05)
+            except Exception as e:
+                logger.warning(f"⚠️ خطا در دریافت محصولات دسته {cat_id}: {e}")
+                # اگر خطای بلاک شدن بود، سرعت را کم کن و تاخیر را زیاد کن
+                if "Blocked" in str(e) or "rate limited" in str(e):
+                    if max_workers > min_workers:
+                        max_workers -= 1
+                    if delay < max_delay:
+                        delay = min(max_delay, delay + 0.2)
+                    logger.warning(f"🚦 سرعت کم شد: max_workers={max_workers}, delay={delay:.2f}")
+            pbar.update(1)
+        pbar.close()
+
+    new_products = list(all_products.values())
     logger.info(f"✅ مرحله 6: استخراج محصولات کامل شد. تعداد استخراج‌شده: {len(new_products)}")
 
     updated_products = {}
