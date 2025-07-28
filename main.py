@@ -149,7 +149,6 @@ def get_selected_categories_flexible(source_categories):
         logger.warning("⚠️ هیچ دسته‌بندی برای انتخاب موجود نیست.")
         return []
 
-    # پارس string (با | برای گروه‌ها، کاما برای زیرشاخه‌ها)
     groups = SELECTED_IDS_STRING.split('|')
     all_selected_ids = set()
     selected = []
@@ -168,7 +167,6 @@ def get_selected_categories_flexible(source_categories):
             logger.warning(f"⚠️ ID اصلی نامعتبر: {main_id_str}")
             continue
         
-        # پیدا کردن دسته اصلی
         main_cat = next((c for c in source_categories if c['id'] == main_id), None)
         if not main_cat:
             logger.warning(f"⚠️ ID اصلی {main_id} پیدا نشد.")
@@ -176,7 +174,7 @@ def get_selected_categories_flexible(source_categories):
         selected.append(main_cat)
         all_selected_ids.add(main_id)
         
-        # پارس زیرشاخه‌ها (با کاما جدا شده، مثل 14548-allz,1584-all-allz)
+        # پارس زیرشاخه‌ها (با کاما جدا شده)
         sub_settings = parts[1].split(',')
         for sub_setting in sub_settings:
             sub_parts = sub_setting.split('-')
@@ -188,18 +186,34 @@ def get_selected_categories_flexible(source_categories):
                 logger.warning(f"⚠️ زیر ID نامعتبر: {sub_id_str}")
                 continue
             
-            # چک اگر زیرشاخه parent_id == main_id باشه
             sub_cat = next((c for c in source_categories if c['id'] == sub_id and c['parent_id'] == main_id), None)
             if not sub_cat:
-                logger.warning(f"⚠️ زیر ID {sub_id} زیر {main_id} پیدا نشد. (چک parent_id)")
+                logger.warning(f"⚠️ زیر ID {sub_id} زیر {main_id} پیدا نشد.")
                 continue
             selected.append(sub_cat)
             all_selected_ids.add(sub_id)
             
-            # چک برای config مثل allz یا all-allz
+            # اعمال syntax برای زیرشاخه
             if len(sub_parts) > 1:
                 config = '-'.join(sub_parts[1:]).lower()
-                if 'all' in config or 'allz' in config:
+                if config == 'all':
+                    # all: همه زیرمجموعه‌های مستقیم (یک سطح)
+                    direct_subs = [c for c in source_categories if c['parent_id'] == sub_id]
+                    for ds in direct_subs:
+                        if ds['id'] not in all_selected_ids:
+                            selected.append(ds)
+                            all_selected_ids.add(ds['id'])
+                elif config == 'allz':
+                    # allz: فقط محصولات مستقیم (بدون زیر)
+                    pass  # محصولات در get_all_products گرفته می‌شن
+                elif config == 'all-allz':
+                    # all-allz: همه زیرمجموعه‌های مستقیم + محصولات (بازگشتی برای تطبیق با توضیح)
+                    direct_subs = [c for c in source_categories if c['parent_id'] == sub_id]
+                    for ds in direct_subs:
+                        if ds['id'] not in all_selected_ids:
+                            selected.append(ds)
+                            all_selected_ids.add(ds['id'])
+                    # بازگشتی برای زیرزیرها
                     sub_ids = get_all_category_ids([sub_cat], source_categories, [sub_id])
                     for s_id in sub_ids:
                         if s_id not in all_selected_ids:
@@ -208,8 +222,25 @@ def get_selected_categories_flexible(source_categories):
                                 selected.append(s_cat)
                                 all_selected_ids.add(s_id)
         
-        # برای main اگر all یا allz باشه (فقط برای اصلی، نه زیرشاخه)
-        if any(x in parts[1].lower() for x in ['all', 'allz']):
+        # اعمال syntax برای اصلی
+        main_config = parts[1].lower()
+        if 'all' in main_config and 'allz' not in main_config:
+            # all برای اصلی
+            direct_subs = [c for c in source_categories if c['parent_id'] == main_id]
+            for ds in direct_subs:
+                if ds['id'] not in all_selected_ids:
+                    selected.append(ds)
+                    all_selected_ids.add(ds['id'])
+        elif 'allz' in main_config and 'all' not in main_config:
+            # allz برای اصلی
+            pass
+        elif 'all-allz' in main_config:
+            # all-allz برای اصلی (بازگشتی)
+            direct_subs = [c for c in source_categories if c['parent_id'] == main_id]
+            for ds in direct_subs:
+                if ds['id'] not in all_selected_ids:
+                    selected.append(ds)
+                    all_selected_ids.add(ds['id'])
             main_sub_ids = get_all_category_ids([main_cat], source_categories, [main_id])
             for ms_id in main_sub_ids:
                 if ms_id not in all_selected_ids:
