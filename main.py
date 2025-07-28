@@ -148,6 +148,16 @@ def get_subcategories(all_cats, parent_id, allz=False):
         return all_subs
     return subs
 
+# تابع جدید برای نمایش درخت در لاگ
+def print_category_tree(selected, all_cats, level=0):
+    tree_log = []
+    for cat in selected:
+        tree_log.append('  ' * level + f"- {cat['name']} (ID: {cat['id']})")
+        subs = get_subcategories(all_cats, cat['id'], allz=True)  # recursive برای نمایش عمق
+        print_category_tree(subs, all_cats, level + 1)
+    for line in tree_log:
+        logger.info(line)
+
 # تابع پارس فرمت جدید SELECTED_TREE (فیکس‌شده)
 def parse_selected_tree(tree_str, source_categories):
     selected = []
@@ -314,6 +324,8 @@ def get_selected_categories_flexible(source_categories):
 
     selected_ids = [cat['id'] for cat in selected]
     logger.info(f"✅ دسته‌بندی‌های نهایی انتخاب‌شده: {[c['name'] for c in selected]} (تعداد: {len(selected)})")
+    logger.info("✅ ساختار درختی دسته‌بندی‌های انتخاب‌شده:")
+    print_category_tree(selected, source_categories)  # نمایش درخت
     return selected
 
 def get_all_category_ids(categories, all_cats, selected_ids):
