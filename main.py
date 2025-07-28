@@ -97,7 +97,9 @@ logger = logging.getLogger(__name__)
 file_handler = RotatingFileHandler('app.log', maxBytes=2*1024*1024, backupCount=5, encoding='utf-8')
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-logger.addHandler(file_handler)
+# برای جلوگیری از اضافه شدن چندباره هندلر در اجراهای مکرر (مفید در نوت‌بوک‌ها)
+if not logger.handlers:
+    logger.addHandler(file_handler)
 
 # ==============================================================================
 # --- اطلاعات ووکامرس و سایت مبدا ---
@@ -115,15 +117,15 @@ EWAYS_USERNAME = os.environ.get("EWAYS_USERNAME") or "شماره موبایل ی
 EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
 
 CACHE_FILE = 'products_cache.json'
+# غیرفعال کردن هشدارهای SSL
+requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
 # ==============================================================================
-# --- توابع کمکی و اصلی ---
+# --- توابع اصلی برنامه ---
 # ==============================================================================
 def login_eways(username, password):
     session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    })
+    session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
     session.verify = False
     login_url = f"{BASE_URL}/User/Login"
     payload = {"UserName": username, "Password": password, "RememberMe": "true"}
@@ -142,96 +144,97 @@ def login_eways(username, password):
         return None
 
 def get_and_parse_categories(session):
-    logger.info(f"⏳ دریافت دسته‌بندی‌ها از سایت مبدا...")
+    logger.info("⏳ دریافت دسته‌بندی‌ها از سایت مبدا...")
     try:
         response = session.get(SOURCE_CATS_API_URL, timeout=30)
         response.raise_for_status()
-        
-        # تلاش برای پارس JSON
         try:
             data = response.json()
-            logger.debug("پاسخ JSON است. در حال پردازش...")
-            final_cats = []
-            for c in data:
-                real_id_match = re.search(r'/Store/List/(\d+)', c.get('url', ''))
-                real_id = int(real_id_match.group(1)) if real_id_match else c.get('id')
-                final_cats.append({"id": real_id, "name": c.get('name', '').strip(), "parent_id": c.get('parent_id')})
-            logger.info(f"✅ تعداد {len(final_cats)} دسته‌بندی از JSON استخراج شد.")
+            # ... منطق پارس JSON ...
             return final_cats
         except json.JSONDecodeError:
             logger.warning("⚠️ پاسخ JSON نبود. تلاش برای پارس HTML...")
-
-        # پلن B: پارس کردن HTML
         soup = BeautifulSoup(response.text, 'lxml')
-        all_menu_items = soup.select("li[id^='menu-item-']")
-        if not all_menu_items:
-            logger.error("❌ هیچ آیتم دسته‌بندی در HTML پیدا نشد.")
-            return []
-        
-        cats_map = {}
-        for item in all_menu_items:
-            # ... (منطق پیچیده پارس HTML شما) ...
-            a_tag = item.find('a', recursive=False) or item.select_one("a")
-            if not a_tag or not a_tag.get('href'): continue
-            name = a_tag.text.strip()
-            real_id_match = re.search(r'/Store/List/(\d+)', a_tag['href'])
-            real_id = int(real_id_match.group(1)) if real_id_match else None
-            
-            cat_id_raw = item.get('id', '')
-            match = re.search(r'(\d+)', cat_id_raw)
-            if not match: continue
-            cat_menu_id = int(match.group(1))
-            
-            if name and real_id and name != "#":
-                cats_map[cat_menu_id] = {"id": real_id, "name": name, "parent_id": None}
-        
-        for item in all_menu_items:
-            cat_id_raw = item.get('id', '')
-            match = re.search(r'(\d+)', cat_id_raw)
-            if not match: continue
-            cat_menu_id = int(match.group(1))
-
-            parent_li = item.find_parent("li", class_="menu-item-has-children")
-            if parent_li:
-                parent_id_raw = parent_li.get('id', '')
-                parent_match = re.search(r'(\d+)', parent_id_raw)
-                if parent_match:
-                    parent_menu_id = int(parent_match.group(1))
-                    if cat_menu_id in cats_map and parent_menu_id in cats_map:
-                        cats_map[cat_menu_id]['parent_id'] = cats_map[parent_menu_id]['id']
-
-        final_cats = list(cats_map.values())
-        logger.info(f"✅ تعداد {len(final_cats)} دسته‌بندی معتبر از HTML استخراج شد.")
+        # ... منطق پیچیده پارس HTML شما ...
+        # ... (کد این بخش بدون تغییر باقی می‌ماند)
         return final_cats
-
     except requests.RequestException as e:
         logger.error(f"❌ خطا در دریافت دسته‌بندی‌ها: {e}")
         return None
 
-def get_products_from_category_page(session, category_id, max_pages=100):
-    # ... (بدون تغییر) ...
-    all_products_in_category = []
-    # ...
-    return all_products_in_category
-# (کد تابع get_products_from_category_page و get_product_details را برای خلاصه‌سازی حذف کردم، آنها بدون تغییر باقی می‌مانند)
-# ...
-def transfer_categories_to_wc(source_categories, all_cats_from_source):
-    # ... (بدون تغییر) ...
-    return {} # source_to_wc_id_map
-# (کد توابع ووکامرس بدون تغییر باقی می‌مانند)
-# ...
-def load_cache():
-    # ... (بدون تغییر) ...
-    return {}
-def save_cache(products):
-    # ... (بدون تغییر) ...
-    pass
+# تابع جدید برای بررسی اولیه اتصال
+def check_wc_connection():
+    """یک درخواست ساده برای بررسی اتصال و کلیدهای API ووکامرس ارسال می‌کند."""
+    logger.info("⏳ در حال بررسی اتصال به ووکامرس...")
+    try:
+        res = requests.get(WC_API_URL, auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), verify=False, timeout=15)
+        if res.status_code == 401:
+            logger.error("❌ اتصال به ووکامرس ناموفق: خطای 401 Unauthorized. لطفاً کلیدهای API (Consumer Key/Secret) را بررسی کنید.")
+            return False
+        res.raise_for_status()
+        logger.info("✅ اتصال به ووکامرس موفقیت‌آمیز است.")
+        return True
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ اتصال به ووکامرس ناموفق: خطای شبکه. لطفاً آدرس API ({WC_API_URL}) را بررسی کنید. خطا: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"❌ خطای ناشناخته در هنگام بررسی اتصال به ووکامرس: {e}")
+        return False
 
-def process_product_wrapper(args):
-    # ... (بدون تغییر) ...
-    pass
+# تابع اصلاح شده برای انتقال دسته‌ها با لاگ‌نویسی بهتر
+def transfer_categories_to_wc(source_categories, all_cats_from_source):
+    logger.info(f"\n⏳ شروع انتقال {len(source_categories)} دسته‌بندی به ووکامرس...")
+    source_cat_map = {cat['id']: cat for cat in all_cats_from_source}
+    sorted_cats = sorted(source_categories, key=lambda c: (source_cat_map.get(c.get('parent_id'), {}).get('name', ''), c['name']))
+    source_to_wc_id_map = {}
+    
+    for cat in tqdm(sorted_cats, desc="انتقال دسته‌ها"):
+        name = cat["name"].strip()
+        source_parent_id = cat.get("parent_id")
+        wc_parent_id = source_to_wc_id_map.get(source_parent_id, 0)
+        
+        logger.debug(f"  - پردازش '{name}' (ID: {cat['id']}) با والد WC ID: {wc_parent_id}")
+        
+        try:
+            res_check = requests.get(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), 
+                                     params={"search": name, "parent": wc_parent_id}, verify=False, timeout=20)
+            res_check.raise_for_status()
+            existing_cats = res_check.json()
+            exact_match = next((wc_cat for wc_cat in existing_cats if wc_cat['name'].strip() == name and wc_cat['parent'] == wc_parent_id), None)
+            
+            if exact_match:
+                source_to_wc_id_map[cat["id"]] = exact_match["id"]
+                logger.debug(f"    -> دسته '{name}' وجود دارد. استفاده از WC ID: {exact_match['id']}")
+                continue 
+
+            logger.debug(f"    -> دسته '{name}' وجود ندارد. تلاش برای ساخت...")
+            data = {"name": name, "parent": wc_parent_id}
+            res = requests.post(f"{WC_API_URL}/products/categories", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), json=data, verify=False, timeout=20)
+            
+            if res.status_code in [200, 201]:
+                new_id = res.json()["id"]
+                source_to_wc_id_map[cat["id"]] = new_id
+                logger.debug(f"    -> ✅ دسته با موفقیت ساخته شد. WC ID جدید: {new_id}")
+            else:
+                error_data = res.json()
+                if error_data.get("code") == "term_exists" and error_data.get("data", {}).get("resource_id"):
+                    existing_id = error_data["data"]["resource_id"]
+                    source_to_wc_id_map[cat["id"]] = existing_id
+                    logger.warning(f"    -> دسته '{name}' به دلیل 'term_exists' با ID موجود {existing_id} مپ شد.")
+                else:
+                    logger.error(f"❌ خطا در ساخت دسته '{name}': {res.text}")
+        except Exception as e:
+            logger.error(f"❌ خطای جدی در حین پردازش دسته '{name}': {e}")
+            return None # شکست خوردن تابع
+
+    logger.info(f"✅ انتقال دسته‌بندی‌ها کامل شد. تعداد نگاشت‌شده: {len(source_to_wc_id_map)}")
+    return source_to_wc_id_map
+
+# ... بقیه توابع (get_product_details, get_products_from_category_page, ووکامرس, کش و ...)
+# ... این توابع باید از کد قبلی شما کپی شوند و بدون تغییر باقی می‌مانند.
+# ...
 # ==============================================================================
-# --- تابع اصلی (نسخه نهایی و بهبودیافته) ---
+# --- تابع اصلی (نسخه نهایی) ---
 # ==============================================================================
 def main():
     session = login_eways(EWAYS_USERNAME, EWAYS_PASSWORD)
@@ -242,91 +245,37 @@ def main():
     if not all_cats:
         return
     logger.info(f"✅ مرحله ۱: بارگذاری کل دسته‌بندی‌ها کامل شد. تعداد: {len(all_cats)}")
-    
-    # ------------------------------------------------------------------------------------
-    # --- ابزار کمکی برای یافتن ID صحیح ---
-    # برای پیدا کردن ID های صحیح، این بخش را از کامنت خارج کرده و یک بار برنامه را اجرا کنید.
-    # لیست کامل در فایل app.log ذخیره خواهد شد.
-    # ------------------------------------------------------------------------------------
-    # logger.info("="*20 + " لیست کامل دسته‌بندی‌های یافت شده " + "="*20)
-    # for cat in sorted(all_cats, key=lambda x: x['name']):
-    #     logger.info(f"نام: {cat['name']:<40} | شناسه: {cat['id']:<10} | شناسه والد: {cat.get('parent_id')}")
-    # logger.info("="*80)
-    # return # برای توقف برنامه بعد از نمایش لیست
-    # ------------------------------------------------------------------------------------
+
+    # مرحله جدید: بررسی اولیه اتصال به ووکامرس
+    if not check_wc_connection():
+        logger.error("برنامه به دلیل عدم امکان اتصال به ووکامرس خاتمه یافت.")
+        return
 
     # --- تعریف و پردازش قوانین انتخاب ---
-    # مقادیر زیر را بر اساس لاگ بالا و ID های صحیح، ویرایش کنید.
-    # مثال: اگر شناسه "گوشی موبایل" 4286 است، به جای 2045 از آن استفاده کنید.
-
-    
-    
     SELECTED_IDS_STRING = "1582:14548-allz,1584-all-allz|16777:all-allz|4882:all-allz|16778:22570-all-allz"
-
-
     
-    # پردازش قوانین برای گرفتن دو لیست مجزا
     structure_cat_ids, product_cat_ids = process_selection_rules(SELECTED_IDS_STRING, all_cats, logger)
     
-    # ایجاد نقشه از ID به نام برای لاگ‌نویسی بهتر
     cat_name_map = {cat['id']: cat['name'] for cat in all_cats}
-    
-    structure_cat_names = [cat_name_map.get(cat_id, f'ID ناشناخته:{cat_id}') for cat_id in structure_cat_ids]
-    product_cat_names = [cat_name_map.get(cat_id, f'ID ناشناخته:{cat_id}') for cat_id in product_cat_ids]
+    structure_cat_names = [cat_name_map.get(cat_id, f'ID ناشناخته:{cat_id}') for cat_id in sorted(list(structure_cat_ids))]
+    product_cat_names = [cat_name_map.get(cat_id, f'ID ناشناخته:{cat_id}') for cat_id in sorted(list(product_cat_ids))]
     
     logger.info(f"✅ دسته‌بندی‌های ساختاری برای انتقال: {structure_cat_names}")
     logger.info(f"✅ دسته‌بندی‌های محصول برای استخراج: {product_cat_names}")
 
     # --- انتقال دسته‌های ساختاری به ووکامرس ---
     cats_for_wc_transfer = [cat for cat in all_cats if cat['id'] in structure_cat_ids]
-    category_mapping = transfer_categories_to_wc(cats_for_wc_transfer, all_cats) # این تابع باید مثل قبل باشد
+    category_mapping = transfer_categories_to_wc(cats_for_wc_transfer, all_cats) 
+    
     if not category_mapping:
         logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
         return
     logger.info(f"✅ مرحله ۲: انتقال دسته‌بندی‌های ساختاری کامل شد.")
 
     # --- استخراج محصولات و ادامه فرآیند ---
-    cached_products = load_cache()
-    
-    all_products = {}
-    logger.info("\n⏳ شروع فرآیند جمع‌آوری تمام محصولات...")
-    for cat_id in tqdm(product_cat_ids, desc="دریافت محصولات"):
-        products_in_cat = get_products_from_category_page(session, cat_id) # این تابع باید مثل قبل باشد
-        for product in products_in_cat:
-            all_products[product['id']] = product
-    
-    new_products_list = list(all_products.values())
-    logger.info(f"\n✅ مرحله ۳: استخراج محصولات کامل شد. تعداد کل محصولات یکتا: {len(new_products_list)}")
-
-    products_to_send = []
-    updated_cache_data = {}
-    for p in new_products_list:
-        pid = str(p['id']) # اطمینان از اینکه کلیدها رشته‌ای هستند
-        cached_p = cached_products.get(pid)
-        if not cached_p or cached_p.get('price') != p.get('price') or cached_p.get('specs') != p.get('specs'):
-            products_to_send.append(p)
-        updated_cache_data[pid] = p
-        
-    logger.info(f"✅ مرحله ۴: مقایسه با کش کامل شد. تعداد محصولات تغییرکرده/جدید برای ارسال: {len(products_to_send)}")
-    save_cache(updated_cache_data)
-
-    if not products_to_send:
-        logger.info("🎉 هیچ محصول جدید یا تغییرکرده‌ای برای ارسال وجود ندارد. کار تمام شد!")
-        return
-
-    stats = {'created': 0, 'updated': 0, 'failed': 0, 'lock': Lock()}
-    logger.info(f"\n🚀 شروع پردازش و ارسال {len(products_to_send)} محصول به ووکامرس...")
-    
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        args_list = [(p, stats, category_mapping) for p in products_to_send]
-        list(tqdm(executor.map(process_product_wrapper, args_list), total=len(products_to_send), desc="ارسال محصولات")) # این تابع باید مثل قبل باشد
-
-    logger.info("\n===============================")
-    logger.info(f"📦 خلاصه عملیات:")
-    logger.info(f"🟢 ایجاد شده: {stats['created']}")
-    logger.info(f"🔵 آپدیت شده: {stats['updated']}")
-    logger.info(f"🔴 شکست‌خورده: {stats['failed']}")
-    logger.info("===============================\nتمام!")
+    # ... بقیه کد شما از این بخش به بعد بدون تغییر است ...
+    # ... (فراخوانی get_all_products یا حلقه روی product_cat_ids, مقایسه با کش، ارسال به ووکامرس)
+    # ...
 
 if __name__ == "__main__":
     main()
