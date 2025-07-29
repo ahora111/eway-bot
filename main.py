@@ -636,15 +636,27 @@ def main():
     # پرینت محصولات به صورت شاخه‌ای و مرتب
     print_products_tree(all_products, filtered_categories)
 
+    # --- ادغام کش و آمار محصولات جدید بر اساس دسته ---
     updated_products = {}
     changed_count = 0
+    new_products_by_category = {}
+
     for key, p in all_products.items():
         if key in cached_products and cached_products[key]['price'] == p['price'] and cached_products[key]['stock'] == p['stock'] and cached_products[key]['specs'] == p['specs']:
             updated_products[key] = cached_products[key]
         else:
             updated_products[key] = p
             changed_count += 1
+            cat_id = p['category_id']
+            new_products_by_category[cat_id] = new_products_by_category.get(cat_id, 0) + 1
+
     logger.info(f"✅ مرحله 7: ادغام با کش کامل شد. تعداد محصولات تغییرشده/جدید برای ارسال: {changed_count}")
+
+    # نمایش آمار محصولات جدید بر اساس دسته
+    logger.info("📊 آمار محصولات جدید/تغییر یافته بر اساس دسته‌بندی:")
+    cat_map = {cat['id']: cat['name'] for cat in filtered_categories}
+    for cat_id, count in sorted(new_products_by_category.items(), key=lambda x: -x[1]):
+        logger.info(f"  - {cat_map.get(cat_id, str(cat_id))}: {count} محصول جدید/تغییر یافته")
 
     save_cache(updated_products)
 
