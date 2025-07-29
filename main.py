@@ -7,10 +7,12 @@ import random
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
-from threading import Lock
+from threading import Lock, Thread
+from queue import Queue
 import logging
 from logging.handlers import RotatingFileHandler
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
+from collections import defaultdict
 
 # ==============================================================================
 # --- توابع انتخاب منعطف با SELECTED_IDS_STRING ---
@@ -125,14 +127,19 @@ def login_eways(username, password):
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(login_url, data=payload, timeout=30)
     if resp.status_code != 200:
-        logger.error(f"❌ لاگین ناموفق! کد وضعیت: {resp.status_code}")
+        logger.error(f"❌ لاگین ناموفق! کد وضعیت: {resp.status_code} - متن پاسخ: {resp.text[:200]}")
         return None
 
     if 'Aut' in session.cookies:
         logger.info("✅ لاگین موفق! کوکی Aut دریافت شد.")
         return session
     else:
-        logger.error("❌ کوکی Aut دریافت نشد. لاگین ناموفق یا کپچا فعال است.")
+        if "کپچا" in resp.text or "captcha" in resp.text.lower():
+            logger.error("❌ کوکی Aut دریافت نشد. کپچا فعال است.")
+        elif "نام کاربری" in resp.text or "رمز عبور" in resp.text:
+            logger.error("❌ کوکی Aut دریافت نشد. نام کاربری یا رمز عبور اشتباه است.")
+        else:
+            logger.error("❌ کوکی Aut دریافت نشد. لاگین ناموفق یا دلیل نامشخص.")
         return None
 
 # ==============================================================================
@@ -244,16 +251,29 @@ def get_and_parse_categories(session):
         logger.error(f"❌ خطای ناشناخته در پردازش دسته‌بندی‌ها: {e}")
         return None
 
+# ==============================================================================
+# --- گرفتن محصولات هر دسته با کنترل خطا و @retry ---
+# ==============================================================================
+
+MAX_ERRORS_PER_CATEGORY = 3
+
+@retry(
+    retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)),
+    stop=stop_after_attempt(4),
+    wait=wait_random_exponential(multiplier=1, max=10),
+    reraise=True
+)
 def get_products_from_category_page(session, category_id, max_pages=10, delay=0.5):
     all_products_in_category = []
     seen_product_ids = set()
     page_num = 1
+    error_count = 0
     while page_num <= max_pages:
         url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id, page=page_num)
         logger.info(f"  - در حال دریافت محصولات از: {url}")
         try:
             response = session.get(url, timeout=30)
-            if response.status_code == 429 or response.status_code == 503 or response.status_code == 403:
+            if response.status_code in [429, 503, 403]:
                 raise requests.exceptions.HTTPError(f"Blocked or rate limited: {response.status_code}", response=response)
             if response.status_code != 200: break
             soup = BeautifulSoup(response.text, 'lxml')
@@ -308,17 +328,19 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                 break
             page_num += 1
             time.sleep(random.uniform(delay, delay + 0.2))
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"    - خطای شبکه در پردازش صفحه محصولات: {e}")
-            raise
+            error_count = 0  # اگر موفق بود، شمارنده خطا ریست شود
         except Exception as e:
-            logger.error(f"    - خطای کلی در پردازش صفحه محصولات: {e}")
-            break
+            error_count += 1
+            logger.error(f"    - خطا در پردازش صفحه محصولات: {e} (تعداد خطا: {error_count})")
+            if error_count >= MAX_ERRORS_PER_CATEGORY:
+                logger.critical(f"🚨 تعداد خطاهای متوالی در دسته {category_id} به {error_count} رسید! توقف پردازش این دسته.")
+                break
+            time.sleep(2)
     logger.info(f"    - تعداد کل محصولات استخراج‌شده از دسته {category_id}: {len(all_products_in_category)}")
     return all_products_in_category
 
 # ==============================================================================
-# --- کش برای محصولات ---
+# --- کش برای محصولات (کلید ترکیبی id|category_id) ---
 # ==============================================================================
 def load_cache():
     if os.path.exists(CACHE_FILE):
@@ -485,6 +507,8 @@ def process_product_wrapper(args):
         wc_cat_id = category_mapping.get(product.get('category_id'))
         if not wc_cat_id:
             logger.warning(f"   ⚠️ دسته برای محصول {product.get('id')} پیدا نشد. رد کردن...")
+            with stats['lock']:
+                stats['no_category'] = stats.get('no_category', 0) + 1
             return
         specs = product.get('specs', {})
         if not specs:
@@ -519,7 +543,21 @@ def process_product_wrapper(args):
         with stats['lock']: stats['failed'] += 1
 
 # ==============================================================================
-# --- تابع اصلی (بدون زمان‌بندی) ---
+# --- پرینت محصولات به صورت شاخه‌ای و مرتب ---
+# ==============================================================================
+def print_products_tree(products, categories):
+    cat_map = {cat['id']: cat['name'] for cat in categories}
+    tree = defaultdict(list)
+    for key, product in products.items():
+        pid, catid = key.split('|')
+        tree[catid].append(product)
+    for catid in sorted(tree, key=lambda x: int(x)):
+        logger.info(f"دسته [{catid}] {cat_map.get(int(catid), 'نامشخص')}:")
+        for p in sorted(tree[catid], key=lambda x: int(x['id'])):
+            logger.info(f"   - {p['name']} (ID: {p['id']})")
+
+# ==============================================================================
+# --- تابع اصلی ---
 # ==============================================================================
 def main():
     session = login_eways(EWAYS_USERNAME, EWAYS_PASSWORD)
@@ -533,14 +571,7 @@ def main():
         return
     logger.info(f"✅ مرحله 1: بارگذاری دسته‌بندی‌ها کامل شد. تعداد: {len(all_cats)}")
 
-
-    
-
     SELECTED_IDS_STRING = "1582:14548-allz,1584-all-allz|16777:all-allz|4882:all-allz|16778:22570-all-allz"
-
-    
-
-    
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
     logger.info(f"✅ انتخاب‌های دلخواه: {parsed_selection}")
 
@@ -565,6 +596,7 @@ def main():
 
     selected_ids = [cat['id'] for cat in filtered_categories]
     all_products = {}
+    product_queue = Queue()
     logger.info(f"\n⏳ شروع فرآیند جمع‌آوری تمام محصولات از همه دسته‌بندی‌های انتخابی و زیرمجموعه‌ها...")
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -579,8 +611,9 @@ def main():
             try:
                 products_in_cat = future.result()
                 for product in products_in_cat:
-                    if product['category_id'] == cat_id:
-                        all_products[(product['id'], cat_id)] = product
+                    key = f"{product['id']}|{cat_id}"
+                    all_products[key] = product
+                    product_queue.put(product)
                 # اگر موفقیت‌آمیز بود، سرعت را کمی زیاد کن (تا سقف)
                 if max_workers < max_max_workers:
                     max_workers += 1
@@ -598,33 +631,51 @@ def main():
             pbar.update(1)
         pbar.close()
 
-    new_products = list(all_products.values())
-    logger.info(f"✅ مرحله 6: استخراج محصولات کامل شد. تعداد استخراج‌شده: {len(new_products)}")
+    logger.info(f"✅ مرحله 6: استخراج محصولات کامل شد. تعداد استخراج‌شده: {len(all_products)}")
+
+    # پرینت محصولات به صورت شاخه‌ای و مرتب
+    print_products_tree(all_products, filtered_categories)
 
     updated_products = {}
     changed_count = 0
-    for p in new_products:
-        pid = p['id']
-        if pid in cached_products and cached_products[pid]['price'] == p['price'] and cached_products[pid]['stock'] == p['stock'] and cached_products[pid]['specs'] == p['specs']:
-            updated_products[pid] = cached_products[pid]
+    for key, p in all_products.items():
+        if key in cached_products and cached_products[key]['price'] == p['price'] and cached_products[key]['stock'] == p['stock'] and cached_products[key]['specs'] == p['specs']:
+            updated_products[key] = cached_products[key]
         else:
-            updated_products[pid] = p
+            updated_products[key] = p
             changed_count += 1
     logger.info(f"✅ مرحله 7: ادغام با کش کامل شد. تعداد محصولات تغییرشده/جدید برای ارسال: {changed_count}")
 
     save_cache(updated_products)
 
-    stats = {'created': 0, 'updated': 0, 'failed': 0, 'lock': Lock()}
+    stats = {'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0, 'lock': Lock()}
     logger.info(f"\n🚀 شروع پردازش و ارسال {changed_count} محصول (تغییرشده/جدید) به ووکامرس...")
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        args_list = [(p, stats, category_mapping) for p in updated_products.values() if p['id'] not in cached_products or updated_products[p['id']] != cached_products.get(p['id'])]
-        list(tqdm(executor.map(process_product_wrapper, args_list), total=changed_count, desc="ارسال محصولات"))
+
+    # ارسال محصولات به ووکامرس با ترد جداگانه و صف مرکزی
+    def worker():
+        while True:
+            try:
+                product = product_queue.get_nowait()
+            except Exception:
+                break
+            process_product_wrapper((product, stats, category_mapping))
+            product_queue.task_done()
+
+    num_workers = 3
+    threads = []
+    for _ in range(num_workers):
+        t = Thread(target=worker)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
 
     logger.info("\n===============================")
     logger.info(f"📦 محصولات پردازش شده: {changed_count}")
     logger.info(f"🟢 ایجاد شده: {stats['created']}")
     logger.info(f"🔵 آپدیت شده: {stats['updated']}")
     logger.info(f"🔴 شکست‌خورده: {stats['failed']}")
+    logger.info(f"🟡 بدون دسته: {stats.get('no_category', 0)}")
     logger.info("===============================\nتمام!")
 
 if __name__ == "__main__":
