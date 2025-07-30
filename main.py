@@ -613,6 +613,54 @@ def print_products_tree(products, categories):
             logger.info(f"   - {p['name']} (ID: {p['id']})")
 
 # ==============================================================================
+# --- ناموجود کردن محصولات حذف‌شده از eways در ووکامرس ---
+# ==============================================================================
+def mark_deleted_products_outofstock(all_products, wc_api_url, wc_consumer_key, wc_consumer_secret):
+    logger.info("🔎 بررسی محصولات حذف‌شده و ناموجود کردن آن‌ها در ووکامرس...")
+    page = 1
+    wc_skus = set()
+    wc_ids = {}
+    while True:
+        res = requests.get(
+            f"{wc_api_url}/products",
+            auth=(wc_consumer_key, wc_consumer_secret),
+            params={"per_page": 100, "page": page, "sku": "EWAYS-"},
+            verify=False
+        )
+        res.raise_for_status()
+        data = res.json()
+        if not data:
+            break
+        for p in data:
+            sku = p.get("sku", "")
+            if sku.startswith("EWAYS-"):
+                wc_skus.add(sku)
+                wc_ids[sku] = p["id"]
+        if len(data) < 100:
+            break
+        page += 1
+
+    current_skus = set(f"EWAYS-{p['id']}" for p in all_products.values())
+    deleted_skus = wc_skus - current_skus
+    logger.info(f"🟠 تعداد محصولات حذف‌شده از eways که باید ناموجود شوند: {len(deleted_skus)}")
+
+    for sku in tqdm(deleted_skus, desc="ناموجود کردن محصولات حذف‌شده"):
+        product_id = wc_ids[sku]
+        try:
+            res = requests.put(
+                f"{wc_api_url}/products/{product_id}",
+                auth=(wc_consumer_key, wc_consumer_secret),
+                json={"stock_quantity": 0, "stock_status": "outofstock"},
+                verify=False
+            )
+            if res.status_code in [200, 201]:
+                logger.info(f"✅ محصول {sku} (ID: {product_id}) ناموجود شد.")
+            else:
+                logger.warning(f"❌ خطا در ناموجود کردن محصول {sku}: {res.text}")
+        except Exception as e:
+            logger.error(f"❌ خطا در ناموجود کردن محصول {sku}: {e}")
+
+# ==============================================================================
 # --- تابع اصلی ---
 # ==============================================================================
 def main():
@@ -744,7 +792,17 @@ def main():
     logger.info(f"🔵 آپدیت شده: {stats['updated']}")
     logger.info(f"🔴 شکست‌خورده: {stats['failed']}")
     logger.info(f"🟡 بدون دسته: {stats.get('no_category', 0)}")
-    logger.info("===============================\nتمام!")
+    logger.info("===============================")
+
+    # --- ناموجود کردن محصولات حذف‌شده از eways در ووکامرس ---
+    mark_deleted_products_outofstock(
+        all_products,
+        WC_API_URL,
+        WC_CONSUMER_KEY,
+        WC_CONSUMER_SECRET
+    )
+
+    logger.info("تمام!")
 
 if __name__ == "__main__":
     main()
