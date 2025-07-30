@@ -479,7 +479,8 @@ def _send_to_woocommerce(sku, data, stats):
                 "regular_price": data["regular_price"],
                 "stock_quantity": data["stock_quantity"],
                 "stock_status": data["stock_status"],
-                "attributes": data["attributes"]
+                "attributes": data["attributes"],
+                "tags": data.get("tags", [])
             }
             logger.debug(f"   - آپدیت محصول {product_id} با {len(update_data['attributes'])} مشخصه فنی...")
             res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=update_data, verify=False, timeout=20)
@@ -501,8 +502,58 @@ def _send_to_woocommerce(sku, data, stats):
         logger.error(f"   ❌ خطای کلی در ارتباط با ووکامرس برای SKU {sku}: {e}")
         raise
 
+# ==============================================================================
+# --- برچسب‌گذاری هوشمند سئو محور ---
+# ==============================================================================
+def smart_tags_for_product(product, cat_map):
+    tags = set()
+    name = product.get('name', '')
+    specs = product.get('specs', {})
+    cat_id = product.get('category_id')
+    cat_name = cat_map.get(cat_id, '').strip()
+    price = int(product.get('price', 0))
+
+    # 1. برند و مدل از نام محصول (اولین و دومین کلمه غیرتکراری و غیرعمومی)
+    name_parts = [w for w in re.split(r'\s+', name) if w and len(w) > 2]
+    common_words = {'گوشی', 'موبایل', 'تبلت', 'لپتاپ', 'لپ‌تاپ', 'مدل', 'محصول', 'کالا', 'جدید'}
+    for part in name_parts[:2]:
+        if part not in common_words:
+            tags.add(part)
+
+    # 2. نام دسته‌بندی (اگر خیلی عمومی نیست)
+    if cat_name and cat_name not in common_words:
+        tags.add(cat_name)
+
+    # 3. ویژگی‌های مهم (رنگ، حافظه، ظرفیت، سایز)
+    important_keys = ['رنگ', 'Color', 'حافظه', 'ظرفیت', 'اندازه', 'سایز', 'Size', 'مدل', 'برند']
+    for key, value in specs.items():
+        if any(imp in key for imp in important_keys):
+            val = value.strip()
+            if 2 < len(val) < 30 and val not in common_words:
+                tags.add(val)
+
+    # 4. برچسب قیمت (اقتصادی/لوکس)
+    if price > 0:
+        if price < 5000000:
+            tags.add('اقتصادی')
+        elif price > 20000000:
+            tags.add('لوکس')
+
+    # 5. برچسب‌های عمومی سئو (فقط یک بار)
+    tags.add('خرید آنلاین')
+    tags.add('گارانتی دار')
+
+    # 6. حذف برچسب‌های تکراری و اسپم
+    tags = {t for t in tags if t and len(t) <= 30 and t.lower() not in ['test', 'spam', 'محصول', 'کالا']}
+
+    # 7. تبدیل به فرمت ووکامرس
+    return [{"name": t} for t in sorted(tags)]
+
+# ==============================================================================
+# --- ارسال محصول به ووکامرس با برچسب هوشمند ---
+# ==============================================================================
 def process_product_wrapper(args):
-    product, stats, category_mapping = args
+    product, stats, category_mapping, cat_map = args
     try:
         wc_cat_id = category_mapping.get(product.get('category_id'))
         if not wc_cat_id:
@@ -524,6 +575,10 @@ def process_product_wrapper(args):
                 "variation": False
             })
             position += 1
+
+        # برچسب‌های هوشمند سئو
+        tags = smart_tags_for_product(product, cat_map)
+
         wc_data = {
             "name": product.get('name', 'بدون نام'),
             "type": "simple",
@@ -534,7 +589,8 @@ def process_product_wrapper(args):
             "stock_quantity": product.get('stock', 0),
             "manage_stock": True,
             "stock_status": "instock" if product.get('stock', 0) > 0 else "outofstock",
-            "attributes": attributes
+            "attributes": attributes,
+            "tags": tags
         }
         _send_to_woocommerce(wc_data['sku'], wc_data, stats)
         time.sleep(random.uniform(0.5, 1.5))
@@ -670,7 +726,7 @@ def main():
                 product = product_queue.get_nowait()
             except Exception:
                 break
-            process_product_wrapper((product, stats, category_mapping))
+            process_product_wrapper((product, stats, category_mapping, cat_map))
             product_queue.task_done()
 
     num_workers = 3
