@@ -186,75 +186,9 @@ def get_product_details(session, cat_id, product_id):
         logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
         return {}
 
-def get_and_parse_categories(session):
-    logger.info(f"⏳ دریافت دسته‌بندی‌ها از: {SOURCE_CATS_API_URL}")
-    try:
-        response = session.get(SOURCE_CATS_API_URL, timeout=30)
-        response.raise_for_status()
-        try:
-            data = response.json()
-            logger.info("✅ پاسخ JSON است. در حال پردازش...")
-            final_cats = []
-            for c in data:
-                real_id_match = re.search(r'/Store/List/(\d+)', c.get('url', ''))
-                real_id = int(real_id_match.group(1)) if real_id_match else c.get('id')
-                final_cats.append({
-                    "id": real_id,
-                    "name": c.get('name', '').strip(),
-                    "parent_id": c.get('parent_id')
-                })
-            logger.info(f"✅ تعداد {len(final_cats)} دسته‌بندی از JSON استخراج شد.")
-            return final_cats
-        except json.JSONDecodeError:
-            logger.warning("⚠️ پاسخ JSON نیست. تلاش برای پارس HTML...")
-
-        soup = BeautifulSoup(response.text, 'lxml')
-        all_menu_items = soup.select("li[id^='menu-item-']")
-        if not all_menu_items:
-            logger.error("❌ هیچ آیتم دسته‌بندی در HTML پیدا نشد.")
-            return []
-        logger.info(f"🔎 تعداد {len(all_menu_items)} آیتم منو پیدا شد. در حال پردازش...")
-
-        cats_map = {}
-        for item in all_menu_items:
-            cat_id_raw = item.get('id', '')
-            match = re.search(r'(\d+)', cat_id_raw)
-            if not match: continue
-            cat_menu_id = int(match.group(1))
-            a_tag = item.find('a', recursive=False) or item.select_one("a")
-            if not a_tag or not a_tag.get('href'): continue
-            name = a_tag.text.strip()
-            real_id_match = re.search(r'/Store/List/(\d+)', a_tag['href'])
-            real_id = int(real_id_match.group(1)) if real_id_match else None
-            if name and real_id and name != "#":
-                cats_map[cat_menu_id] = {"id": real_id, "name": name, "parent_id": None}
-        for item in all_menu_items:
-            cat_id_raw = item.get('id', '')
-            match = re.search(r'(\d+)', cat_id_raw)
-            if not match: continue
-            cat_menu_id = int(match.group(1))
-            parent_li = item.find_parent("li", class_="menu-item-has-children")
-            if parent_li:
-                parent_id_raw = parent_li.get('id', '')
-                parent_match = re.search(r'(\d+)', parent_id_raw)
-                if parent_match:
-                    parent_menu_id = int(parent_match.group(1))
-                    if cat_menu_id in cats_map and parent_menu_id in cats_map:
-                        cats_map[cat_menu_id]['parent_id'] = cats_map[parent_menu_id]['id']
-        final_cats = list(cats_map.values())
-        logger.info(f"✅ تعداد {len(final_cats)} دسته‌بندی معتبر استخراج شد.")
-        return final_cats
-    except requests.RequestException as e:
-        logger.error(f"❌ خطا در دریافت دسته‌بندی‌ها: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"❌ خطای ناشناخته در پردازش دسته‌بندی‌ها: {e}")
-        return None
-
 # ==============================================================================
-# --- گرفتن محصولات هر دسته با کنترل خطا و @retry ---
+# --- گرفتن محصولات هر دسته با کنترل خطا و @retry و منطق دقیق موجودی ---
 # ==============================================================================
-
 MAX_ERRORS_PER_CATEGORY = 3
 
 @retry(
@@ -285,11 +219,23 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
             current_page_product_ids = []
             for block in product_blocks:
                 try:
-                    unavailable = block.select_one(".goods-record-unavailable")
-                    if unavailable:
+                    # منطق دقیق تشخیص موجودی
+                    is_unavailable = False
+                    block_classes = block.get('class', [])
+                    if 'noCount' in block_classes:
+                        is_unavailable = True
+                    if block.select_one('.goods-record-unavailable'):
+                        is_unavailable = True
+
+                    stock = 1
+                    count_tag = block.select_one('.goods-item-desc-count')
+                    if count_tag:
+                        m = re.search(r'(\d+)\s*عدد', count_tag.text)
+                        if m:
+                            stock = int(m.group(1))
+                    if is_unavailable:
                         stock = 0
-                    else:
-                        stock = 1
+
                     a_tag = block.select_one("a")
                     href = a_tag['href'] if a_tag else None
                     product_id = None
@@ -329,7 +275,7 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                 break
             page_num += 1
             time.sleep(random.uniform(delay, delay + 0.2))
-            error_count = 0  # اگر موفق بود، شمارنده خطا ریست شود
+            error_count = 0
         except Exception as e:
             error_count += 1
             logger.error(f"    - خطا در پردازش صفحه محصولات: {e} (تعداد خطا: {error_count})")
@@ -358,7 +304,7 @@ def save_cache(products):
     logger.info(f"✅ کش ذخیره شد. تعداد محصولات: {len(products)}")
 
 # ==============================================================================
-# --- توابع ووکامرس ---
+# --- توابع ووکامرس و بقیه بخش‌ها ---
 # ==============================================================================
 def get_wc_categories():
     wc_cats, page = [], 1
@@ -503,9 +449,6 @@ def _send_to_woocommerce(sku, data, stats):
         logger.error(f"   ❌ خطای کلی در ارتباط با ووکامرس برای SKU {sku}: {e}")
         raise
 
-# ==============================================================================
-# --- برچسب‌گذاری هوشمند سئو محور ---
-# ==============================================================================
 def smart_tags_for_product(product, cat_map):
     tags = set()
     name = product.get('name', '')
@@ -514,45 +457,29 @@ def smart_tags_for_product(product, cat_map):
     cat_name = cat_map.get(cat_id, '').strip()
     price = int(product.get('price', 0))
 
-    # 1. برند و مدل از نام محصول (اولین و دومین کلمه غیرتکراری و غیرعمومی)
     name_parts = [w for w in re.split(r'\s+', name) if w and len(w) > 2]
     common_words = {'گوشی', 'موبایل', 'تبلت', 'لپتاپ', 'لپ‌تاپ', 'مدل', 'محصول', 'کالا', 'جدید'}
     for part in name_parts[:2]:
         if part not in common_words:
             tags.add(part)
-
-    # 2. نام دسته‌بندی (اگر خیلی عمومی نیست)
     if cat_name and cat_name not in common_words:
         tags.add(cat_name)
-
-    # 3. ویژگی‌های مهم (رنگ، حافظه، ظرفیت، سایز)
     important_keys = ['رنگ', 'Color', 'حافظه', 'ظرفیت', 'اندازه', 'سایز', 'Size', 'مدل', 'برند']
     for key, value in specs.items():
         if any(imp in key for imp in important_keys):
             val = value.strip()
             if 2 < len(val) < 30 and val not in common_words:
                 tags.add(val)
-
-    # 4. برچسب قیمت (اقتصادی/لوکس)
     if price > 0:
         if price < 5000000:
             tags.add('اقتصادی')
         elif price > 20000000:
             tags.add('لوکس')
-
-    # 5. برچسب‌های عمومی سئو (فقط یک بار)
     tags.add('خرید آنلاین')
     tags.add('گارانتی دار')
-
-    # 6. حذف برچسب‌های تکراری و اسپم
     tags = {t for t in tags if t and len(t) <= 30 and t.lower() not in ['test', 'spam', 'محصول', 'کالا']}
-
-    # 7. تبدیل به فرمت ووکامرس
     return [{"name": t} for t in sorted(tags)]
 
-# ==============================================================================
-# --- ارسال محصول به ووکامرس با برچسب هوشمند ---
-# ==============================================================================
 def process_product_wrapper(args):
     product, stats, category_mapping, cat_map = args
     try:
@@ -576,10 +503,7 @@ def process_product_wrapper(args):
                 "variation": False
             })
             position += 1
-
-        # برچسب‌های هوشمند سئو
         tags = smart_tags_for_product(product, cat_map)
-
         wc_data = {
             "name": product.get('name', 'بدون نام'),
             "type": "simple",
@@ -599,9 +523,6 @@ def process_product_wrapper(args):
         logger.error(f"   ❌ خطای جدی در پردازش محصول {product.get('id', '')}: {e}")
         with stats['lock']: stats['failed'] += 1
 
-# ==============================================================================
-# --- پرینت محصولات به صورت شاخه‌ای و مرتب ---
-# ==============================================================================
 def print_products_tree(products, categories):
     cat_map = {cat['id']: cat['name'] for cat in categories}
     tree = defaultdict(list)
@@ -613,9 +534,6 @@ def print_products_tree(products, categories):
         for p in sorted(tree[catid], key=lambda x: int(x['id'])):
             logger.info(f"   - {p['name']} (ID: {p['id']})")
 
-# ==============================================================================
-# --- ناموجود کردن محصولات حذف‌شده از eways در ووکامرس ---
-# ==============================================================================
 def mark_deleted_products_outofstock(all_products, wc_api_url, wc_consumer_key, wc_consumer_secret):
     logger.info("🔎 بررسی محصولات حذف‌شده و ناموجود کردن آن‌ها در ووکامرس...")
     page = 1
@@ -661,9 +579,6 @@ def mark_deleted_products_outofstock(all_products, wc_api_url, wc_consumer_key, 
         except Exception as e:
             logger.error(f"❌ خطا در ناموجود کردن محصول {sku}: {e}")
 
-# ==============================================================================
-# --- تابع اصلی ---
-# ==============================================================================
 def main():
     session = login_eways(EWAYS_USERNAME, EWAYS_PASSWORD)
     if not session:
@@ -691,7 +606,6 @@ def main():
 
     cached_products = load_cache()
 
-    # --- کنترل هوشمند سرعت و تاخیر در دریافت محصولات ---
     max_workers = 3
     delay = 0.5
     min_workers = 1
@@ -719,14 +633,12 @@ def main():
                     key = f"{product['id']}|{cat_id}"
                     all_products[key] = product
                     product_queue.put(product)
-                # اگر موفقیت‌آمیز بود، سرعت را کمی زیاد کن (تا سقف)
                 if max_workers < max_max_workers:
                     max_workers += 1
                 if delay > min_delay:
                     delay = max(min_delay, delay - 0.05)
             except Exception as e:
                 logger.warning(f"⚠️ خطا در دریافت محصولات دسته {cat_id}: {e}")
-                # اگر خطای بلاک شدن بود، سرعت را کم کن و تاخیر را زیاد کن
                 if "Blocked" in str(e) or "rate limited" in str(e):
                     if max_workers > min_workers:
                         max_workers -= 1
@@ -738,10 +650,8 @@ def main():
 
     logger.info(f"✅ مرحله 6: استخراج محصولات کامل شد. تعداد استخراج‌شده: {len(all_products)}")
 
-    # پرینت محصولات به صورت شاخه‌ای و مرتب
     print_products_tree(all_products, filtered_categories)
 
-    # --- ادغام کش و آمار محصولات جدید بر اساس دسته ---
     updated_products = {}
     changed_count = 0
     new_products_by_category = {}
@@ -757,7 +667,6 @@ def main():
 
     logger.info(f"✅ مرحله 7: ادغام با کش کامل شد. تعداد محصولات تغییرشده/جدید برای ارسال: {changed_count}")
 
-    # نمایش آمار محصولات جدید بر اساس دسته
     logger.info("📊 آمار محصولات جدید/تغییر یافته بر اساس دسته‌بندی:")
     cat_map = {cat['id']: cat['name'] for cat in filtered_categories}
     for cat_id, count in sorted(new_products_by_category.items(), key=lambda x: -x[1]):
@@ -768,7 +677,6 @@ def main():
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0, 'lock': Lock()}
     logger.info(f"\n🚀 شروع پردازش و ارسال {changed_count} محصول (تغییرشده/جدید) به ووکامرس...")
 
-    # ارسال محصولات به ووکامرس با ترد جداگانه و صف مرکزی
     def worker():
         while True:
             try:
@@ -795,7 +703,6 @@ def main():
     logger.info(f"🟡 بدون دسته: {stats.get('no_category', 0)}")
     logger.info("===============================")
 
-    # --- ناموجود کردن محصولات حذف‌شده از eways در ووکامرس ---
     mark_deleted_products_outofstock(
         all_products,
         WC_API_URL,
