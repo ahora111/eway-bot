@@ -263,7 +263,7 @@ MAX_ERRORS_PER_CATEGORY = 3
     wait=wait_random_exponential(multiplier=1, max=10),
     reraise=True
 )
-def get_products_from_category_page(session, category_id, max_pages=10, delay=0.5):
+def get_products_from_category_page(session, category_id, max_pages=50, delay=0.5):  # افزایش max_pages به 50 برای پوشش بیشتر
     all_products_in_category = []
     seen_product_ids = set()
     page_num = 1
@@ -346,6 +346,31 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
     return all_products_in_category
 
 # ==============================================================================
+# --- چک مستقیم وضعیت محصول (برای دقت بالاتر در ناموجودها) ---
+# ==============================================================================
+@retry(
+    retry=retry_if_exception_type(requests.exceptions.RequestException),
+    stop=stop_after_attempt(3),
+    wait=wait_random_exponential(multiplier=1, max=5),
+    reraise=True
+)
+def check_product_availability(session, cat_id, product_id):
+    url = PRODUCT_DETAIL_URL_TEMPLATE.format(cat_id=cat_id, product_id=product_id)
+    try:
+        response = session.get(url, timeout=30)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'lxml')
+        unavailable = soup.select_one(".goods-record-unavailable") or "ناموجود" in response.text
+        price_tag = soup.select_one("span.goods-record-price")
+        price = re.sub(r'[^\d]', '', price_tag.text.strip()) if price_tag else "0"
+        is_available = not unavailable and int(price) > 0
+        logger.debug(f"      - چک مستقیم محصول {product_id} (cat {cat_id}): {'موجود' if is_available else 'ناموجود'} (قیمت: {price}, unavailable tag: {unavailable})")
+        return is_available
+    except Exception as e:
+        logger.warning(f"      - خطا در چک مستقیم محصول {product_id}: {e}. فرض ناموجود.")
+        return False
+
+# ==============================================================================
 # --- کش برای محصولات (کلید ترکیبی id|category_id) ---
 # ==============================================================================
 def load_cache():
@@ -363,7 +388,7 @@ def save_cache(products):
     logger.info(f"✅ کش ذخیره شد. تعداد محصولات: {len(products)}")
 
 # ==============================================================================
-# --- توابع ووکامرس (اضافه شدن تابع جدید برای گرفتن محصولات با پیشوند SKU) ---
+# --- توابع ووکامرس ---
 # ==============================================================================
 def get_wc_categories():
     wc_cats, page = [], 1
@@ -709,7 +734,7 @@ def main():
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_catid = {}
         for cat_id in selected_ids:
-            future = executor.submit(get_products_from_category_page, session, cat_id, 10, delay)
+            future = executor.submit(get_products_from_category_page, session, cat_id, 50, delay)  # max_pages=50
             future_to_catid[future] = cat_id
 
         pbar = tqdm(total=len(selected_ids), desc="دریافت محصولات دسته‌ها")
@@ -767,19 +792,25 @@ def main():
 
     save_cache(updated_products)
 
-    # --- مرحله جدید: مدیریت محصولات ناموجود ---
-    logger.info("\n⏳ شروع مدیریت محصولات ناموجود...")
+    # --- مرحله جدید: مدیریت محصولات ناموجود با چک مستقیم ---
+    logger.info("\n⏳ شروع مدیریت محصولات ناموجود با چک مستقیم...")
     wc_products = get_all_wc_products_with_prefix("EWAYS-")
     extracted_skus = {f"EWAYS-{p['id']}" for p in all_products.values()}  # SKUهای استخراج‌شده (موجودها)
     outofstock_queue = Queue()
 
     for wc_p in wc_products:
-        if wc_p['sku'] not in extracted_skus and wc_p['stock_status'] != "outofstock":
-            outofstock_queue.put(wc_p['id'])
-            logger.debug(f"      - محصول {wc_p['id']} (SKU: {wc_p['sku']}) برای آپدیت به ناموجود اضافه شد.")
+        sku = wc_p['sku']
+        if sku not in extracted_skus and wc_p['stock_status'] != "outofstock":
+            # استخراج cat_id و product_id از SKU (فرض: EWAYS-product_id)
+            product_id = sku.split('-')[-1]
+            # cat_id رو از کش یا category_mapping پیدا کن (اگر ندونی، از اولین دسته استفاده کن یا دستی تنظیم کن)
+            cat_id = wc_p['categories'][0]['id'] if wc_p['categories'] else list(category_mapping.values())[0]  # فرض اولین دسته
+            if not check_product_availability(session, cat_id, product_id):
+                outofstock_queue.put(wc_p['id'])
+                logger.info(f"      - محصول {wc_p['id']} (SKU: {sku}) واقعاً ناموجود است (چک مستقیم). اضافه به صف.")
 
     outofstock_count = outofstock_queue.qsize()
-    logger.info(f"🔍 تعداد محصولات برای آپدیت به ناموجود: {outofstock_count}")
+    logger.info(f"🔍 تعداد محصولات برای آپدیت به ناموجود (پس از چک مستقیم): {outofstock_count}")
 
     # --- ارسال محصولات موجود (تغییرشده/جدید) به ووکامرس با ترد جداگانه و صف مرکزی ---
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0, 'outofstock_updated': 0, 'lock': Lock()}
