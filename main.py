@@ -277,7 +277,7 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                 raise requests.exceptions.HTTPError(f"Blocked or rate limited: {response.status_code}", response=response)
             if response.status_code != 200: break
             soup = BeautifulSoup(response.text, 'lxml')
-            product_blocks = soup.select(".goods_item.goods-record")
+            product_blocks = soup.select(".goods-record")  # اصلاح سلکتور: فقط goods-record (بر اساس HTML شما)
             logger.info(f"    - تعداد بلاک‌های محصول پیدا شده: {len(product_blocks)}")
             if not product_blocks:
                 logger.info("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی.")
@@ -287,6 +287,7 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                 try:
                     unavailable = block.select_one(".goods-record-unavailable")
                     if unavailable:
+                        logger.debug(f"      - محصول skip شد: ناموجود (unavailable tag پیدا شد).")
                         continue  # ناموجودها skip می‌شن (مدیریت جداگانه)
                     a_tag = block.select_one("a")
                     href = a_tag['href'] if a_tag else None
@@ -295,17 +296,22 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                         match = re.search(r'/Store/Detail/\d+/(\d+)', href)
                         product_id = match.group(1) if match else None
                     if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
+                        logger.debug(f"      - محصول skip شد: ID نامعتبر یا تکراری ({product_id}).")
                         continue
                     name_tag = block.select_one("span.goods-record-title")
                     name = name_tag.text.strip() if name_tag else None
                     price_tag = block.select_one("span.goods-record-price")
-                    price = re.sub(r'[^\d]', '', price_tag.text.strip()) if price_tag else "0"
+                    price_text = price_tag.text.strip() if price_tag else ""
+                    price = re.sub(r'[^\d]', '', price_text) if price_text else "0"
+                    if int(price) <= 0:
+                        logger.debug(f"      - محصول skip شد: قیمت نامعتبر یا صفر ({price}).")
+                        continue
                     image_tag = block.select_one("img.goods-record-image")
                     image_url = image_tag.get('data-src', '') if image_tag else ''
                     if not name:
                         logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name})")
                         continue
-                    stock = 1 if int(price) > 0 else 0  # اگر قیمت 0 باشه، stock=0
+                    stock = 1  # موجود فرض می‌شه
                     specs = get_product_details(session, category_id, product_id)
                     time.sleep(random.uniform(delay, delay + 0.2))
                     product = {
@@ -382,12 +388,15 @@ def get_all_wc_products_with_prefix(prefix="EWAYS-"):
     while True:
         try:
             res = requests.get(f"{WC_API_URL}/products", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), params={
-                "per_page": 100, "page": page, "sku": prefix  # فیلتر بر اساس SKU (شروع با prefix)
+                "per_page": 100, "page": page
             }, verify=False)
             res.raise_for_status()
             data = res.json()
             if not data: break
-            products.extend([p for p in data if p['sku'].startswith(prefix)])
+            # فیلتر دستی بر اساس شروع SKU با prefix (برای ایمنی بیشتر)
+            filtered = [p for p in data if p.get('sku', '').startswith(prefix)]
+            products.extend(filtered)
+            logger.debug(f"      - صفحه {page}: {len(filtered)} محصول با پیشوند {prefix} پیدا شد.")
             if len(data) < 100: break
             page += 1
         except Exception as e:
@@ -767,6 +776,7 @@ def main():
     for wc_p in wc_products:
         if wc_p['sku'] not in extracted_skus and wc_p['stock_status'] != "outofstock":
             outofstock_queue.put(wc_p['id'])
+            logger.debug(f"      - محصول {wc_p['id']} (SKU: {wc_p['sku']}) برای آپدیت به ناموجود اضافه شد.")
 
     outofstock_count = outofstock_queue.qsize()
     logger.info(f"🔍 تعداد محصولات برای آپدیت به ناموجود: {outofstock_count}")
