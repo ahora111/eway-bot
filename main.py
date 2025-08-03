@@ -186,6 +186,71 @@ def get_product_details(session, cat_id, product_id):
         logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
         return {}
 
+def get_and_parse_categories(session):
+    logger.info(f"⏳ دریافت دسته‌بندی‌ها از: {SOURCE_CATS_API_URL}")
+    try:
+        response = session.get(SOURCE_CATS_API_URL, timeout=30)
+        response.raise_for_status()
+        try:
+            data = response.json()
+            logger.info("✅ پاسخ JSON است. در حال پردازش...")
+            final_cats = []
+            for c in data:
+                real_id_match = re.search(r'/Store/List/(\d+)', c.get('url', ''))
+                real_id = int(real_id_match.group(1)) if real_id_match else c.get('id')
+                final_cats.append({
+                    "id": real_id,
+                    "name": c.get('name', '').strip(),
+                    "parent_id": c.get('parent_id')
+                })
+            logger.info(f"✅ تعداد {len(final_cats)} دسته‌بندی از JSON استخراج شد.")
+            return final_cats
+        except json.JSONDecodeError:
+            logger.warning("⚠️ پاسخ JSON نیست. تلاش برای پارس HTML...")
+
+        soup = BeautifulSoup(response.text, 'lxml')
+        all_menu_items = soup.select("li[id^='menu-item-']")
+        if not all_menu_items:
+            logger.error("❌ هیچ آیتم دسته‌بندی در HTML پیدا نشد.")
+            return []
+        logger.info(f"🔎 تعداد {len(all_menu_items)} آیتم منو پیدا شد. در حال پردازش...")
+
+        cats_map = {}
+        for item in all_menu_items:
+            cat_id_raw = item.get('id', '')
+            match = re.search(r'(\d+)', cat_id_raw)
+            if not match: continue
+            cat_menu_id = int(match.group(1))
+            a_tag = item.find('a', recursive=False) or item.select_one("a")
+            if not a_tag or not a_tag.get('href'): continue
+            name = a_tag.text.strip()
+            real_id_match = re.search(r'/Store/List/(\d+)', a_tag['href'])
+            real_id = int(real_id_match.group(1)) if real_id_match else None
+            if name and real_id and name != "#":
+                cats_map[cat_menu_id] = {"id": real_id, "name": name, "parent_id": None}
+        for item in all_menu_items:
+            cat_id_raw = item.get('id', '')
+            match = re.search(r'(\d+)', cat_id_raw)
+            if not match: continue
+            cat_menu_id = int(match.group(1))
+            parent_li = item.find_parent("li", class_="menu-item-has-children")
+            if parent_li:
+                parent_id_raw = parent_li.get('id', '')
+                parent_match = re.search(r'(\d+)', parent_id_raw)
+                if parent_match:
+                    parent_menu_id = int(parent_match.group(1))
+                    if cat_menu_id in cats_map and parent_menu_id in cats_map:
+                        cats_map[cat_menu_id]['parent_id'] = cats_map[parent_menu_id]['id']
+        final_cats = list(cats_map.values())
+        logger.info(f"✅ تعداد {len(final_cats)} دسته‌بندی معتبر استخراج شد.")
+        return final_cats
+    except requests.RequestException as e:
+        logger.error(f"❌ خطا در دریافت دسته‌بندی‌ها: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"❌ خطای ناشناخته در پردازش دسته‌بندی‌ها: {e}")
+        return None
+
 # ==============================================================================
 # --- گرفتن محصولات هر دسته با کنترل خطا و @retry ---
 # ==============================================================================
