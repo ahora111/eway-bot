@@ -579,10 +579,11 @@ def process_product_wrapper(args):
         # برچسب‌های هوشمند سئو
         tags = smart_tags_for_product(product, cat_map)
 
+        # *** اصلاح مهم: SKU ترکیبی ***
         wc_data = {
             "name": product.get('name', 'بدون نام'),
             "type": "simple",
-            "sku": f"EWAYS-{product.get('id')}",
+            "sku": f"EWAYS-{product.get('id')}-{product.get('category_id')}",  # <--- اینجا
             "regular_price": process_price(product.get('price', 0)),
             "categories": [{"id": wc_cat_id}],
             "images": [{"src": product.get("image")}] if product.get("image") else [],
@@ -613,6 +614,25 @@ def print_products_tree(products, categories):
             logger.info(f"   - {p['name']} (ID: {p['id']})")
 
 # ==============================================================================
+# --- ادغام کش و محصولات جدید ---
+# ==============================================================================
+def merge_products_with_cache(all_products, cached_products):
+    updated_products = {}
+    changed_count = 0
+    new_products_by_category = {}
+
+    for key, p in all_products.items():
+        if key in cached_products and cached_products[key]['price'] == p['price'] and cached_products[key]['stock'] == p['stock'] and cached_products[key]['specs'] == p['specs']:
+            updated_products[key] = cached_products[key]
+        else:
+            updated_products[key] = p
+            changed_count += 1
+            cat_id = p['category_id']
+            new_products_by_category[cat_id] = new_products_by_category.get(cat_id, 0) + 1
+
+    return updated_products, changed_count, new_products_by_category
+
+# ==============================================================================
 # --- تابع اصلی ---
 # ==============================================================================
 def main():
@@ -627,7 +647,7 @@ def main():
         return
     logger.info(f"✅ مرحله 1: بارگذاری دسته‌بندی‌ها کامل شد. تعداد: {len(all_cats)}")
 
-    SELECTED_IDS_STRING = "1582:14548-allz,1584-all-allz|16777:all-allz|4882:all-allz|16778:22570-all-allz"
+    SELECTED_IDS_STRING = "16777:all-allz|4882:all-allz|16778:22570-all-allz"
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
     logger.info(f"✅ انتخاب‌های دلخواه: {parsed_selection}")
 
@@ -693,18 +713,7 @@ def main():
     print_products_tree(all_products, filtered_categories)
 
     # --- ادغام کش و آمار محصولات جدید بر اساس دسته ---
-    updated_products = {}
-    changed_count = 0
-    new_products_by_category = {}
-
-    for key, p in all_products.items():
-        if key in cached_products and cached_products[key]['price'] == p['price'] and cached_products[key]['stock'] == p['stock'] and cached_products[key]['specs'] == p['specs']:
-            updated_products[key] = cached_products[key]
-        else:
-            updated_products[key] = p
-            changed_count += 1
-            cat_id = p['category_id']
-            new_products_by_category[cat_id] = new_products_by_category.get(cat_id, 0) + 1
+    updated_products, changed_count, new_products_by_category = merge_products_with_cache(all_products, cached_products)
 
     logger.info(f"✅ مرحله 7: ادغام با کش کامل شد. تعداد محصولات تغییرشده/جدید برای ارسال: {changed_count}")
 
