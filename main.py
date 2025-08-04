@@ -17,7 +17,7 @@ from collections import defaultdict
 # ==============================================================================
 # --- تنظیمات ---
 # ==============================================================================
-FORCE_REFRESH_CACHE = False  # اگر True باشد، کش نادیده گرفته می‌شود و همه چیز تازه استخراج می‌شود
+FORCE_REFRESH_CACHE = True  # کش نادیده گرفته می‌شود و استخراج تازه انجام می‌شود
 
 # ==============================================================================
 # --- توابع انتخاب منعطف با SELECTED_IDS_STRING ---
@@ -652,7 +652,7 @@ def main():
         return
     logger.info(f"✅ مرحله 1: بارگذاری دسته‌بندی‌ها کامل شد. تعداد: {len(all_cats)}")
 
-    SELECTED_IDS_STRING = "16777:all-allz"
+    SELECTED_IDS_STRING = "16777:all-allz|4882:all-allz|16778:22570-all-allz"
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
     logger.info(f"✅ انتخاب‌های دلخواه: {parsed_selection}")
 
