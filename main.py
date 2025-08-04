@@ -508,7 +508,8 @@ def _send_to_woocommerce(sku, data, stats):
                 "stock_quantity": data["stock_quantity"],
                 "stock_status": data["stock_status"],
                 "attributes": data["attributes"],
-                "tags": data.get("tags", [])
+                "tags": data.get("tags", []),
+                "categories": data["categories"]
             }
             logger.debug(f"   - آپدیت محصول {product_id} با {len(update_data['attributes'])} مشخصه فنی...")
             res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=update_data, verify=False, timeout=20)
@@ -593,17 +594,24 @@ def smart_tags_for_product(product, cat_map):
     return [{"name": t} for t in sorted(tags)]
 
 # ==============================================================================
-# --- ارسال محصول به ووکامرس با برچسب هوشمند ---
+# --- ارسال محصول به ووکامرس با برچسب هوشمند و چند دسته ---
 # ==============================================================================
 def process_product_wrapper(args):
-    product, stats, category_mapping, cat_map = args
+    product, stats, category_mapping, cat_map, all_products = args
     try:
-        wc_cat_id = category_mapping.get(product.get('category_id'))
-        if not wc_cat_id:
-            logger.warning(f"   ⚠️ دسته برای محصول {product.get('id')} پیدا نشد. رد کردن...")
+        # پیدا کردن همه دسته‌های ووکامرس برای این محصول
+        all_cats_for_this_product = [
+            category_mapping.get(p['category_id'])
+            for k, p in all_products.items()
+            if p['id'] == product['id']
+        ]
+        all_cats_for_this_product = list(set([c for c in all_cats_for_this_product if c]))  # حذف تکراری و None
+        if not all_cats_for_this_product:
+            logger.warning(f"   ⚠️ هیچ دسته‌ای برای محصول {product.get('id')} پیدا نشد. رد کردن...")
             with stats['lock']:
                 stats['no_category'] = stats.get('no_category', 0) + 1
             return
+
         specs = product.get('specs', {})
         if not specs:
             logger.warning(f"   ⚠️ مشخصات برای محصول {product.get('id')} خالی است. ارسال بدون attributes.")
@@ -626,7 +634,7 @@ def process_product_wrapper(args):
             "type": "simple",
             "sku": f"EWAYS-{product.get('id')}",
             "regular_price": process_price(product.get('price', 0)),
-            "categories": [{"id": wc_cat_id}],
+            "categories": [{"id": cid} for cid in all_cats_for_this_product],
             "images": [{"src": product.get("image")}] if product.get("image") else [],
             "stock_quantity": product.get('stock', 0),
             "manage_stock": True,
@@ -793,7 +801,7 @@ def main():
                 product = product_queue.get_nowait()
             except Exception:
                 break
-            process_product_wrapper((product, stats, category_mapping, cat_map))
+            process_product_wrapper((product, stats, category_mapping, cat_map, all_products))
             product_queue.task_done()
 
     num_workers = 3
