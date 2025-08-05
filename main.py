@@ -272,7 +272,9 @@ def get_products_from_category_page(session, category_id, delay=0.5):
     seen_product_ids = set()
     page_num = 1
     error_count = 0
-    max_pages = 100  # افزایش برای دسته‌های بزرگ
+    consecutive_empty_pages = 0
+    max_consecutive_empty = 3  # حداکثر صفحات تکراری متوالی قبل از توقف
+    max_pages = 200  # محدودیت کلی
     while page_num <= max_pages:
         url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id, page=page_num)
         logger.info(f"  - در حال دریافت محصولات از صفحه {page_num}: {url}")
@@ -293,6 +295,12 @@ def get_products_from_category_page(session, category_id, delay=0.5):
             current_page_product_ids = []
             for block in product_blocks:
                 try:
+                    # چک برای ناموجود: اگر شامل کلاس noCount-desc و متن "ناموجود" باشه، رد کن
+                    no_count = block.select_one(".noCount-desc")
+                    if no_count and "ناموجود" in no_count.text.strip():
+                        logger.debug(f"      - محصول ناموجود رد شد (کلاس noCount-desc تشخیص داده شد).")
+                        continue
+
                     unavailable = block.select_one(".goods-record-unavailable") is not None
                     a_tag = block.select_one("a")
                     href = a_tag['href'] if a_tag else None
@@ -313,7 +321,7 @@ def get_products_from_category_page(session, category_id, delay=0.5):
                     price = re.sub(r'[^\d]', '', price_raw) or "0"
                     image_tag = block.select_one("img.goods-record-image")
                     image_url = image_tag.get('data-src', '') or image_tag.get('src', '') if image_tag else ''
-                    # مدیریت unavailable: stock=0 قرار می‌دهیم اما استخراج می‌کنیم
+                    # مدیریت unavailable: اگر unavailable باشه اما ناموجود نباشه، stock=0
                     stock = 0 if unavailable else 1
                     if unavailable:
                         logger.debug(f"      - محصول {product_id} unavailable اما استخراج شد (stock=0).")
@@ -339,7 +347,13 @@ def get_products_from_category_page(session, category_id, delay=0.5):
                 except Exception as e:
                     logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
             if not current_page_product_ids:
-                logger.info("    - صفحه تکراری یا بدون محصول جدید، ادامه به صفحه بعدی.")
+                consecutive_empty_pages += 1
+                logger.info(f"    - صفحه تکراری یا بدون محصول جدید (متوالی: {consecutive_empty_pages})، ادامه به صفحه بعدی.")
+                if consecutive_empty_pages >= max_consecutive_empty:
+                    logger.info(f"    - {max_consecutive_empty} صفحه متوالی بدون محصول جدید. توقف زودرس صفحه‌بندی.")
+                    break
+            else:
+                consecutive_empty_pages = 0  # ریست شمارنده اگر محصول جدیدی پیدا شد
             page_num += 1
             time.sleep(random.uniform(delay, delay + 0.2))
             error_count = 0
@@ -673,7 +687,7 @@ def main():
         return
     logger.info(f"✅ مرحله 1: بارگذاری دسته‌بندی‌ها کامل شد. تعداد: {len(all_cats)}")
 
-    SELECTED_IDS_STRING = "16777:all-allz"
+    SELECTED_IDS_STRING = "16777:all-allz|4882:all-allz|16778:22570-all-allz"
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
     logger.info(f"✅ انتخاب‌های دلخواه: {parsed_selection}")
 
