@@ -263,127 +263,129 @@ MAX_ERRORS_PER_CATEGORY = 3
     wait=wait_random_exponential(multiplier=1, max=10),
     reraise=True
 )
-def get_products_from_category_page(session, category_id, max_pages=10, delay=0.5):
+def get_products_from_category_page(session, category_id, max_pages=20, delay=0.5):
     all_products_in_category = []
     seen_product_ids = set()
     page_num = 1
     error_count = 0
+    page_size = 24  # طبق پارامتر PageSize
     while page_num <= max_pages:
-        url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id, page=page_num)
-        logger.info(f"  - در حال دریافت محصولات از: {url}")
-        try:
+        if page_num == 1:
+            # صفحه اول: همان GET قبلی
+            url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id, page=1)
+            logger.info(f"  - در حال دریافت محصولات صفحه اول از: {url}")
             response = session.get(url, timeout=30)
             if response.status_code in [429, 503, 403]:
                 raise requests.exceptions.HTTPError(f"Blocked or rate limited: {response.status_code}", response=response)
             if response.status_code != 200: break
-
-            # تلاش برای پارس JSON (در صورت وجود)
-            is_json = False
-            product_blocks = []
-            try:
-                data = response.json()
-                # اگر محصولات در JSON هستند، اینجا پارس کنید
-                # فرض: data['products'] یا data['Items'] لیست محصولات است
-                if 'products' in data:
-                    product_blocks = data['products']
-                    is_json = True
-                elif 'Items' in data:
-                    product_blocks = data['Items']
-                    is_json = True
-            except Exception:
-                pass  # اگر JSON نبود، فرض می‌کنیم HTML است
-
-            if not is_json:
-                # اگر JSON نبود، فرض می‌کنیم HTML است
-                soup = BeautifulSoup(response.text, 'lxml')
-                product_blocks = soup.select(".goods-record")
-
+            soup = BeautifulSoup(response.text, 'lxml')
+            product_blocks = soup.select(".goods-record")
             logger.info(f"    - تعداد بلاک‌های محصول پیدا شده: {len(product_blocks)}")
-            if not product_blocks:
-                logger.info("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی.")
-                break
-
-            current_page_product_ids = []
             for block in product_blocks:
                 try:
-                    if is_json:
-                        # فرض: block یک dict است
-                        product_id = str(block.get('id') or block.get('ID') or block.get('ProductID'))
-                        name = block.get('name') or block.get('Name') or block.get('title')
-                        price = str(block.get('price', '0') or block.get('Price', '0'))
-                        image_url = block.get('image', '') or block.get('Image', '') or block.get('image_url', '')
-                        if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
-                            continue
-                        if not name:
-                            continue
-                        if int(price) <= 0:
-                            continue
-                        stock = 1
-                        specs = get_product_details(session, category_id, product_id)
-                        time.sleep(random.uniform(delay, delay + 0.2))
-                        product = {
-                            "id": product_id,
-                            "name": name,
-                            "price": price,
-                            "stock": stock,
-                            "image": image_url,
-                            "category_id": category_id,
-                            "specs": specs
-                        }
-                    else:
-                        unavailable = block.select_one(".goods-record-unavailable")
-                        if unavailable:
-                            continue
-                        a_tag = block.select_one("a")
-                        href = a_tag['href'] if a_tag else None
-                        product_id = None
-                        if href:
-                            match = re.search(r'/Store/Detail/\d+/(\d+)', href)
-                            product_id = match.group(1) if match else None
-                        if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
-                            continue
-                        name_tag = block.select_one("span.goods-record-title")
-                        name = name_tag.text.strip() if name_tag else None
-                        price_tag = block.select_one("span.goods-record-price")
-                        price_text = price_tag.text.strip() if price_tag else ""
-                        price = re.sub(r'[^\d]', '', price_text) if price_text else "0"
-                        image_tag = block.select_one("img.goods-record-image")
-                        image_url = image_tag.get('data-src', '') if image_tag else ''
-                        if not name:
-                            continue
-                        if int(price) <= 0:
-                            continue
-                        stock = 1
-                        specs = get_product_details(session, category_id, product_id)
-                        time.sleep(random.uniform(delay, delay + 0.2))
-                        product = {
-                            "id": product_id,
-                            "name": name,
-                            "price": price,
-                            "stock": stock,
-                            "image": image_url,
-                            "category_id": category_id,
-                            "specs": specs
-                        }
+                    unavailable = block.select_one(".goods-record-unavailable")
+                    if unavailable:
+                        continue
+                    a_tag = block.select_one("a")
+                    href = a_tag['href'] if a_tag else None
+                    product_id = None
+                    if href:
+                        match = re.search(r'/Store/Detail/\d+/(\d+)', href)
+                        product_id = match.group(1) if match else None
+                    if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
+                        continue
+                    name_tag = block.select_one("span.goods-record-title")
+                    name = name_tag.text.strip() if name_tag else None
+                    price_tag = block.select_one("span.goods-record-price")
+                    price_text = price_tag.text.strip() if price_tag else ""
+                    try:
+                        price = float(re.sub(r'[^\d.]', '', price_text)) if price_text else 0
+                    except Exception:
+                        price = 0
+                    image_tag = block.select_one("img.goods-record-image")
+                    image_url = image_tag.get('data-src', '') if image_tag else ''
+                    if not name or price <= 0:
+                        continue
+                    stock = 1
+                    specs = get_product_details(session, category_id, product_id)
+                    time.sleep(random.uniform(delay, delay + 0.2))
+                    product = {
+                        "id": product_id,
+                        "name": name,
+                        "price": str(int(price)),
+                        "stock": stock,
+                        "image": image_url,
+                        "category_id": category_id,
+                        "specs": specs
+                    }
                     seen_product_ids.add(product_id)
-                    current_page_product_ids.append(product_id)
                     all_products_in_category.append(product)
                     logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']} و {len(product['specs'])} مشخصه فنی.")
                 except Exception as e:
                     logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
-            if not current_page_product_ids:
-                logger.info("    - محصول جدیدی در این صفحه یافت نشد، توقف صفحه‌بندی.")
+        else:
+            # صفحات بعدی: POST به /Store/ListLazy
+            url = f"{BASE_URL}/Store/ListLazy"
+            payload = {
+                "ListViewType": 0,
+                "CatId": category_id,
+                "Order": 2,
+                "Sort": 2,
+                "LazyPageIndex": page_num,
+                "PageIndex": 0,
+                "PageSize": page_size,
+                "Available": 0,
+                "MinPrice": 0,
+                "MaxPrice": 10000000000,
+                "IsLazyLoading": "true"
+            }
+            logger.info(f"  - در حال دریافت محصولات صفحه {page_num} (Ajax) از: {url}")
+            response = session.post(url, data=payload, timeout=30)
+            if response.status_code in [429, 503, 403]:
+                raise requests.exceptions.HTTPError(f"Blocked or rate limited: {response.status_code}", response=response)
+            if response.status_code != 200: break
+            try:
+                data = response.json()
+                goods = data.get("Goods", [])
+            except Exception as e:
+                logger.error(f"    - خطا در پارس JSON صفحه {page_num}: {e}")
                 break
-            page_num += 1
-            time.sleep(random.uniform(delay, delay + 0.2))
-            error_count = 0
-        except Exception as e:
-            error_count += 1
-            logger.error(f"    - خطا در پردازش صفحه محصولات: {e} (تعداد خطا: {error_count})")
-            if error_count >= MAX_ERRORS_PER_CATEGORY:
-                logger.critical(f"🚨 تعداد خطاهای متوالی در دسته {category_id} به {error_count} رسید! توقف پردازش این دسته.")
+            logger.info(f"    - تعداد محصولات دریافت‌شده در این صفحه: {len(goods)}")
+            if not goods:
+                logger.info("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی.")
                 break
-            time.sleep(2)
+            for item in goods:
+                try:
+                    product_id = str(item.get("Id"))
+                    if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
+                        continue
+                    name = item.get("Name")
+                    try:
+                        price = float(item.get("Price", 0))
+                    except Exception:
+                        price = 0
+                    image_url = item.get("ImageUrl", "")
+                    if not name or price <= 0:
+                        continue
+                    stock = 1
+                    specs = get_product_details(session, category_id, product_id)
+                    time.sleep(random.uniform(delay, delay + 0.2))
+                    product = {
+                        "id": product_id,
+                        "name": name,
+                        "price": str(int(price)),
+                        "stock": stock,
+                        "image": image_url,
+                        "category_id": category_id,
+                        "specs": specs
+                    }
+                    seen_product_ids.add(product_id)
+                    all_products_in_category.append(product)
+                    logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']} و {len(product['specs'])} مشخصه فنی.")
+                except Exception as e:
+                    logger.warning(f"      - خطا در پردازش یک محصول Ajax: {e}. رد شدن...")
+        page_num += 1
+        time.sleep(random.uniform(delay, delay + 0.2))
     logger.info(f"    - تعداد کل محصولات استخراج‌شده از دسته {category_id}: {len(all_products_in_category)}")
     return all_products_in_category
 
@@ -603,7 +605,7 @@ def smart_tags_for_product(product, cat_map):
     specs = product.get('specs', {})
     cat_id = product.get('category_id')
     cat_name = cat_map.get(cat_id, '').strip()
-    price = int(product.get('price', 0))
+    price = int(float(product.get('price', 0)))
 
     name_parts = [w for w in re.split(r'\s+', name) if w and len(w) > 2]
     common_words = {'گوشی', 'موبایل', 'تبلت', 'لپتاپ', 'لپ‌تاپ', 'مدل', 'محصول', 'کالا', 'جدید'}
@@ -744,7 +746,7 @@ def main():
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_catid = {}
         for cat_id in selected_ids:
-            future = executor.submit(get_products_from_category_page, session, cat_id, 10, delay)
+            future = executor.submit(get_products_from_category_page, session, cat_id, 20, delay)
             future_to_catid[future] = cat_id
 
         pbar = tqdm(total=len(selected_ids), desc="دریافت محصولات دسته‌ها")
