@@ -93,6 +93,8 @@ logger.addHandler(handler)
 # ==============================================================================
 BASE_URL = "https://panel.eways.co"
 SOURCE_CATS_API_URL = f"{BASE_URL}/Store/GetCategories"
+PRODUCT_LIST_URL_TEMPLATE = f"{BASE_URL}/Store/List/{{category_id}}/2/2/0/0/0/10000000000?page={{page}}"
+LAZY_LOAD_URL = f"{BASE_URL}/Store/ListLazy"
 PRODUCT_DETAIL_URL_TEMPLATE = f"{BASE_URL}/Store/Detail/{{cat_id}}/{{product_id}}"
 
 WC_API_URL = os.environ.get("WC_API_URL") or "https://your-woocommerce-site.com/wp-json/wc/v3"
@@ -142,8 +144,49 @@ def login_eways(username, password):
         return None
 
 # ==============================================================================
-# --- تابع دریافت دسته‌بندی‌ها (کامل) ---
+# --- توابع مربوط به سایت مبدا (eways) ---
 # ==============================================================================
+
+@retry(
+    retry=retry_if_exception_type(requests.exceptions.RequestException),
+    stop=stop_after_attempt(5),
+    wait=wait_random_exponential(multiplier=1, max=5),
+    reraise=True
+)
+def get_product_details(session, cat_id, product_id):
+    url = PRODUCT_DETAIL_URL_TEMPLATE.format(cat_id=cat_id, product_id=product_id)
+    try:
+        response = session.get(url, timeout=60)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'lxml')
+        specs_table = soup.select_one('#link1 .table-responsive table')
+        if not specs_table:
+            specs_table = soup.select_one('.table-responsive table')
+            if not specs_table:
+                specs_table = soup.find('table', class_='table')
+                if not specs_table:
+                    logger.debug(f"      - هیچ جدولی پیدا نشد. HTML خام صفحه: {soup.prettify()[:1000]}...")
+                    return {}
+        specs = {}
+        rows = specs_table.find_all("tr")
+        for row in rows:
+            cells = row.find_all("td")
+            if len(cells) == 2:
+                key = cells[0].text.strip()
+                value = cells[1].text.strip()
+                if key and value:
+                    specs[key] = value
+        if not specs:
+            logger.debug(f"      - هیچ ردیفی در جدول پیدا نشد. HTML خام جدول: {specs_table.prettify()}")
+        logger.debug(f"      - مشخصات استخراج‌شده برای {product_id} (کامل): {json.dumps(specs, ensure_ascii=False, indent=4)}")
+        return specs
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: {e}. Retry...")
+        raise
+    except Exception as e:
+        logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
+        return {}
+
 def get_and_parse_categories(session):
     logger.info(f"⏳ دریافت دسته‌بندی‌ها از: {SOURCE_CATS_API_URL}")
     try:
@@ -210,47 +253,10 @@ def get_and_parse_categories(session):
         return None
 
 # ==============================================================================
-# --- گرفتن محصولات هر دسته فقط با AJAX و فقط محصولات موجود ---
+# --- گرفتن محصولات هر دسته با کنترل خطا و @retry (با AJAX برای همه صفحات، فیلتر نرم‌تر) ---
 # ==============================================================================
-@retry(
-    retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)),
-    stop=stop_after_attempt(4),
-    wait=wait_random_exponential(multiplier=1, max=10),
-    reraise=True
-)
-def get_product_details(session, cat_id, product_id):
-    url = PRODUCT_DETAIL_URL_TEMPLATE.format(cat_id=cat_id, product_id=product_id)
-    try:
-        response = session.get(url, timeout=60)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'lxml')
-        specs_table = soup.select_one('#link1 .table-responsive table')
-        if not specs_table:
-            specs_table = soup.select_one('.table-responsive table')
-            if not specs_table:
-                specs_table = soup.find('table', class_='table')
-                if not specs_table:
-                    logger.debug(f"      - هیچ جدولی پیدا نشد. HTML خام صفحه: {soup.prettify()[:1000]}...")
-                    return {}
-        specs = {}
-        rows = specs_table.find_all("tr")
-        for row in rows:
-            cells = row.find_all("td")
-            if len(cells) == 2:
-                key = cells[0].text.strip()
-                value = cells[1].text.strip()
-                if key and value:
-                    specs[key] = value
-        if not specs:
-            logger.debug(f"      - هیچ ردیفی در جدول پیدا نشد. HTML خام جدول: {specs_table.prettify()}")
-        logger.debug(f"      - مشخصات استخراج‌شده برای {product_id} (کامل): {json.dumps(specs, ensure_ascii=False, indent=4)}")
-        return specs
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: {e}. Retry...")
-        raise
-    except Exception as e:
-        logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
-        return {}
+
+MAX_ERRORS_PER_CATEGORY = 3
 
 @retry(
     retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)),
@@ -258,76 +264,102 @@ def get_product_details(session, cat_id, product_id):
     wait=wait_random_exponential(multiplier=1, max=10),
     reraise=True
 )
-def get_products_from_category_page(session, category_id, max_pages=30, delay=0.5):
+def get_products_from_category_page(session, category_id, max_pages=50, delay=0.5):
     all_products_in_category = []
     seen_product_ids = set()
+    lazy_page_index = 1  # شروع از صفحه 1
     page_size = 24
-    page_num = 1
+    error_count = 0
 
-    while True:
-        url = f"{BASE_URL}/Store/ListLazy"
+    while lazy_page_index <= max_pages:
         payload = {
             "ListViewType": 0,
             "CatId": category_id,
             "Order": 2,
             "Sort": 2,
-            "LazyPageIndex": page_num,
+            "LazyPageIndex": lazy_page_index,
             "PageIndex": 0,
             "PageSize": page_size,
             "Available": 0,
             "MinPrice": 0,
             "MaxPrice": 10000000000,
-            "IsLazyLoading": "true"
+            "IsLazyLoading": True
         }
-        logger.info(f"  - دریافت صفحه {page_num} (Ajax) از: {url}")
-        response = session.post(url, data=payload, timeout=30)
-        if response.status_code != 200:
-            logger.error(f"    - خطا در دریافت صفحه {page_num}: {response.status_code}")
-            break
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "application/json, text/javascript, */*; q=0.01"
+        }
+        logger.info(f"    - درخواست AJAX برای صفحه {lazy_page_index}: {LAZY_LOAD_URL}")
         try:
+            response = session.post(LAZY_LOAD_URL, data=payload, headers=headers, timeout=30)
+            if response.status_code in [429, 503, 403]:
+                raise requests.exceptions.HTTPError(f"Blocked or rate limited: {response.status_code}", response=response)
+            response.raise_for_status()
             data = response.json()
-            goods = data.get("Goods", [])
-        except Exception as e:
-            logger.error(f"    - خطا در پارس JSON صفحه {page_num}: {e}")
-            break
-        logger.info(f"    - تعداد محصولات این صفحه: {len(goods)}")
-        if not goods:
-            break
-        for item in goods:
-            try:
-                product_id = str(item.get("Id"))
-                if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
+            products = data.get("Goods", [])
+            next_lazy_index = data.get("LazyPageIndex", lazy_page_index + 1)  # صفحه بعدی از پاسخ
+
+            logger.info(f"    - تعداد محصولات در صفحه {lazy_page_index}: {len(products)}")
+            if not products:
+                logger.info("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی.")
+                break
+
+            current_page_product_ids = []
+            for p in products:
+                product_id = str(p.get("Id"))
+                if not product_id or product_id in seen_product_ids:
+                    logger.debug(f"      - محصول skip شد: ID نامعتبر یا تکراری ({product_id}).")
                     continue
-                name = item.get("Name")
-                try:
-                    price = float(item.get("Price", 0))
-                except Exception:
-                    price = 0
-                image_url = item.get("ImageUrl", "")
-                stock = int(item.get("Stock", 0))
-                # فقط محصولات موجود
-                if not name or price <= 0 or not image_url or stock <= 0:
+
+                price_text = str(p.get("Price", 0))
+                price = re.sub(r'[^\d]', '', price_text) if price_text else "0"
+                if int(price) <= 0:
+                    logger.debug(f"      - محصول skip شد: قیمت نامعتبر یا صفر ({price}).")
                     continue
+
+                name = p.get("Name", "").strip()
+                image_url = p.get("ImageUrl", "")
+                if not name:
+                    logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name})")
+                    continue
+
+                # فرض بر موجودی 1 اگر قیمت >0 (چون Availability/Stock در JSON نامعتبر است)
+                stock = 1
+
                 specs = get_product_details(session, category_id, product_id)
                 time.sleep(random.uniform(delay, delay + 0.2))
+
                 product = {
                     "id": product_id,
                     "name": name,
-                    "price": str(int(price)),
+                    "price": price,
                     "stock": stock,
                     "image": image_url,
                     "category_id": category_id,
                     "specs": specs
                 }
                 seen_product_ids.add(product_id)
+                current_page_product_ids.append(product_id)
                 all_products_in_category.append(product)
-            except Exception as e:
-                logger.warning(f"      - خطا در پردازش محصول Ajax: {e}")
-        if len(goods) < page_size:
-            break
-        page_num += 1
-        time.sleep(random.uniform(delay, delay + 0.2))
-    logger.info(f"    - تعداد کل محصولات موجود استخراج‌شده از دسته {category_id}: {len(all_products_in_category)}")
+                logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']} و {len(specs)} مشخصه فنی.")
+
+            if not current_page_product_ids:
+                logger.info("    - محصول جدیدی در این صفحه یافت نشد، توقف صفحه‌بندی.")
+                break
+
+            lazy_page_index = next_lazy_index
+            time.sleep(random.uniform(delay, delay + 0.2))
+            error_count = 0
+        except Exception as e:
+            error_count += 1
+            logger.error(f"    - خطا در پردازش صفحه AJAX {lazy_page_index}: {e} (تعداد خطا: {error_count})")
+            if error_count >= MAX_ERRORS_PER_CATEGORY:
+                logger.critical(f"🚨 تعداد خطاهای متوالی در دسته {category_id} به {error_count} رسید! توقف پردازش این دسته.")
+                break
+            time.sleep(2)
+
+    logger.info(f"    - تعداد کل محصولات استخراج‌شده از دسته {category_id}: {len(all_products_in_category)}")
     return all_products_in_category
 
 # ==============================================================================
@@ -546,7 +578,7 @@ def smart_tags_for_product(product, cat_map):
     specs = product.get('specs', {})
     cat_id = product.get('category_id')
     cat_name = cat_map.get(cat_id, '').strip()
-    price = int(float(product.get('price', 0)))
+    price = int(product.get('price', 0))
 
     name_parts = [w for w in re.split(r'\s+', name) if w and len(w) > 2]
     common_words = {'گوشی', 'موبایل', 'تبلت', 'لپتاپ', 'لپ‌تاپ', 'مدل', 'محصول', 'کالا', 'جدید'}
@@ -687,7 +719,7 @@ def main():
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_catid = {}
         for cat_id in selected_ids:
-            future = executor.submit(get_products_from_category_page, session, cat_id, 20, delay)
+            future = executor.submit(get_products_from_category_page, session, cat_id, 50, delay)
             future_to_catid[future] = cat_id
 
         pbar = tqdm(total=len(selected_ids), desc="دریافت محصولات دسته‌ها")
