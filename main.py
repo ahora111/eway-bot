@@ -337,8 +337,8 @@ def get_products_from_category_page(session, category_id, max_pages=100, delay=0
             if not current_page_product_ids:
                 logger.info("    - هیچ محصول جدیدی در این صفحه نبود. پایان صفحه‌بندی.")
                 break
-            if len(product_blocks) < 24:
-                logger.info("    - تعداد محصولات این صفحه کمتر از 24 است. پایان صفحه‌بندی.")
+            if len(product_blocks) < 96:
+                logger.info("    - تعداد محصولات این صفحه کمتر از 96 است. پایان صفحه‌بندی.")
                 break
 
             page_num += 1
