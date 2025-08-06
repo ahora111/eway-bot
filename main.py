@@ -93,7 +93,7 @@ logger.addHandler(handler)
 # ==============================================================================
 BASE_URL = "https://panel.eways.co"
 SOURCE_CATS_API_URL = f"{BASE_URL}/Store/GetCategories"
-PRODUCT_LIST_URL_TEMPLATE = f"{BASE_URL}/Store/List/{{category_id}}/2/2/0/0/0/10000000000?page={{page}}"
+PRODUCT_LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
 PRODUCT_DETAIL_URL_TEMPLATE = f"{BASE_URL}/Store/Detail/{{cat_id}}/{{product_id}}"
 
 WC_API_URL = os.environ.get("WC_API_URL") or "https://your-woocommerce-site.com/wp-json/wc/v3"
@@ -252,7 +252,7 @@ def get_and_parse_categories(session):
         return None
 
 # ==============================================================================
-# --- گرفتن محصولات هر دسته با کنترل خطا و @retry و صفحه‌بندی هوشمند و مرتب‌سازی ---
+# --- گرفتن محصولات هر دسته با ListLazy (جدید) ---
 # ==============================================================================
 
 MAX_ERRORS_PER_CATEGORY = 3
@@ -265,83 +265,84 @@ MAX_ERRORS_PER_CATEGORY = 3
 )
 def get_products_from_category_page(session, category_id, max_pages=100, delay=0.5):
     all_products_in_category = {}
-    page_num = 1
+    page_size = 24
+    lazy_page_index = 1
     error_count = 0
-    while page_num <= max_pages:
-        url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id, page=page_num)
-        logger.info(f"  - در حال دریافت محصولات از: {url}")
+    while lazy_page_index <= max_pages:
+        payload = {
+            'ListViewType': 0,
+            'CatId': category_id,
+            'Order': 2,
+            'Sort': 2,
+            'LazyPageIndex': lazy_page_index,
+            'PageIndex': 0,
+            'PageSize': page_size,
+            'Available': 0,
+            'MinPrice': 0,
+            'MaxPrice': 10000000000,
+            'IsLazyLoading': 'true'
+        }
+        logger.info(f"  - در حال دریافت محصولات (LazyPageIndex={lazy_page_index}) از: {PRODUCT_LIST_LAZY_URL}")
         try:
-            response = session.get(url, timeout=30)
+            response = session.post(PRODUCT_LIST_LAZY_URL, data=payload, timeout=30)
             if response.status_code in [429, 503, 403]:
                 raise requests.exceptions.HTTPError(f"Blocked or rate limited: {response.status_code}", response=response)
             if response.status_code != 200:
                 logger.warning(f"    - وضعیت HTTP غیرمنتظره: {response.status_code}")
                 break
-            soup = BeautifulSoup(response.text, 'lxml')
-            product_blocks = soup.select("div.col-lg-3.col-md-4.col-sm-6.goods-p")
-            logger.info(f"    - تعداد بلاک‌های محصول پیدا شده: {len(product_blocks)}")
-            if not product_blocks:
+            data = response.json()
+            products = data.get('Products', []) or data.get('products', [])
+            logger.info(f"    - تعداد محصولات دریافت‌شده در این صفحه: {len(products)}")
+            if not products:
                 logger.info("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی.")
                 break
 
             current_page_product_ids = []
 
-            for block in product_blocks:
+            for p in products:
                 # بررسی ناموجود بودن
-                desc_count = block.select_one(".goods-item-desc-count")
-                if desc_count:
-                    desc_text = desc_count.get_text(strip=True)
-                    if "0 عدد در انبار باقیست" in desc_text:
-                        continue  # این محصول ناموجود است
+                # اگر فیلد خاصی برای موجودی داری، اینجا چک کن. اگر نه، فرض کن همه محصولات موجودند مگر اینکه در توضیحاتش "0 عدد در انبار باقیست" باشد.
+                stock = 1
+                name = p.get('Name') or p.get('name') or ''
+                product_id = p.get('Id') or p.get('id') or ''
+                price = p.get('Price') or p.get('price') or ''
+                image_url = p.get('Image') or p.get('image') or p.get('ImageUrl') or ''
+                # اگر فیلد توضیحات یا موجودی داری، اینجا چک کن:
+                desc = p.get('Description', '') or p.get('description', '')
+                if "0 عدد در انبار باقیست" in desc:
+                    continue  # ناموجود
 
-                # ادامه استخراج اطلاعات محصول (همانند قبل)
-                try:
-                    a_tag = block.select_one("a")
-                    href = a_tag['href'] if a_tag else None
-                    product_id = None
-                    if href:
-                        match = re.search(r'/Store/Detail/\d+/(\d+)', href)
-                        product_id = match.group(1) if match else None
-                    if not product_id:
-                        continue
-                    key = f"{product_id}|{category_id}"
-                    if key in all_products_in_category:
-                        continue
-                    name_tag = block.select_one("span.goods-record-title")
-                    name = name_tag.text.strip() if name_tag else None
-                    price_tag = block.select_one("span.goods-record-price")
-                    price = re.sub(r'[^\d]', '', price_tag.text.strip()) if price_tag else None
-                    image_tag = block.select_one("img.goods-record-image")
-                    image_url = image_tag.get('data-src', '') if image_tag else ''
-                    if not name or not price or int(price) <= 0:
-                        logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name}, قیمت: {price})")
-                        continue
-                    stock = 1
-                    specs = get_product_details(session, category_id, product_id)
-                    time.sleep(random.uniform(delay, delay + 0.2))
-                    product = {
-                        "id": product_id,
-                        "name": name,
-                        "price": price,
-                        "stock": stock,
-                        "image": image_url,
-                        "category_id": category_id,
-                        "specs": specs
-                    }
-                    all_products_in_category[key] = product
-                    current_page_product_ids.append(product_id)
-                    logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']} و {len(specs)} مشخصه فنی.")
-                except Exception as e:
-                    logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
+                if not name or not price or int(re.sub(r'[^\d]', '', str(price))) <= 0:
+                    logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name}, قیمت: {price})")
+                    continue
+
+                # واکشی مشخصات فنی (در صورت نیاز)
+                specs = get_product_details(session, category_id, product_id)
+                time.sleep(random.uniform(delay, delay + 0.2))
+                key = f"{product_id}|{category_id}"
+                if key in all_products_in_category:
+                    continue
+                product = {
+                    "id": product_id,
+                    "name": name,
+                    "price": str(price),
+                    "stock": stock,
+                    "image": image_url,
+                    "category_id": category_id,
+                    "specs": specs
+                }
+                all_products_in_category[key] = product
+                current_page_product_ids.append(product_id)
+                logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']} و {len(specs)} مشخصه فنی.")
 
             if not current_page_product_ids:
                 logger.info("    - هیچ محصول جدیدی در این صفحه نبود. پایان صفحه‌بندی.")
                 break
-            if len(product_blocks) < 96:
-                logger.info("    - تعداد محصولات این صفحه کمتر از 96 است. پایان صفحه‌بندی.")
+            if len(products) < page_size:
+                logger.info(f"    - تعداد محصولات این صفحه کمتر از {page_size} است. پایان صفحه‌بندی.")
                 break
 
-            page_num += 1
+            lazy_page_index += 1
             time.sleep(random.uniform(delay, delay + 0.2))
             error_count = 0
         except Exception as e:
