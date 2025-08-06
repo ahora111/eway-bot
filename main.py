@@ -278,36 +278,23 @@ def get_products_from_category_page(session, category_id, max_pages=100, delay=0
                 logger.warning(f"    - وضعیت HTTP غیرمنتظره: {response.status_code}")
                 break
             soup = BeautifulSoup(response.text, 'lxml')
-            product_blocks = soup.select(".goods_item.goods-record")
+            product_blocks = soup.select("div.col-lg-3.col-md-4.col-sm-6.goods-p")
             logger.info(f"    - تعداد بلاک‌های محصول پیدا شده: {len(product_blocks)}")
             if not product_blocks:
                 logger.info("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی.")
                 break
 
-            # --- مرتب‌سازی محصولات موجود بر اساس قیمت ---
-            available_blocks = []
-            unavailable_blocks = []
-            for block in product_blocks:
-                if block.select_one(".goods-record-unavailable"):
-                    unavailable_blocks.append(block)
-                else:
-                    available_blocks.append(block)
-
-            def get_price(block):
-                price_tag = block.select_one("span.goods-record-price")
-                if price_tag:
-                    try:
-                        return int(re.sub(r'[^\d]', '', price_tag.text.strip()))
-                    except:
-                        return 0
-                return 0
-
-            available_blocks.sort(key=get_price)  # از کم به زیاد
-
             current_page_product_ids = []
 
-            # پردازش محصولات موجود
-            for block in available_blocks:
+            for block in product_blocks:
+                # بررسی ناموجود بودن
+                desc_count = block.select_one(".goods-item-desc-count")
+                if desc_count:
+                    desc_text = desc_count.get_text(strip=True)
+                    if "0 عدد در انبار باقیست" in desc_text:
+                        continue  # این محصول ناموجود است
+
+                # ادامه استخراج اطلاعات محصول (همانند قبل)
                 try:
                     a_tag = block.select_one("a")
                     href = a_tag['href'] if a_tag else None
@@ -347,11 +334,6 @@ def get_products_from_category_page(session, category_id, max_pages=100, delay=0
                 except Exception as e:
                     logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
 
-            # اگر خواستی محصولات ناموجود را هم پردازش کن (معمولاً لازم نیست)
-            # for block in unavailable_blocks:
-            #     ...
-
-            # توقف هوشمند:
             if not current_page_product_ids:
                 logger.info("    - هیچ محصول جدیدی در این صفحه نبود. پایان صفحه‌بندی.")
                 break
