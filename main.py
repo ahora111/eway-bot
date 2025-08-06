@@ -310,7 +310,13 @@ def get_products_from_category_page(session, category_id, max_pages=100, delay=0
                 image_url = p.get('ImageUrl', '')
                 stock = p.get('Stock', 0)
 
-                if not name or not price or int(price) <= 0:
+                # تبدیل قیمت به عدد صحیح (حل مشکل اعشاری)
+                try:
+                    price_float = float(str(price).replace(',', '').replace(' ', ''))
+                except Exception:
+                    logger.debug(f"      - قیمت نامعتبر برای محصول {product_id}: {price}")
+                    continue
+                if not name or price_float <= 0:
                     logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name}, قیمت: {price})")
                     continue
 
@@ -322,7 +328,7 @@ def get_products_from_category_page(session, category_id, max_pages=100, delay=0
                 product = {
                     "id": product_id,
                     "name": name,
-                    "price": str(price),
+                    "price": str(int(price_float)),  # قیمت به صورت عدد صحیح
                     "stock": stock,
                     "image": image_url,
                     "category_id": category_id,
@@ -461,7 +467,8 @@ def transfer_categories_to_wc(source_categories):
 
 def process_price(price_value):
     try:
-        price_value = float(re.sub(r'[^\d.]', '', str(price_value)))
+        price_value = float(str(price_value).replace(',', '').replace(' ', ''))
+        price_value = int(price_value)
         price_value /= 10
     except (ValueError, TypeError): return "0"
     if price_value <= 1: return "0"
