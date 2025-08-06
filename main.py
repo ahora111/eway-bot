@@ -94,6 +94,7 @@ logger.addHandler(handler)
 BASE_URL = "https://panel.eways.co"
 SOURCE_CATS_API_URL = f"{BASE_URL}/Store/GetCategories"
 PRODUCT_LIST_URL_TEMPLATE = f"{BASE_URL}/Store/List/{{category_id}}/2/2/0/0/0/10000000000?page={{page}}"
+LAZY_LOAD_URL = f"{BASE_URL}/Store/ListLazy"
 PRODUCT_DETAIL_URL_TEMPLATE = f"{BASE_URL}/Store/Detail/{{cat_id}}/{{product_id}}"
 
 WC_API_URL = os.environ.get("WC_API_URL") or "https://your-woocommerce-site.com/wp-json/wc/v3"
@@ -263,129 +264,112 @@ MAX_ERRORS_PER_CATEGORY = 3
     wait=wait_random_exponential(multiplier=1, max=10),
     reraise=True
 )
-def get_products_from_category_page(session, category_id, max_pages=20, delay=0.5):
+def get_products_from_category_page(session, category_id, max_pages=50, delay=0.5):
     all_products_in_category = []
     seen_product_ids = set()
-    page_num = 1
+    lazy_page_index = 1  # شروع از صفحه 1 (صفحه اول)
+    page_size = 24  # ثابت بر اساس درخواست شما
     error_count = 0
-    page_size = 24  # طبق پارامتر PageSize
-    while page_num <= max_pages:
-        if page_num == 1:
-            # صفحه اول: همان GET قبلی
-            url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id, page=1)
-            logger.info(f"  - در حال دریافت محصولات صفحه اول از: {url}")
-            response = session.get(url, timeout=30)
+
+    # ابتدا صفحه اول را با GET بگیریم تا کوکی‌ها و رفتار واقعی شبیه‌سازی شود
+    initial_url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id, page=1)
+    logger.info(f"  - دریافت صفحه اولیه: {initial_url}")
+    try:
+        response = session.get(initial_url, timeout=30)
+        response.raise_for_status()
+    except Exception as e:
+        logger.error(f"    - خطا در صفحه اولیه: {e}")
+        return []
+
+    while lazy_page_index <= max_pages:
+        # درخواست POST برای lazy load
+        payload = {
+            "ListViewType": 0,
+            "CatId": category_id,
+            "Order": 2,
+            "Sort": 2,
+            "LazyPageIndex": lazy_page_index,
+            "PageIndex": 0,
+            "PageSize": page_size,
+            "Available": 0,  # 0 برای همه، اما بعداً فیلتر می‌کنیم
+            "MinPrice": 0,
+            "MaxPrice": 10000000000,
+            "IsLazyLoading": True
+        }
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "application/json, text/javascript, */*; q=0.01"
+        }
+        logger.info(f"    - درخواست AJAX برای صفحه {lazy_page_index}: {LAZY_LOAD_URL}")
+        try:
+            response = session.post(LAZY_LOAD_URL, data=payload, headers=headers, timeout=30)
             if response.status_code in [429, 503, 403]:
                 raise requests.exceptions.HTTPError(f"Blocked or rate limited: {response.status_code}", response=response)
-            if response.status_code != 200: break
-            soup = BeautifulSoup(response.text, 'lxml')
-            product_blocks = soup.select(".goods-record")
-            logger.info(f"    - تعداد بلاک‌های محصول پیدا شده: {len(product_blocks)}")
-            for block in product_blocks:
-                try:
-                    unavailable = block.select_one(".goods-record-unavailable")
-                    if unavailable:
-                        continue
-                    a_tag = block.select_one("a")
-                    href = a_tag['href'] if a_tag else None
-                    product_id = None
-                    if href:
-                        match = re.search(r'/Store/Detail/\d+/(\d+)', href)
-                        product_id = match.group(1) if match else None
-                    if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
-                        continue
-                    name_tag = block.select_one("span.goods-record-title")
-                    name = name_tag.text.strip() if name_tag else None
-                    price_tag = block.select_one("span.goods-record-price")
-                    price_text = price_tag.text.strip() if price_tag else ""
-                    try:
-                        price = float(re.sub(r'[^\d.]', '', price_text)) if price_text else 0
-                    except Exception:
-                        price = 0
-                    image_tag = block.select_one("img.goods-record-image")
-                    image_url = image_tag.get('data-src', '') if image_tag else ''
-                    if not name or price <= 0:
-                        continue
-                    stock = 1
-                    specs = get_product_details(session, category_id, product_id)
-                    time.sleep(random.uniform(delay, delay + 0.2))
-                    product = {
-                        "id": product_id,
-                        "name": name,
-                        "price": str(int(price)),
-                        "stock": stock,
-                        "image": image_url,
-                        "category_id": category_id,
-                        "specs": specs
-                    }
-                    seen_product_ids.add(product_id)
-                    all_products_in_category.append(product)
-                    logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']} و {len(product['specs'])} مشخصه فنی.")
-                except Exception as e:
-                    logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
-        else:
-            # صفحات بعدی: POST به /Store/ListLazy
-            url = f"{BASE_URL}/Store/ListLazy"
-            payload = {
-                "ListViewType": 0,
-                "CatId": category_id,
-                "Order": 2,
-                "Sort": 2,
-                "LazyPageIndex": page_num,
-                "PageIndex": 0,
-                "PageSize": page_size,
-                "Available": 0,
-                "MinPrice": 0,
-                "MaxPrice": 10000000000,
-                "IsLazyLoading": "true"
-            }
-            logger.info(f"  - در حال دریافت محصولات صفحه {page_num} (Ajax) از: {url}")
-            response = session.post(url, data=payload, timeout=30)
-            if response.status_code in [429, 503, 403]:
-                raise requests.exceptions.HTTPError(f"Blocked or rate limited: {response.status_code}", response=response)
-            if response.status_code != 200: break
-            try:
-                data = response.json()
-                goods = data.get("Goods", [])
-            except Exception as e:
-                logger.error(f"    - خطا در پارس JSON صفحه {page_num}: {e}")
-                break
-            logger.info(f"    - تعداد محصولات دریافت‌شده در این صفحه: {len(goods)}")
-            if not goods:
+            response.raise_for_status()
+            data = response.json()
+            products = data.get("Goods", [])
+            next_lazy_index = data.get("LazyPageIndex", lazy_page_index + 1)  # صفحه بعدی از پاسخ
+
+            logger.info(f"    - تعداد محصولات در صفحه {lazy_page_index}: {len(products)}")
+            if not products:
                 logger.info("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی.")
                 break
-            for item in goods:
-                try:
-                    product_id = str(item.get("Id"))
-                    if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
-                        continue
-                    name = item.get("Name")
-                    try:
-                        price = float(item.get("Price", 0))
-                    except Exception:
-                        price = 0
-                    image_url = item.get("ImageUrl", "")
-                    if not name or price <= 0:
-                        continue
-                    stock = 1
-                    specs = get_product_details(session, category_id, product_id)
-                    time.sleep(random.uniform(delay, delay + 0.2))
-                    product = {
-                        "id": product_id,
-                        "name": name,
-                        "price": str(int(price)),
-                        "stock": stock,
-                        "image": image_url,
-                        "category_id": category_id,
-                        "specs": specs
-                    }
-                    seen_product_ids.add(product_id)
-                    all_products_in_category.append(product)
-                    logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']} و {len(product['specs'])} مشخصه فنی.")
-                except Exception as e:
-                    logger.warning(f"      - خطا در پردازش یک محصول Ajax: {e}. رد شدن...")
-        page_num += 1
-        time.sleep(random.uniform(delay, delay + 0.2))
+
+            current_page_product_ids = []
+            for p in products:
+                product_id = str(p.get("Id"))
+                if not product_id or product_id in seen_product_ids:
+                    logger.debug(f"      - محصول skip شد: ID نامعتبر یا تکراری ({product_id}).")
+                    continue
+
+                availability = p.get("Availability", False)
+                stock = p.get("Stock", 0)
+                price_text = str(p.get("Price", 0))
+                price = re.sub(r'[^\d]', '', price_text) if price_text else "0"
+                if not availability or stock <= 0 or int(price) <= 0:
+                    logger.debug(f"      - محصول skip شد: ناموجود (Availability: {availability}, Stock: {stock}, Price: {price}).")
+                    continue
+
+                name = p.get("Name", "").strip()
+                image_url = p.get("ImageUrl", "")
+                if not name:
+                    logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name})")
+                    continue
+
+                # گرفتن specs
+                specs = get_product_details(session, category_id, product_id)
+                time.sleep(random.uniform(delay, delay + 0.2))
+
+                product = {
+                    "id": product_id,
+                    "name": name,
+                    "price": price,
+                    "stock": stock,
+                    "image": image_url,
+                    "category_id": category_id,
+                    "specs": specs
+                }
+                seen_product_ids.add(product_id)
+                current_page_product_ids.append(product_id)
+                all_products_in_category.append(product)
+                logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']} و {len(specs)} مشخصه فنی.")
+
+            if not current_page_product_ids:
+                logger.info("    - محصول جدیدی در این صفحه یافت نشد، توقف صفحه‌بندی.")
+                break
+
+            lazy_page_index = next_lazy_index
+            time.sleep(random.uniform(delay, delay + 0.2))
+            error_count = 0
+        except Exception as e:
+            error_count += 1
+            logger.error(f"    - خطا در پردازش صفحه AJAX {lazy_page_index}: {e} (تعداد خطا: {error_count})")
+            if error_count >= MAX_ERRORS_PER_CATEGORY:
+                logger.critical(f"🚨 تعداد خطاهای متوالی در دسته {category_id} به {error_count} رسید! توقف پردازش این دسته.")
+                break
+            time.sleep(2)
+
     logger.info(f"    - تعداد کل محصولات استخراج‌شده از دسته {category_id}: {len(all_products_in_category)}")
     return all_products_in_category
 
@@ -520,15 +504,23 @@ def transfer_categories_to_wc(source_categories):
 
 def process_price(price_value):
     try:
+        # همیشه ابتدا به float تبدیل کن (حتی اگر اعشاری باشد)
         price_value = float(re.sub(r'[^\d.]', '', str(price_value)))
         price_value /= 10
-    except (ValueError, TypeError): return "0"
-    if price_value <= 1: return "0"
-    elif price_value <= 7000000: new_price = price_value + 260000
-    elif price_value <= 10000000: new_price = price_value * 1.035
-    elif price_value <= 20000000: new_price = price_value * 1.025
-    elif price_value <= 30000000: new_price = price_value * 1.02
-    else: new_price = price_value * 1.015
+    except (ValueError, TypeError):
+        return "0"
+    if price_value <= 1:
+        return "0"
+    elif price_value <= 7000000:
+        new_price = price_value + 260000
+    elif price_value <= 10000000:
+        new_price = price_value * 1.035
+    elif price_value <= 20000000:
+        new_price = price_value * 1.025
+    elif price_value <= 30000000:
+        new_price = price_value * 1.02
+    else:
+        new_price = price_value * 1.015
     return str(int(round(new_price, -4)))
 
 @retry(
@@ -605,7 +597,7 @@ def smart_tags_for_product(product, cat_map):
     specs = product.get('specs', {})
     cat_id = product.get('category_id')
     cat_name = cat_map.get(cat_id, '').strip()
-    price = int(float(product.get('price', 0)))
+    price = int(product.get('price', 0))
 
     name_parts = [w for w in re.split(r'\s+', name) if w and len(w) > 2]
     common_words = {'گوشی', 'موبایل', 'تبلت', 'لپتاپ', 'لپ‌تاپ', 'مدل', 'محصول', 'کالا', 'جدید'}
@@ -746,7 +738,7 @@ def main():
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_catid = {}
         for cat_id in selected_ids:
-            future = executor.submit(get_products_from_category_page, session, cat_id, 20, delay)
+            future = executor.submit(get_products_from_category_page, session, cat_id, 50, delay)
             future_to_catid[future] = cat_id
 
         pbar = tqdm(total=len(selected_ids), desc="دریافت محصولات دسته‌ها")
