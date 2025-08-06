@@ -291,7 +291,7 @@ def get_products_from_category_page(session, category_id, max_pages=100, delay=0
                 logger.warning(f"    - وضعیت HTTP غیرمنتظره: {response.status_code}")
                 break
             data = response.json()
-            products = data.get('Products', []) or data.get('products', [])
+            products = data.get('Goods', [])
             logger.info(f"    - تعداد محصولات دریافت‌شده در این صفحه: {len(products)}")
             if not products:
                 logger.info("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی.")
@@ -300,23 +300,20 @@ def get_products_from_category_page(session, category_id, max_pages=100, delay=0
             current_page_product_ids = []
 
             for p in products:
-                # بررسی ناموجود بودن
-                # اگر فیلد خاصی برای موجودی داری، اینجا چک کن. اگر نه، فرض کن همه محصولات موجودند مگر اینکه در توضیحاتش "0 عدد در انبار باقیست" باشد.
-                stock = 1
-                name = p.get('Name') or p.get('name') or ''
-                product_id = p.get('Id') or p.get('id') or ''
-                price = p.get('Price') or p.get('price') or ''
-                image_url = p.get('Image') or p.get('image') or p.get('ImageUrl') or ''
-                # اگر فیلد توضیحات یا موجودی داری، اینجا چک کن:
-                desc = p.get('Description', '') or p.get('description', '')
-                if "0 عدد در انبار باقیست" in desc:
+                # فقط محصولات موجود را بردار
+                if not p.get('Availability', False) or p.get('Stock', 0) == 0:
                     continue  # ناموجود
 
-                if not name or not price or int(re.sub(r'[^\d]', '', str(price))) <= 0:
+                name = p.get('Name', '')
+                product_id = p.get('Id', '')
+                price = p.get('Price', '')
+                image_url = p.get('ImageUrl', '')
+                stock = p.get('Stock', 0)
+
+                if not name or not price or int(price) <= 0:
                     logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name}, قیمت: {price})")
                     continue
 
-                # واکشی مشخصات فنی (در صورت نیاز)
                 specs = get_product_details(session, category_id, product_id)
                 time.sleep(random.uniform(delay, delay + 0.2))
                 key = f"{product_id}|{category_id}"
