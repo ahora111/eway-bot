@@ -13,6 +13,16 @@ import logging
 from logging.handlers import RotatingFileHandler
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
 from collections import defaultdict
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+# ==============================================================================
+# --- تنظیمات Selenium (مسیر ChromeDriver را تنظیم کنید) ---
+# ==============================================================================
+DRIVER_PATH = '/path/to/chromedriver'  # مسیر ChromeDriver را اینجا بگذارید (مثل '/usr/local/bin/chromedriver')
 
 # ==============================================================================
 # --- توابع انتخاب منعطف با SELECTED_IDS_STRING ---
@@ -93,7 +103,7 @@ logger.addHandler(handler)
 # ==============================================================================
 BASE_URL = "https://panel.eways.co"
 SOURCE_CATS_API_URL = f"{BASE_URL}/Store/GetCategories"
-PRODUCT_LIST_URL_TEMPLATE = f"{BASE_URL}/Store/List/{{category_id}}/2/2/0/0/0/10000000000?page={{page}}"
+PRODUCT_LIST_URL_TEMPLATE = f"{BASE_URL}/Store/List/{{category_id}}/2/2/0/0/0/10000000000"
 PRODUCT_DETAIL_URL_TEMPLATE = f"{BASE_URL}/Store/Detail/{{cat_id}}/{{product_id}}"
 
 WC_API_URL = os.environ.get("WC_API_URL") or "https://your-woocommerce-site.com/wp-json/wc/v3"
@@ -106,7 +116,7 @@ EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
 CACHE_FILE = 'products_cache.json'  # فایل کش
 
 # ==============================================================================
-# --- تابع لاگین اتوماتیک به eways ---
+# --- تابع لاگین اتوماتیک به eways (با Selenium برای لاگین اگر لازم باشد) ---
 # ==============================================================================
 def login_eways(username, password):
     session = requests.Session()
@@ -252,7 +262,7 @@ def get_and_parse_categories(session):
         return None
 
 # ==============================================================================
-# --- گرفتن محصولات هر دسته با کنترل خطا و @retry (با scraping HTML و شرط شما) ---
+# --- گرفتن محصولات هر دسته با کنترل خطا و @retry (با Selenium برای infinite scroll) ---
 # ==============================================================================
 
 MAX_ERRORS_PER_CATEGORY = 3
@@ -263,96 +273,96 @@ MAX_ERRORS_PER_CATEGORY = 3
     wait=wait_random_exponential(multiplier=1, max=10),
     reraise=True
 )
-def get_products_from_category_page(session, category_id, max_pages=50, delay=0.5):
+def get_products_from_category_page(session, category_id, delay=0.5):
     all_products_in_category = []
     seen_product_ids = set()
-    page_num = 1
-    error_count = 0
-    while page_num <= max_pages:
-        url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id, page=page_num)
-        logger.info(f"  - در حال دریافت محصولات از: {url}")
-        try:
-            response = session.get(url, timeout=30)
-            if response.status_code in [429, 503, 403]:
-                raise requests.exceptions.HTTPError(f"Blocked or rate limited: {response.status_code}", response=response)
-            if response.status_code != 200: break
-            soup = BeautifulSoup(response.text, 'lxml')
-            product_blocks = soup.select(".col-lg-3.col-md-4.col-sm-6.goods-p")
-            logger.info(f"    - تعداد بلاک‌های محصول پیدا شده: {len(product_blocks)}")
-            if not product_blocks:
-                logger.info("    - هیچ محصولی در این صفحه یافت نشد. پایان صفحه‌بندی.")
-                break
-            current_page_product_ids = []
-            for block in product_blocks:
-                try:
-                    # چک موجودی بر اساس شرط شما
-                    bell_icon = block.select_one('i.far.fa-bell')
-                    is_unavailable = False
-                    stock_text = ""
-                    if bell_icon:
-                        # متن کامل عنصر یا sibling بعدی را چک کن
-                        stock_text = (bell_icon.text.strip() or (bell_icon.next_sibling.text.strip() if bell_icon.next_sibling else "")) .strip()
-                        logger.debug(f"      - متن stock برای چک: '{stock_text}'")
-                        if stock_text == "0 عدد در انبار باقیست":
-                            is_unavailable = True
-                    if is_unavailable:
-                        logger.debug(f"      - محصول skip شد: ناموجود (متن: {stock_text}).")
-                        continue
-                    # اگر شرط ناموجود نبود، موجود است
 
-                    a_tag = block.select_one("a")
-                    href = a_tag['href'] if a_tag else None
-                    product_id = None
-                    if href:
-                        match = re.search(r'/Store/Detail/\d+/(\d+)', href)
-                        product_id = match.group(1) if match else None
-                    if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
-                        logger.debug(f"      - محصول skip شد: ID نامعتبر یا تکراری ({product_id}).")
-                        continue
-                    name_tag = block.select_one("span.goods-record-title")
-                    name = name_tag.text.strip() if name_tag else None
-                    price_tag = block.select_one("span.goods-record-price")
-                    price_text = price_tag.text.strip() if price_tag else ""
-                    price = re.sub(r'[^\d]', '', price_text) if price_text else "0"
-                    if int(price) <= 0:
-                        logger.debug(f"      - محصول skip شد: قیمت نامعتبر یا صفر ({price}).")
-                        continue
-                    image_tag = block.select_one("img.goods-record-image")
-                    image_url = image_tag.get('data-src', '') if image_tag else ''
-                    if not name:
-                        logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name})")
-                        continue
-                    stock = 1  # فرض بر موجودی 1 برای محصولات موجود
-                    specs = get_product_details(session, category_id, product_id)
-                    time.sleep(random.uniform(delay, delay + 0.2))
-                    product = {
-                        "id": product_id,
-                        "name": name,
-                        "price": price,
-                        "stock": stock,
-                        "image": image_url,
-                        "category_id": category_id,
-                        "specs": specs
-                    }
-                    seen_product_ids.add(product_id)
-                    current_page_product_ids.append(product_id)
-                    all_products_in_category.append(product)
-                    logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']} و {len(specs)} مشخصه فنی.")
-                except Exception as e:
-                    logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
-            if not current_page_product_ids:
-                logger.info("    - محصول جدیدی در این صفحه یافت نشد، توقف صفحه‌بندی.")
-                break
-            page_num += 1
+    # تنظیم Selenium
+    options = Options()
+    options.headless = True  # بدون پنجره (برای سرور، false برای تست)
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(executable_path=DRIVER_PATH, options=options)
+
+    url = PRODUCT_LIST_URL_TEMPLATE.format(category_id=category_id)
+    logger.info(f"  - در حال لود صفحه با Selenium: {url}")
+    driver.get(url)
+
+    # اسکرول تا لود تمام محصولات
+    last_height = driver.execute_script("return document.body.scrollHeight")
+    while True:
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)  # منتظر لود
+        new_height = driver.execute_script("return document.body.scrollHeight")
+        if new_height == last_height:
+            break
+        last_height = new_height
+
+    # حالا HTML کامل را بگیر
+    soup = BeautifulSoup(driver.page_source, 'lxml')
+    product_blocks = soup.select(".col-lg-3.col-md-4.col-sm-6.goods-p")
+    logger.info(f"    - تعداد بلاک‌های محصول پیدا شده پس از اسکرول: {len(product_blocks)}")
+
+    driver.quit()  # بستن مرورگر
+
+    if not product_blocks:
+        logger.info("    - هیچ محصولی یافت نشد.")
+        return []
+
+    for block in product_blocks:
+        try:
+            # چک موجودی بر اساس شرط شما
+            bell_icon = block.select_one('i.far.fa-bell')
+            is_unavailable = False
+            stock_text = ""
+            if bell_icon:
+                stock_text = (bell_icon.text.strip() or (bell_icon.next_sibling.text.strip() if bell_icon.next_sibling else "")) .strip()
+                logger.debug(f"      - متن stock برای چک: '{stock_text}'")
+                if stock_text == "0 عدد در انبار باقیست":
+                    is_unavailable = True
+            if is_unavailable:
+                logger.debug(f"      - محصول skip شد: ناموجود (متن: {stock_text}).")
+                continue
+
+            a_tag = block.select_one("a")
+            href = a_tag['href'] if a_tag else None
+            product_id = None
+            if href:
+                match = re.search(r'/Store/Detail/\d+/(\d+)', href)
+                product_id = match.group(1) if match else None
+            if not product_id or product_id in seen_product_ids or product_id.startswith('##'):
+                logger.debug(f"      - محصول skip شد: ID نامعتبر یا تکراری ({product_id}).")
+                continue
+            name_tag = block.select_one("span.goods-record-title")
+            name = name_tag.text.strip() if name_tag else None
+            price_tag = block.select_one("span.goods-record-price")
+            price_text = price_tag.text.strip() if price_tag else ""
+            price = re.sub(r'[^\d]', '', price_text) if price_text else "0"
+            if int(price) <= 0:
+                logger.debug(f"      - محصول skip شد: قیمت نامعتبر یا صفر ({price}).")
+                continue
+            image_tag = block.select_one("img.goods-record-image")
+            image_url = image_tag.get('data-src', '') if image_tag else ''
+            if not name:
+                logger.debug(f"      - محصول {product_id} نامعتبر (نام: {name})")
+                continue
+            stock = 1  # فرض بر موجودی 1 برای محصولات موجود
+            specs = get_product_details(session, category_id, product_id)
             time.sleep(random.uniform(delay, delay + 0.2))
-            error_count = 0
+            product = {
+                "id": product_id,
+                "name": name,
+                "price": price,
+                "stock": stock,
+                "image": image_url,
+                "category_id": category_id,
+                "specs": specs
+            }
+            seen_product_ids.add(product_id)
+            all_products_in_category.append(product)
+            logger.info(f"      - محصول {product_id} ({product['name']}) اضافه شد با قیمت {product['price']} و {len(specs)} مشخصه فنی.")
         except Exception as e:
-            error_count += 1
-            logger.error(f"    - خطا در پردازش صفحه محصولات: {e} (تعداد خطا: {error_count})")
-            if error_count >= MAX_ERRORS_PER_CATEGORY:
-                logger.critical(f"🚨 تعداد خطاهای متوالی در دسته {category_id} به {error_count} رسید! توقف پردازش این دسته.")
-                break
-            time.sleep(2)
+            logger.warning(f"      - خطا در پردازش یک بلاک محصول: {e}. رد شدن...")
     logger.info(f"    - تعداد کل محصولات استخراج‌شده از دسته {category_id}: {len(all_products_in_category)}")
     return all_products_in_category
 
@@ -683,7 +693,7 @@ def main():
         return
     logger.info(f"✅ مرحله 1: بارگذاری دسته‌بندی‌ها کامل شد. تعداد: {len(all_cats)}")
 
-    SELECTED_IDS_STRING = "16777:all-allz"
+    SELECTED_IDS_STRING = "1582:14548-allz,1584-all-allz|16777:all-allz|4882:all-allz|16778:22570-all-allz"
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
     logger.info(f"✅ انتخاب‌های دلخواه: {parsed_selection}")
 
@@ -713,7 +723,7 @@ def main():
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_catid = {}
         for cat_id in selected_ids:
-            future = executor.submit(get_products_from_category_page, session, cat_id, 50, delay)
+            future = executor.submit(get_products_from_category_page, session, cat_id, delay)
             future_to_catid[future] = cat_id
 
         pbar = tqdm(total=len(selected_ids), desc="دریافت محصولات دسته‌ها")
