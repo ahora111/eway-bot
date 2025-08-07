@@ -1,7 +1,7 @@
 import requests
-from bs4 import BeautifulSoup
 import re
 import time
+from bs4 import BeautifulSoup
 
 BASE_URL = "https://panel.eways.co"
 CATEGORY_ID = 4286  # دسته گوشی موبایل
@@ -11,41 +11,34 @@ def login_eways(username, password):
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': BASE_URL + '/user/login',
+        'Referer': f"{BASE_URL}/",
         'X-Requested-With': 'XMLHttpRequest',
-        'Accept-Language': 'fa',
-        'Origin': BASE_URL
+        'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'
     })
     session.verify = False
 
-    # مرحله 1: دریافت صفحه لاگین و استخراج توکن
-    login_page = session.get(BASE_URL + "/user/login")
-    soup = BeautifulSoup(login_page.text, 'lxml')
-    token_input = soup.find('input', {'name': '__RequestVerificationToken'})
-    token_value = token_input['value'] if token_input else ''
-    if not token_value:
-        print("❌ نتوانستم توکن آنتی‌فورجری را پیدا کنم!")
-        return None
-
-    time.sleep(0.5)  # تاخیر کوتاه
-
-    # مرحله 2: ارسال لاگین با توکن
-    login_url = BASE_URL + "/User/Login"
+    login_url = f"{BASE_URL}/User/Login"
     payload = {
         "UserName": username,
         "Password": password,
-        "RememberMe": "true",
-        "__RequestVerificationToken": token_value
+        "RememberMe": "true"
     }
     resp = session.post(login_url, data=payload, timeout=30)
-    if resp.status_code == 200 and 'Aut' in session.cookies:
-        print("✅ Login OK")
+    if resp.status_code != 200:
+        print(f"❌ لاگین ناموفق! کد وضعیت: {resp.status_code} - متن پاسخ: {resp.text[:200]}")
+        return None
+
+    if 'Aut' in session.cookies:
+        print("✅ لاگین موفق! کوکی Aut دریافت شد.")
         return session
-    if "کپچا" in resp.text or "captcha" in resp.text.lower():
-        print("❌ کپچا فعال شده! لاگین با ربات ممکن نیست.")
     else:
-        print("❌ Login failed")
-    return None
+        if "کپچا" in resp.text or "captcha" in resp.text.lower():
+            print("❌ کوکی Aut دریافت نشد. کپچا فعال است.")
+        elif "نام کاربری" in resp.text or "رمز عبور" in resp.text:
+            print("❌ کوکی Aut دریافت نشد. نام کاربری یا رمز عبور اشتباه است.")
+        else:
+            print("❌ کوکی Aut دریافت نشد. لاگین ناموفق یا دلیل نامشخص.")
+        return None
 
 def get_all_products(session):
     all_products = []
@@ -81,7 +74,6 @@ def get_all_products(session):
     return all_products
 
 if __name__ == "__main__":
-    # اطلاعات لاگین خودت رو اینجا بذار
     username = "شماره موبایل یا یوزرنیم"
     password = "پسورد"
     session = login_eways(username, password)
