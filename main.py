@@ -1,7 +1,7 @@
 import requests
-import time
-import re
 from bs4 import BeautifulSoup
+import re
+import time
 
 BASE_URL = "https://panel.eways.co"
 CATEGORY_ID = 4286  # دسته گوشی موبایل
@@ -11,25 +11,40 @@ def login_eways(username, password):
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://panel.eways.co/user/login',
+        'Referer': BASE_URL + '/user/login',
         'X-Requested-With': 'XMLHttpRequest',
-        'Accept-Language': 'fa'
+        'Accept-Language': 'fa',
+        'Origin': BASE_URL
     })
     session.verify = False
-    login_url = "https://panel.eways.co/User/Login"
+
+    # مرحله 1: دریافت صفحه لاگین و استخراج توکن
+    login_page = session.get(BASE_URL + "/user/login")
+    soup = BeautifulSoup(login_page.text, 'lxml')
+    token_input = soup.find('input', {'name': '__RequestVerificationToken'})
+    token_value = token_input['value'] if token_input else ''
+    if not token_value:
+        print("❌ نتوانستم توکن آنتی‌فورجری را پیدا کنم!")
+        return None
+
+    time.sleep(0.5)  # تاخیر کوتاه
+
+    # مرحله 2: ارسال لاگین با توکن
+    login_url = BASE_URL + "/User/Login"
     payload = {
         "UserName": username,
         "Password": password,
-        "RememberMe": "true"
+        "RememberMe": "true",
+        "__RequestVerificationToken": token_value
     }
     resp = session.post(login_url, data=payload, timeout=30)
-    print("Status code:", resp.status_code)
-    print("Response text:", resp.text[:500])
-    print("Cookies:", session.cookies)
     if resp.status_code == 200 and 'Aut' in session.cookies:
         print("✅ Login OK")
         return session
-    print("❌ Login failed")
+    if "کپچا" in resp.text or "captcha" in resp.text.lower():
+        print("❌ کپچا فعال شده! لاگین با ربات ممکن نیست.")
+    else:
+        print("❌ Login failed")
     return None
 
 def get_all_products(session):
@@ -58,7 +73,7 @@ def get_all_products(session):
                     product_id = match.group(1)
                 name = name_tag.text.strip()
                 all_products.append({'id': product_id, 'name': name})
-        # اگر تعداد محصولات کمتر از 96 شد، یعنی آخرین صفحه است
+        # اگر تعداد محصولات این صفحه کمتر از 96 شد، یعنی آخرین صفحه است
         if len(product_blocks) < 96:
             break
         page += 1
