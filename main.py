@@ -10,19 +10,22 @@ PRODUCT_LIST_URL = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000"
 def login_eways(username, password):
     session = requests.Session()
     session.headers.update({
-        'User-Agent': 'Mozilla/5.0',
-        'Referer': BASE_URL,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://panel.eways.co/user/login',
         'X-Requested-With': 'XMLHttpRequest',
         'Accept-Language': 'fa'
     })
     session.verify = False
-    login_url = f"{BASE_URL}/User/Login"
+    login_url = "https://panel.eways.co/User/Login"
     payload = {
         "UserName": username,
         "Password": password,
         "RememberMe": "true"
     }
     resp = session.post(login_url, data=payload, timeout=30)
+    print("Status code:", resp.status_code)
+    print("Response text:", resp.text[:500])
+    print("Cookies:", session.cookies)
     if resp.status_code == 200 and 'Aut' in session.cookies:
         print("✅ Login OK")
         return session
