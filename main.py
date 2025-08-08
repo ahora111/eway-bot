@@ -2,25 +2,26 @@ import requests
 import logging
 from logging.handlers import RotatingFileHandler
 from bs4 import BeautifulSoup
-import os
 import time
 import re
 
-# --- Logging ---
+# --- تنظیمات ---
+BASE_URL = "https://panel.eways.co"
+CATEGORY_ID = 4286  # دسته مورد نظر
+LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
+LIST_HTML_URL_TEMPLATE = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000?page={{page}}"
+EWAYS_USERNAME = "شماره موبایل یا یوزرنیم"  # مقدار صحیح را وارد کن
+EWAYS_PASSWORD = "پسورد"  # مقدار صحیح را وارد کن
+MAX_PAGE = 5  # تعداد صفحات مورد بررسی
+
+# --- لاگینگ ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 handler = RotatingFileHandler('app.log', maxBytes=1024*1024, backupCount=5)
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
 
-BASE_URL = "https://panel.eways.co"
-CATEGORY_ID = 22244
-LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
-LIST_HTML_URL_TEMPLATE = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000?page={{page}}"
-
-EWAYS_USERNAME = os.environ.get("EWAYS_USERNAME") or "شماره موبایل یا یوزرنیم"
-EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
-
+# --- لاگین ---
 def login_eways(username, password):
     session = requests.Session()
     session.headers.update({
@@ -48,12 +49,13 @@ def login_eways(username, password):
         logger.error("❌ کوکی Aut دریافت نشد. لاگین ناموفق یا دلیل نامشخص.")
         return None
 
-def get_initial_products(session, page):
-    url = LIST_HTML_URL_TEMPLATE.format(page=page)
-    logger.info(f"⏳ دریافت محصولات اولیه از HTML صفحه {page} ...")
+# --- محصولات اولیه فقط صفحه اول (۲۴ تای اول) ---
+def get_initial_products(session):
+    url = LIST_HTML_URL_TEMPLATE.format(page=1)
+    logger.info(f"⏳ دریافت محصولات اولیه از HTML صفحه 1 ...")
     resp = session.get(url, timeout=30)
     if resp.status_code != 200:
-        logger.error(f"❌ خطا در دریافت HTML صفحه {page}")
+        logger.error(f"❌ خطا در دریافت HTML صفحه 1")
         return []
     soup = BeautifulSoup(resp.text, 'lxml')
     product_blocks = soup.select(".goods-record")
@@ -71,11 +73,10 @@ def get_initial_products(session, page):
                 product_id = match.group(1)
             name = name_tag.text.strip()
             products.append({'id': product_id, 'name': name, 'available': is_available})
-    logger.info(f"تعداد محصولات اولیه (HTML) صفحه {page}: {len(products)}")
-    if len(products) == 0:
-        logger.warning(f"⚠️ هیچ محصول اولیه در HTML صفحه {page} پیدا نشد. فقط Lazy بررسی می‌شود.")
+    logger.info(f"تعداد محصولات اولیه (HTML) صفحه 1: {len(products)}")
     return products
 
+# --- محصولات Lazy همه صفحات ---
 def get_lazy_products(session, page):
     all_products = []
     lazy_page = 1
@@ -87,7 +88,7 @@ def get_lazy_products(session, page):
             "Order": 2,
             "Sort": 2,
             "LazyPageIndex": lazy_page,
-            "PageIndex": page - 1,  # دقت کن PageIndex از 0 شروع میشه
+            "PageIndex": page - 1,  # PageIndex از 0 شروع می‌شود
             "PageSize": 24,
             "Available": 0,
             "MinPrice": 0,
@@ -125,27 +126,31 @@ def get_lazy_products(session, page):
         time.sleep(0.5)
     return all_products
 
+# --- اجرای اصلی ---
 if __name__ == "__main__":
     session = login_eways(EWAYS_USERNAME, EWAYS_PASSWORD)
     if not session:
         logger.error("برنامه به دلیل خطای لاگین متوقف شد.")
         exit(1)
 
-    max_page = 5  # تا هر چند صفحه که می‌خواهی بررسی کن
     all_products = {}
 
-    for page in range(1, max_page + 1):
-        initial_products = get_initial_products(session, page)
+    # فقط HTML صفحه اول
+    initial_products = get_initial_products(session)
+    for p in initial_products:
+        all_products[p['id']] = p
+
+    # Lazy همه صفحات
+    for page in range(1, MAX_PAGE + 1):
         lazy_products = get_lazy_products(session, page)
-        # ترکیب و حذف تکراری‌ها
-        for p in initial_products + lazy_products:
+        for p in lazy_products:
             all_products[p['id']] = p
 
     all_products = list(all_products.values())
     available = [p for p in all_products if p['available']]
     unavailable = [p for p in all_products if not p['available']]
 
-    logger.info(f"\n✅ تعداد کل محصولات این دسته (در {max_page} صفحه): {len(all_products)}")
+    logger.info(f"\n✅ تعداد کل محصولات این دسته (در {MAX_PAGE} صفحه): {len(all_products)}")
     logger.info(f"🟢 محصولات موجود: {len(available)}")
     logger.info(f"🔴 محصولات ناموجود: {len(unavailable)}\n")
 
