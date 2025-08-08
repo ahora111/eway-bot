@@ -1,33 +1,23 @@
 import requests
-import re
-import time
-import os
 import logging
 from logging.handlers import RotatingFileHandler
-from bs4 import BeautifulSoup
+import os
+import time
 
-# ==============================================================================
-# --- تنظیمات لاگینگ ---
-# ==============================================================================
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# --- Logging ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 handler = RotatingFileHandler('app.log', maxBytes=1024*1024, backupCount=5)
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
 
-# ==============================================================================
-# --- اطلاعات سایت مبدا ---
-# ==============================================================================
 BASE_URL = "https://panel.eways.co"
-CATEGORY_ID = 4286  # دسته گوشی موبایل
-PRODUCT_LIST_URL = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000"
+LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
+CATEGORY_ID = 4286
 
 EWAYS_USERNAME = os.environ.get("EWAYS_USERNAME") or "شماره موبایل یا یوزرنیم"
 EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
 
-# ==============================================================================
-# --- تابع لاگین اتوماتیک به eways ---
-# ==============================================================================
 def login_eways(username, password):
     session = requests.Session()
     session.headers.update({
@@ -37,7 +27,6 @@ def login_eways(username, password):
         'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'
     })
     session.verify = False
-
     login_url = f"{BASE_URL}/User/Login"
     payload = {
         "UserName": username,
@@ -49,58 +38,56 @@ def login_eways(username, password):
     if resp.status_code != 200:
         logger.error(f"❌ لاگین ناموفق! کد وضعیت: {resp.status_code} - متن پاسخ: {resp.text[:200]}")
         return None
-
     if 'Aut' in session.cookies:
         logger.info("✅ لاگین موفق! کوکی Aut دریافت شد.")
         return session
     else:
-        if "کپچا" in resp.text or "captcha" in resp.text.lower():
-            logger.error("❌ کوکی Aut دریافت نشد. کپچا فعال است.")
-        elif "نام کاربری" in resp.text or "رمز عبور" in resp.text:
-            logger.error("❌ کوکی Aut دریافت نشد. نام کاربری یا رمز عبور اشتباه است.")
-        else:
-            logger.error("❌ کوکی Aut دریافت نشد. لاگین ناموفق یا دلیل نامشخص.")
+        logger.error("❌ کوکی Aut دریافت نشد. لاگین ناموفق یا دلیل نامشخص.")
         return None
 
-# ==============================================================================
-# --- گرفتن محصولات یک دسته ---
-# ==============================================================================
 def get_all_products(session):
     all_products = []
-    page = 1
+    lazy_page = 1
     while True:
-        url = f"{PRODUCT_LIST_URL}?page={page}"
-        logger.info(f"⏳ در حال دریافت صفحه {page} ...")
-        resp = session.get(url, timeout=30)
+        data = {
+            "ListViewType": 0,
+            "CatId": CATEGORY_ID,
+            "Order": 2,
+            "Sort": 2,
+            "LazyPageIndex": lazy_page,
+            "PageIndex": 0,
+            "PageSize": 24,
+            "Available": 0,
+            "MinPrice": 0,
+            "MaxPrice": 10000000000,
+            "IsLazyLoading": "true"
+        }
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000"
+        }
+        logger.info(f"⏳ در حال دریافت LazyPageIndex={lazy_page} ...")
+        resp = session.post(LIST_LAZY_URL, data=data, headers=headers, timeout=30)
         if resp.status_code != 200:
-            logger.error("❌ خطا در دریافت صفحه محصولات")
+            logger.error(f"❌ خطا در دریافت محصولات (کد: {resp.status_code})")
             break
-        soup = BeautifulSoup(resp.text, 'lxml')
-        product_blocks = soup.select(".goods-record")
-        if not product_blocks:
-            logger.info("🚩 محصولی یافت نشد یا به انتهای صفحات رسیدیم.")
+        try:
+            result = resp.json()
+        except Exception as e:
+            logger.error(f"❌ خطا در تبدیل پاسخ به json: {e}")
             break
-        for block in product_blocks:
-            a_tag = block.select_one("a")
-            name_tag = block.select_one("span.goods-record-title")
-            if a_tag and name_tag:
-                product_id = None
-                href = a_tag['href']
-                match = re.search(r'/Store/Detail/\d+/(\d+)', href)
-                if match:
-                    product_id = match.group(1)
-                name = name_tag.text.strip()
-                all_products.append({'id': product_id, 'name': name})
-        # اگر تعداد محصولات این صفحه کمتر از 96 شد، یعنی آخرین صفحه است
-        if len(product_blocks) < 96:
+        goods = result.get("Goods", [])
+        if not goods:
+            logger.info("🚩 به انتهای محصولات رسیدیم.")
             break
-        page += 1
-        time.sleep(1)
+        for g in goods:
+            all_products.append({"id": g["Id"], "name": g["Name"]})
+        logger.info(f"تعداد محصولات این صفحه: {len(goods)}")
+        lazy_page += 1
+        time.sleep(0.5)
     return all_products
 
-# ==============================================================================
-# --- اجرای اصلی ---
-# ==============================================================================
 if __name__ == "__main__":
     session = login_eways(EWAYS_USERNAME, EWAYS_PASSWORD)
     if not session:
