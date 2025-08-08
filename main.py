@@ -1,6 +1,7 @@
 import requests
 import logging
 from logging.handlers import RotatingFileHandler
+from bs4 import BeautifulSoup
 import os
 import time
 
@@ -12,8 +13,9 @@ handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)
 logger.addHandler(handler)
 
 BASE_URL = "https://panel.eways.co"
-LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
 CATEGORY_ID = 4286
+LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
+LIST_HTML_URL = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000"
 
 EWAYS_USERNAME = os.environ.get("EWAYS_USERNAME") or "شماره موبایل یا یوزرنیم"
 EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
@@ -45,7 +47,31 @@ def login_eways(username, password):
         logger.error("❌ کوکی Aut دریافت نشد. لاگین ناموفق یا دلیل نامشخص.")
         return None
 
-def get_all_products(session):
+def get_initial_products(session):
+    logger.info("⏳ دریافت محصولات اولیه از HTML صفحه اول ...")
+    resp = session.get(LIST_HTML_URL, timeout=30)
+    if resp.status_code != 200:
+        logger.error("❌ خطا در دریافت HTML صفحه اول")
+        return []
+    soup = BeautifulSoup(resp.text, 'lxml')
+    product_blocks = soup.select(".goods-record")
+    products = []
+    for block in product_blocks:
+        a_tag = block.select_one("a")
+        name_tag = block.select_one("span.goods-record-title")
+        if a_tag and name_tag:
+            product_id = None
+            href = a_tag['href']
+            import re
+            match = re.search(r'/Store/Detail/\d+/(\d+)', href)
+            if match:
+                product_id = match.group(1)
+            name = name_tag.text.strip()
+            products.append({'id': product_id, 'name': name})
+    logger.info(f"تعداد محصولات اولیه (HTML): {len(products)}")
+    return products
+
+def get_lazy_products(session):
     all_products = []
     lazy_page = 1
     while True:
@@ -65,7 +91,7 @@ def get_all_products(session):
         headers = {
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             "X-Requested-With": "XMLHttpRequest",
-            "Referer": f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000"
+            "Referer": LIST_HTML_URL
         }
         logger.info(f"⏳ در حال دریافت LazyPageIndex={lazy_page} ...")
         resp = session.post(LIST_LAZY_URL, data=data, headers=headers, timeout=30)
@@ -94,8 +120,14 @@ if __name__ == "__main__":
     if not session:
         logger.error("برنامه به دلیل خطای لاگین متوقف شد.")
         exit(1)
-    products = get_all_products(session)
-    logger.info(f"\n✅ تعداد کل محصولات این دسته: {len(products)}\n")
-    for i, p in enumerate(products, 1):
+    initial_products = get_initial_products(session)
+    lazy_products = get_lazy_products(session)
+    # ترکیب و حذف تکراری‌ها
+    all_products = {p['id']: p for p in initial_products}
+    for p in lazy_products:
+        all_products[p['id']] = p
+    all_products = list(all_products.values())
+    logger.info(f"\n✅ تعداد کل محصولات این دسته: {len(all_products)}\n")
+    for i, p in enumerate(all_products, 1):
         logger.info(f"{i:03d}. {p['name']} (ID: {p['id']})")
-    print(f"\n✅ تعداد کل محصولات این دسته: {len(products)}")
+    print(f"\n✅ تعداد کل محصولات این دسته: {len(all_products)}")
