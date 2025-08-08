@@ -8,9 +8,8 @@ import os
 import sys
 
 BASE_URL = "https://panel.eways.co"
-CATEGORY_ID = 22244
-MAX_PAGE = 5
-
+CATEGORY_ID = 4286
+MAX_PAGE = 50  # حداکثر تعداد صفحات برای اطمینان (در عمل زودتر قطع می‌شود)
 LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -80,14 +79,14 @@ def get_initial_products(session, page):
             products.append({'id': product_id, 'name': name, 'available': is_available})
     logger.info(f"تعداد محصولات اولیه (HTML) صفحه {page}: {len(products)}")
     return products
-    
+
 def get_lazy_products(session, page):
     all_products = []
     lazy_page = 1
     referer_url = (
         f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000?text=%DA%AF%D9%88%D8%B4%DB%8C-%D9%85%D9%88%D8%A8%D8%A7%DB%8C%D9%84"
         if page == 1 else
-        f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/{page-1}/0/0/0/10000000000?brands=&isMobile=false"
+        f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/{page-1}/0/0/10000000000?brands=&isMobile=false"
     )
     while True:
         data = {
@@ -141,8 +140,8 @@ if __name__ == "__main__":
         exit(1)
 
     all_products = {}
-
-    for page in range(1, MAX_PAGE + 1):
+    page = 1
+    while True:
         # محصولات اولیه HTML هر صفحه
         initial_products = get_initial_products(session, page)
         for p in initial_products:
@@ -153,18 +152,25 @@ if __name__ == "__main__":
         for p in lazy_products:
             all_products[p['id']] = p
 
+        # فقط محصولات موجود این صفحه
+        available_in_page = [p for p in initial_products + lazy_products if p['available']]
+        logger.info(f"🟢 محصولات موجود در صفحه {page}: {len(available_in_page)}")
+
+        # اگر هیچ محصول موجود نبود، حلقه را قطع کن
+        if len(available_in_page) == 0:
+            logger.info(f"⛔️ هیچ محصول موجودی در صفحه {page} نبود. بررسی صفحات متوقف شد.")
+            break
+
+        page += 1
+        if page > MAX_PAGE:
+            logger.info(f"به حداکثر تعداد صفحات ({MAX_PAGE}) رسیدیم.")
+            break
+
+    # فقط محصولات موجود را نمایش بده
     all_products = list(all_products.values())
     available = [p for p in all_products if p['available']]
-    unavailable = [p for p in all_products if not p['available']]
 
-    logger.info(f"\n✅ تعداد کل محصولات این دسته (در {MAX_PAGE} صفحه): {len(all_products)}")
-    logger.info(f"🟢 محصولات موجود: {len(available)}")
-    logger.info(f"🔴 محصولات ناموجود: {len(unavailable)}\n")
-
+    logger.info(f"\n✅ تعداد کل محصولات موجود این دسته: {len(available)}\n")
     print(f"\n🟢 محصولات موجود ({len(available)}):")
     for i, p in enumerate(available, 1):
-        print(f"{i:03d}. {p['name']} (ID: {p['id']})")
-
-    print(f"\n🔴 محصولات ناموجود ({len(unavailable)}):")
-    for i, p in enumerate(unavailable, 1):
         print(f"{i:03d}. {p['name']} (ID: {p['id']})")
