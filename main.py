@@ -7,28 +7,24 @@ import re
 import os
 import sys
 
-# --- تنظیمات ---
 BASE_URL = "https://panel.eways.co"
 CATEGORY_ID = 22244
 LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
 LIST_HTML_URL_TEMPLATE = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000?page={{page}}"
-MAX_PAGE = 5  # تعداد صفحات مورد بررسی
+MAX_PAGE = 5
 
-# --- لاگینگ ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 handler = RotatingFileHandler('app.log', maxBytes=1024*1024, backupCount=5)
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
 
-# --- دریافت یوزرنیم و پسورد از سکرت/متغیر محیطی ---
 EWAYS_USERNAME = os.environ.get("EWAYS_USERNAME")
 EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD")
 if not EWAYS_USERNAME or not EWAYS_PASSWORD:
     logger.error("❌ مقدار یوزرنیم یا پسورد در متغیر محیطی (سکرت) تعریف نشده است.")
     sys.exit(1)
 
-# --- لاگین ---
 def login_eways(username, password):
     session = requests.Session()
     session.headers.update({
@@ -46,9 +42,6 @@ def login_eways(username, password):
     }
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(login_url, data=payload, timeout=30)
-    print("Status code:", resp.status_code)
-    print("Response text:", resp.text[:500])
-    print("Cookies:", session.cookies)
     if resp.status_code != 200:
         logger.error(f"❌ لاگین ناموفق! کد وضعیت: {resp.status_code} - متن پاسخ: {resp.text[:200]}")
         return None
@@ -59,13 +52,12 @@ def login_eways(username, password):
         logger.error("❌ کوکی Aut دریافت نشد. لاگین ناموفق یا دلیل نامشخص.")
         return None
 
-# --- محصولات اولیه فقط صفحه اول (۲۴ تای اول) ---
-def get_initial_products(session):
-    url = LIST_HTML_URL_TEMPLATE.format(page=1)
-    logger.info(f"⏳ دریافت محصولات اولیه از HTML صفحه 1 ...")
+def get_initial_products(session, page):
+    url = LIST_HTML_URL_TEMPLATE.format(page=page)
+    logger.info(f"⏳ دریافت محصولات اولیه از HTML صفحه {page} ...")
     resp = session.get(url, timeout=30)
     if resp.status_code != 200:
-        logger.error(f"❌ خطا در دریافت HTML صفحه 1")
+        logger.error(f"❌ خطا در دریافت HTML صفحه {page}")
         return []
     soup = BeautifulSoup(resp.text, 'lxml')
     product_blocks = soup.select(".goods-record")
@@ -83,10 +75,9 @@ def get_initial_products(session):
                 product_id = match.group(1)
             name = name_tag.text.strip()
             products.append({'id': product_id, 'name': name, 'available': is_available})
-    logger.info(f"تعداد محصولات اولیه (HTML) صفحه 1: {len(products)}")
+    logger.info(f"تعداد محصولات اولیه (HTML) صفحه {page}: {len(products)}")
     return products
 
-# --- محصولات Lazy همه صفحات ---
 def get_lazy_products(session, page):
     all_products = []
     lazy_page = 1
@@ -98,7 +89,7 @@ def get_lazy_products(session, page):
             "Order": 2,
             "Sort": 2,
             "LazyPageIndex": lazy_page,
-            "PageIndex": page - 1,  # PageIndex از 0 شروع می‌شود
+            "PageIndex": page - 1,
             "PageSize": 24,
             "Available": 0,
             "MinPrice": 0,
@@ -136,7 +127,6 @@ def get_lazy_products(session, page):
         time.sleep(0.5)
     return all_products
 
-# --- اجرای اصلی ---
 if __name__ == "__main__":
     session = login_eways(EWAYS_USERNAME, EWAYS_PASSWORD)
     if not session:
@@ -145,13 +135,13 @@ if __name__ == "__main__":
 
     all_products = {}
 
-    # فقط HTML صفحه اول
-    initial_products = get_initial_products(session)
-    for p in initial_products:
-        all_products[p['id']] = p
-
-    # Lazy همه صفحات
     for page in range(1, MAX_PAGE + 1):
+        # محصولات اولیه HTML هر صفحه
+        initial_products = get_initial_products(session, page)
+        for p in initial_products:
+            all_products[p['id']] = p
+
+        # محصولات Lazy هر صفحه
         lazy_products = get_lazy_products(session, page)
         for p in lazy_products:
             all_products[p['id']] = p
