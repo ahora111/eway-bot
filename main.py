@@ -76,11 +76,12 @@ def get_all_products(session):
             result = resp.json()
         except Exception as e:
             logger.error(f"❌ خطا در تبدیل پاسخ به json: {e}")
+            logger.error(f"متن پاسخ سرور:\n{resp.text[:500]}")
             break
-        goods = result.get("Goods", [])
-        if not goods:
-            logger.info("🚩 به انتهای محصولات رسیدیم.")
+        if not result or "Goods" not in result or not result["Goods"]:
+            logger.info("🚩 به انتهای محصولات رسیدیم یا لیست خالی است.")
             break
+        goods = result["Goods"]
         for g in goods:
             all_products.append({"id": g["Id"], "name": g["Name"]})
         logger.info(f"تعداد محصولات این صفحه: {len(goods)}")
