@@ -4,6 +4,7 @@ from logging.handlers import RotatingFileHandler
 from bs4 import BeautifulSoup
 import os
 import time
+import re
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -13,7 +14,7 @@ handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)
 logger.addHandler(handler)
 
 BASE_URL = "https://panel.eways.co"
-CATEGORY_ID = 16777
+CATEGORY_ID = 4286
 LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
 LIST_HTML_URL = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000"
 
@@ -59,15 +60,16 @@ def get_initial_products(session):
     for block in product_blocks:
         a_tag = block.select_one("a")
         name_tag = block.select_one("span.goods-record-title")
+        unavailable = block.select_one(".goods-record-unavailable")
+        is_available = unavailable is None
         if a_tag and name_tag:
             product_id = None
             href = a_tag['href']
-            import re
             match = re.search(r'/Store/Detail/\d+/(\d+)', href)
             if match:
                 product_id = match.group(1)
             name = name_tag.text.strip()
-            products.append({'id': product_id, 'name': name})
+            products.append({'id': product_id, 'name': name, 'available': is_available})
     logger.info(f"تعداد محصولات اولیه (HTML): {len(products)}")
     return products
 
@@ -109,7 +111,11 @@ def get_lazy_products(session):
             break
         goods = result["Goods"]
         for g in goods:
-            all_products.append({"id": g["Id"], "name": g["Name"]})
+            all_products.append({
+                "id": g["Id"],
+                "name": g["Name"],
+                "available": g.get("Availability", True)
+            })
         logger.info(f"تعداد محصولات این صفحه: {len(goods)}")
         lazy_page += 1
         time.sleep(0.5)
@@ -127,7 +133,18 @@ if __name__ == "__main__":
     for p in lazy_products:
         all_products[p['id']] = p
     all_products = list(all_products.values())
-    logger.info(f"\n✅ تعداد کل محصولات این دسته: {len(all_products)}\n")
-    for i, p in enumerate(all_products, 1):
-        logger.info(f"{i:03d}. {p['name']} (ID: {p['id']})")
-    print(f"\n✅ تعداد کل محصولات این دسته: {len(all_products)}")
+
+    available = [p for p in all_products if p['available']]
+    unavailable = [p for p in all_products if not p['available']]
+
+    logger.info(f"\n✅ تعداد کل محصولات این دسته: {len(all_products)}")
+    logger.info(f"🟢 محصولات موجود: {len(available)}")
+    logger.info(f"🔴 محصولات ناموجود: {len(unavailable)}\n")
+
+    print(f"\n🟢 محصولات موجود ({len(available)}):")
+    for i, p in enumerate(available, 1):
+        print(f"{i:03d}. {p['name']} (ID: {p['id']})")
+
+    print(f"\n🔴 محصولات ناموجود ({len(unavailable)}):")
+    for i, p in enumerate(unavailable, 1):
+        print(f"{i:03d}. {p['name']} (ID: {p['id']})")
