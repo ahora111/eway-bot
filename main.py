@@ -7,11 +7,11 @@ import re
 
 # --- تنظیمات ---
 BASE_URL = "https://panel.eways.co"
-CATEGORY_ID = 4286  # دسته مورد نظر
+CATEGORY_ID = 22244  # دسته مورد نظر
 LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
 LIST_HTML_URL_TEMPLATE = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000?page={{page}}"
-EWAYS_USERNAME = "شماره موبایل یا یوزرنیم"  # مقدار صحیح را وارد کن
-EWAYS_PASSWORD = "پسورد"  # مقدار صحیح را وارد کن
+EWAYS_USERNAME = os.environ.get("EWAYS_USERNAME") or "شماره موبایل یا یوزرنیم"
+EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
 MAX_PAGE = 5  # تعداد صفحات مورد بررسی
 
 # --- لاگینگ ---
