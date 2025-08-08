@@ -146,6 +146,16 @@ if __name__ == "__main__":
         for p in lazy_products:
             all_products[p['id']] = p
 
+        # بررسی تفاوت محصولات HTML و LazyPageIndex=1
+        html_ids = set(p['id'] for p in initial_products)
+        lazy1_ids = set(p['id'] for p in lazy_products[:24])  # فقط 24 تای اول Lazy
+        only_in_html = html_ids - lazy1_ids
+        only_in_lazy = lazy1_ids - html_ids
+        if only_in_html:
+            logger.warning(f"در صفحه {page} این محصولات فقط در HTML هستند و در LazyPageIndex=1 نیستند: {only_in_html}")
+        if only_in_lazy:
+            logger.warning(f"در صفحه {page} این محصولات فقط در LazyPageIndex=1 هستند و در HTML نیستند: {only_in_lazy}")
+
     all_products = list(all_products.values())
     available = [p for p in all_products if p['available']]
     unavailable = [p for p in all_products if not p['available']]
