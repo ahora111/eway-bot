@@ -8,7 +8,7 @@ import os
 import sys
 
 BASE_URL = "https://panel.eways.co"
-CATEGORY_ID = 4286
+CATEGORY_ID = 22244
 MAX_PAGE = 50  # حداکثر تعداد صفحات برای اطمینان (در عمل زودتر قطع می‌شود)
 LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
 
