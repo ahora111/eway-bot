@@ -53,10 +53,8 @@ def login_eways(username, password):
         return None
 
 def get_initial_products(session, page):
-    if page == 1:
-        url = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000?text=%DA%AF%D9%88%D8%B4%DB%8C-%D9%85%D9%88%D8%A8%D8%A7%DB%8C%D9%84"
-    else:
-        url = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/{page-1}/0/0/0/10000000000?brands=&isMobile=false"
+    text_param = "?text=%DA%AF%D9%88%D8%B4%DB%8C-%D9%85%D9%88%D8%A8%D8%A7%DB%8C%D9%84"
+    url = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/{page-1}/0/0/0/10000000000{text_param}"
     logger.info(f"⏳ دریافت محصولات اولیه از HTML صفحه {page} ...")
     resp = session.get(url, timeout=30)
     if resp.status_code != 200:
