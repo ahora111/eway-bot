@@ -80,7 +80,7 @@ def get_initial_products(session, page):
             products.append({'id': product_id, 'name': name, 'available': is_available})
     logger.info(f"تعداد محصولات اولیه (HTML) صفحه {page}: {len(products)}")
     return products
-
+    
 def get_lazy_products(session, page):
     all_products = []
     lazy_page = 1
