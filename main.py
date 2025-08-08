@@ -72,6 +72,8 @@ def get_initial_products(session, page):
             name = name_tag.text.strip()
             products.append({'id': product_id, 'name': name, 'available': is_available})
     logger.info(f"تعداد محصولات اولیه (HTML) صفحه {page}: {len(products)}")
+    if len(products) == 0:
+        logger.warning(f"⚠️ هیچ محصول اولیه در HTML صفحه {page} پیدا نشد. فقط Lazy بررسی می‌شود.")
     return products
 
 def get_lazy_products(session, page):
