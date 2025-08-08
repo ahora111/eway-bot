@@ -4,14 +4,14 @@ from logging.handlers import RotatingFileHandler
 from bs4 import BeautifulSoup
 import time
 import re
+import os
+import sys
 
 # --- تنظیمات ---
 BASE_URL = "https://panel.eways.co"
-CATEGORY_ID = 22244  # دسته مورد نظر
+CATEGORY_ID = 22244
 LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
 LIST_HTML_URL_TEMPLATE = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000?page={{page}}"
-EWAYS_USERNAME = os.environ.get("EWAYS_USERNAME") or "شماره موبایل یا یوزرنیم"
-EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
 MAX_PAGE = 5  # تعداد صفحات مورد بررسی
 
 # --- لاگینگ ---
@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 handler = RotatingFileHandler('app.log', maxBytes=1024*1024, backupCount=5)
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
+
+# --- دریافت یوزرنیم و پسورد از سکرت/متغیر محیطی ---
+EWAYS_USERNAME = os.environ.get("EWAYS_USERNAME")
+EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD")
+if not EWAYS_USERNAME or not EWAYS_PASSWORD:
+    logger.error("❌ مقدار یوزرنیم یا پسورد در متغیر محیطی (سکرت) تعریف نشده است.")
+    sys.exit(1)
 
 # --- لاگین ---
 def login_eways(username, password):
@@ -39,6 +46,9 @@ def login_eways(username, password):
     }
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(login_url, data=payload, timeout=30)
+    print("Status code:", resp.status_code)
+    print("Response text:", resp.text[:500])
+    print("Cookies:", session.cookies)
     if resp.status_code != 200:
         logger.error(f"❌ لاگین ناموفق! کد وضعیت: {resp.status_code} - متن پاسخ: {resp.text[:200]}")
         return None
