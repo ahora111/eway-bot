@@ -8,7 +8,7 @@ import os
 import sys
 
 BASE_URL = "https://panel.eways.co"
-CATEGORY_ID = 22244
+CATEGORY_ID = 4286
 MAX_PAGE = 5
 
 LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
