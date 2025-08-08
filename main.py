@@ -9,9 +9,9 @@ import sys
 
 BASE_URL = "https://panel.eways.co"
 CATEGORY_ID = 22244
-LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
-LIST_HTML_URL_TEMPLATE = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000?page={{page}}"
 MAX_PAGE = 5
+
+LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -53,7 +53,10 @@ def login_eways(username, password):
         return None
 
 def get_initial_products(session, page):
-    url = LIST_HTML_URL_TEMPLATE.format(page=page)
+    if page == 1:
+        url = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000?text=%DA%AF%D9%88%D8%B4%DB%8C-%D9%85%D9%88%D8%A8%D8%A7%DB%8C%D9%84"
+    else:
+        url = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/{page-1}/0/0/0/10000000000?brands=&isMobile=false"
     logger.info(f"⏳ دریافت محصولات اولیه از HTML صفحه {page} ...")
     resp = session.get(url, timeout=30)
     if resp.status_code != 200:
@@ -81,7 +84,11 @@ def get_initial_products(session, page):
 def get_lazy_products(session, page):
     all_products = []
     lazy_page = 1
-    referer_url = LIST_HTML_URL_TEMPLATE.format(page=page)
+    referer_url = (
+        f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000?text=%DA%AF%D9%88%D8%B4%DB%8C-%D9%85%D9%88%D8%A8%D8%A7%DB%8C%D9%84"
+        if page == 1 else
+        f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/{page-1}/0/0/0/10000000000?brands=&isMobile=false"
+    )
     while True:
         data = {
             "ListViewType": 0,
