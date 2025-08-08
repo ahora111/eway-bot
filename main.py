@@ -8,7 +8,7 @@ import os
 import sys
 
 BASE_URL = "https://panel.eways.co"
-CATEGORY_ID = 22244
+CATEGORY_ID = 4286
 LIST_LAZY_URL = f"{BASE_URL}/Store/ListLazy"
 LIST_HTML_URL_TEMPLATE = f"{BASE_URL}/Store/List/{CATEGORY_ID}/2/2/0/0/0/10000000000?page={{page}}"
 MAX_PAGE = 5
@@ -118,7 +118,7 @@ def get_lazy_products(session, page):
         goods = result["Goods"]
         for g in goods:
             all_products.append({
-                "id": g["Id"],
+                "id": str(g["Id"]),
                 "name": g["Name"],
                 "available": g.get("Availability", True)
             })
@@ -145,16 +145,6 @@ if __name__ == "__main__":
         lazy_products = get_lazy_products(session, page)
         for p in lazy_products:
             all_products[p['id']] = p
-
-        # بررسی تفاوت محصولات HTML و LazyPageIndex=1
-        html_ids = set(p['id'] for p in initial_products)
-        lazy1_ids = set(p['id'] for p in lazy_products[:24])  # فقط 24 تای اول Lazy
-        only_in_html = html_ids - lazy1_ids
-        only_in_lazy = lazy1_ids - html_ids
-        if only_in_html:
-            logger.warning(f"در صفحه {page} این محصولات فقط در HTML هستند و در LazyPageIndex=1 نیستند: {only_in_html}")
-        if only_in_lazy:
-            logger.warning(f"در صفحه {page} این محصولات فقط در LazyPageIndex=1 هستند و در HTML نیستند: {only_in_lazy}")
 
     all_products = list(all_products.values())
     available = [p for p in all_products if p['available']]
