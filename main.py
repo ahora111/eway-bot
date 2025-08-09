@@ -11,7 +11,7 @@ from queue import Queue
 import logging
 from logging.handlers import RotatingFileHandler
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
-from collections import defaultdict
+from collections import defaultdict, Counter
 from urllib.parse import urljoin
 
 # ==============================================================================
@@ -40,29 +40,28 @@ EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
 CACHE_FILE = 'products_cache.json'
 
 # ==============================================================================
-# ابزارهای دسته (ایندکس والد/عمق)
+# ابزارهای دسته (ایندکس والد/عمق/نام)
 # ==============================================================================
 CATEGORY_PARENT = {}
 CATEGORY_DEPTH = {}
-CATEGORY_NAMES = {}  # نگاشت ID به نام دسته
+CATEGORY_NAME = {}
 
 def init_category_index_global(categories):
-    global CATEGORY_PARENT, CATEGORY_DEPTH, CATEGORY_NAMES
+    global CATEGORY_PARENT, CATEGORY_DEPTH, CATEGORY_NAME
     CATEGORY_PARENT = {c['id']: c.get('parent_id') for c in categories}
+    CATEGORY_NAME = {c['id']: (c.get('name') or '').strip() for c in categories}
     CATEGORY_DEPTH = {}
-    CATEGORY_NAMES = {c['id']: c['name'] for c in categories}  # پر کردن دیکشنری نام‌ها
-    
     def depth(cid):
         if cid in CATEGORY_DEPTH:
             return CATEGORY_DEPTH[cid]
         p = CATEGORY_PARENT.get(cid)
         CATEGORY_DEPTH[cid] = 0 if not p else 1 + depth(p)
         return CATEGORY_DEPTH[cid]
-    
     for c in categories:
         depth(c['id'])
 
 def pick_deepest(*cat_ids):
+    # انتخاب عمیق‌ترین دسته از بین ورودی‌ها (نادیده گرفتن None)
     candidates = [c for c in cat_ids if c is not None]
     if not candidates:
         return None
@@ -74,10 +73,17 @@ def abs_url(u):
     return u if str(u).startswith('http') else urljoin(BASE_URL, u)
 
 def extract_ids_from_href(href):
+    # استخراج cat_id و product_id از /Store/Detail/<cat>/<pid>
     m = re.search(r'/Store/Detail/(\d+)/(\d+)', href or '')
     if not m:
         return None, None
     return int(m.group(1)), m.group(2)
+
+def cat_label(catid):
+    if catid is None:
+        return "None (نامشخص)"
+    name = CATEGORY_NAME.get(catid)
+    return f"{catid} ({name if name else 'نامشخص'})"
 
 # ==============================================================================
 # توابع انتخاب منعطف با SELECTED_IDS_STRING
@@ -121,6 +127,7 @@ def get_all_subcategories(parent_id, all_cats):
         result.extend(get_all_subcategories(sub_id, all_cats))
     return result
 
+# خروجی: (دسته‌های اسکرپ، دسته‌های انتقال) — والد فقط اگر خودت در رشته بیاوری
 def get_selected_categories_according_to_selection(parsed_selection, all_cats):
     selected_scrape = set()
     selected_transfer = set()
@@ -275,6 +282,7 @@ def get_product_details(session, cat_id, product_id):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'lxml')
 
+        # دسته نهایی از breadcrumb (آخرین لینک List/)
         canonical_cat_id = None
         try:
             selectors = [
@@ -298,6 +306,7 @@ def get_product_details(session, cat_id, product_id):
         except Exception:
             pass
 
+        # جدول مشخصات
         specs_table = soup.select_one('#link1 .table-responsive table') \
                       or soup.select_one('.table-responsive table') \
                       or soup.find('table', class_='table')
@@ -331,17 +340,17 @@ def get_product_details(session, cat_id, product_id):
     reraise=True
 )
 def get_products_from_category_page(session, category_id, max_pages=10, delay=0.5):
-    cat_name = CATEGORY_NAMES.get(category_id, "نامشخص")
     all_products_in_category = []
     seen_product_ids = set()
     page = 1
     error_count = 0
     while page <= max_pages:
+        # HTML
         if page == 1:
             url = f"{BASE_URL}/Store/List/{category_id}/2/2/0/0/0/10000000000"
         else:
             url = f"{BASE_URL}/Store/List/{category_id}/2/2/{page-1}/0/0/10000000000?brands=&isMobile=false"
-        logger.info(f"⏳ دریافت HTML صفحه {page} از دسته {cat_name} ({category_id}) ...")
+        logger.info(f"⏳ دریافت HTML صفحه {page} برای دسته {cat_label(category_id)} ...")
         try:
             resp = session.get(url, timeout=30)
             if resp.status_code != 200:
@@ -374,10 +383,11 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                         image_url = abs_url(image_url)
 
                     if is_available and pid not in seen_product_ids:
+                        # خواندن جزئیات + دسته نهایی
                         specs, canonical_id = get_product_details(session, cat_from_link or category_id, pid)
                         eff_cat = pick_deepest(category_id, cat_from_link, canonical_id)
                         if canonical_id and eff_cat != category_id:
-                            logger.debug(f"      - نگاشت دستهٔ محصول {pid}: {category_id} → {eff_cat} (breadcrumb)")
+                            logger.debug(f"      - نگاشت دستهٔ محصول {pid}: {cat_label(category_id)} → {cat_label(eff_cat)} (breadcrumb)")
                         html_products.append({
                             'id': pid,
                             'name': name,
@@ -391,6 +401,7 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                         time.sleep(random.uniform(delay, delay + 0.2))
             logger.info(f"🟢 محصولات موجود (HTML) صفحه {page}: {len(html_products)}")
 
+            # Lazy (فقط موجودها)
             lazy_products = []
             lazy_page = 1
             referer_url = url
@@ -413,7 +424,7 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                     "X-Requested-With": "XMLHttpRequest",
                     "Referer": referer_url
                 }
-                logger.info(f"⏳ LazyPageIndex={lazy_page} صفحه {page} ...")
+                logger.info(f"⏳ LazyPageIndex={lazy_page} صفحه {page} برای دسته {cat_label(category_id)} ...")
                 resp = session.post(f"{BASE_URL}/Store/ListLazy", data=data, headers=headers, timeout=30)
                 if resp.status_code != 200:
                     logger.error(f"❌ خطا در Lazy (کد: {resp.status_code})")
@@ -434,6 +445,7 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                     pid = str(g["Id"])
                     if pid in seen_product_ids:
                         continue
+                    # تلاش برای گرفتن cat از لینک در خود JSON (اگر باشد)
                     cat_from_link = None
                     for k in ("Url", "Link", "Href", "RelativeUrl"):
                         u = g.get(k)
@@ -469,10 +481,10 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
             error_count += 1
             logger.error(f"    - خطا در پردازش صفحه محصولات: {e} (تعداد خطا: {error_count})")
             if error_count >= 3:
-                logger.critical(f"🚨 خطاهای متوالی زیاد در دسته {cat_name} ({category_id}). توقف.")
+                logger.critical(f"🚨 خطاهای متوالی زیاد در دسته {cat_label(category_id)}. توقف.")
                 break
             time.sleep(2)
-    logger.info(f"    - کل محصولات موجود استخراج‌شده از دسته {cat_name} ({category_id}): {len(all_products_in_category)}")
+    logger.info(f"    - کل محصولات موجود استخراج‌شده از دسته {cat_label(category_id)}: {len(all_products_in_category)}")
     return all_products_in_category
 
 # ==============================================================================
@@ -519,12 +531,18 @@ def get_all_wc_products_with_prefix(prefix="EWAYS-"):
     page = 1
     while True:
         try:
-            res = requests.get(f"{WC_API_URL}/products", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), params={"per_page": 100, "page": page}, verify=False)
+            res = requests.get(
+                f"{WC_API_URL}/products",
+                auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET),
+                params={"per_page": 100, "page": page},
+                verify=False
+            )
             res.raise_for_status()
             data = res.json()
             if not data:
                 break
-            products.extend([p for p in data if p.get('sku', '').startswith(prefix)])
+            # فقط محصولاتی که SKU با پیشوند مشخص شروع می‌شود
+            products.extend([p for p in data if (p.get('sku') or '').startswith(prefix)])
             if len(data) < 100:
                 break
             page += 1
@@ -549,9 +567,10 @@ def check_existing_category(name, parent):
 
 def transfer_categories_to_wc(source_categories):
     logger.info("\n⏳ شروع انتقال دسته‌بندی‌ها به ووکامرس...")
+    # والدها خودکار اضافه نمی‌شوند؛ فقط ورودی‌ها ساخته می‌شوند
+    # ترتیب: والد قبل از فرزند اگر هر دو در ورودی باشند
     sorted_cats = []
     id_to_cat = {cat['id']: cat for cat in source_categories}
-    
     def add_with_parents_if_present(cat):
         pid = cat.get('parent_id')
         if pid and pid in id_to_cat:
@@ -560,7 +579,6 @@ def transfer_categories_to_wc(source_categories):
                 add_with_parents_if_present(parent_cat)
         if cat not in sorted_cats:
             sorted_cats.append(cat)
-    
     for cat in source_categories:
         add_with_parents_if_present(cat)
 
@@ -615,30 +633,25 @@ def process_price(price_value):
     wait=wait_random_exponential(multiplier=1, max=10),
     reraise=True
 )
-def _send_to_woocommerce(wc_by_sku, sku, data, stats):
+def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
     try:
         auth = (WC_CONSUMER_KEY, WC_CONSUMER_SECRET)
-        
-        # چک وجود محصول با استفاده از داده‌های کش شده
-        if sku in wc_by_sku:
-            product_id = wc_by_sku[sku]['id']
+        if existing_product_id:
             update_data = {
                 "regular_price": data["regular_price"],
                 "stock_quantity": data["stock_quantity"],
                 "stock_status": data["stock_status"],
                 "attributes": data["attributes"],
                 "tags": data.get("tags", []),
-                "categories": data.get("categories", []),
+                "categories": data.get("categories", []),  # فقط leaf
             }
-            res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=update_data, verify=False, timeout=20)
+            res = requests.put(f"{WC_API_URL}/products/{existing_product_id}", auth=auth, json=update_data, verify=False, timeout=20)
             res.raise_for_status()
             with stats['lock']: stats['updated'] += 1
-            logger.debug(f"      - محصول {sku} با موفقیت آپدیت شد (ID: {product_id})")
         else:
             res = requests.post(f"{WC_API_URL}/products", auth=auth, json=data, verify=False, timeout=20)
             res.raise_for_status()
             with stats['lock']: stats['created'] += 1
-            logger.debug(f"      - محصول {sku} با موفقیت ایجاد شد")
     except requests.exceptions.HTTPError as e:
         logger.error(f"   ❌ HTTP خطا برای {sku}: {e.response.status_code} - {e.response.text[:300]}")
         raise
@@ -715,12 +728,18 @@ def process_product_wrapper(args):
         for idx, (key, value) in enumerate(specs.items()):
             attributes.append({"name": key, "options": [value], "position": idx, "visible": True, "variation": False})
 
+        sku = f"EWAYS-{product.get('id')}"
+        existing_wc_id = None
+        wcp = wc_by_sku.get(sku)
+        if wcp:
+            existing_wc_id = wcp.get('id')
+
         wc_data = {
             "name": product.get('name', 'بدون نام'),
             "type": "simple",
-            "sku": f"EWAYS-{product.get('id')}",
+            "sku": sku,
             "regular_price": process_price(product.get('price', 0)),
-            "categories": [{"id": wc_cat_id}],
+            "categories": [{"id": wc_cat_id}],  # فقط leaf
             "images": [{"src": abs_url(product.get("image"))}] if product.get("image") else [],
             "stock_quantity": product.get('stock', 0),
             "manage_stock": True,
@@ -729,7 +748,7 @@ def process_product_wrapper(args):
             "tags": smart_tags_for_product(product, cat_map),
             "status": "publish"
         }
-        _send_to_woocommerce(wc_by_sku, wc_data['sku'], wc_data, stats)
+        _send_to_woocommerce(wc_data['sku'], wc_data, stats, existing_product_id=existing_wc_id)
         time.sleep(random.uniform(0.5, 1.5))
     except Exception as e:
         logger.error(f"   ❌ خطا در پردازش محصول {product.get('id','')}: {e}")
@@ -739,6 +758,7 @@ def process_product_wrapper(args):
 # ابزارهای تجمیع محصول به leaf و کش
 # ==============================================================================
 def condense_products_to_leaf(all_products_by_catkey, categories):
+    # اگر یک محصول در چند دسته دیده شد، عمیق‌ترین را انتخاب می‌کنیم
     occurrences = defaultdict(list)
     for key, p in all_products_by_catkey.items():
         occurrences[str(p['id'])].append(p)
@@ -752,6 +772,7 @@ def normalize_cache(cached_products, categories):
     if not cached_products:
         return {}
     if any('|' in k for k in cached_products.keys()):
+        # کش قدیم → تجمیع روی leaf
         all_products_by_catkey = {}
         for key, p in cached_products.items():
             if 'category_id' not in p:
@@ -763,6 +784,7 @@ def normalize_cache(cached_products, categories):
             all_products_by_catkey[key] = p
         return condense_products_to_leaf(all_products_by_catkey, categories)
     else:
+        # کش جدید
         normalized = {}
         for pid, p in cached_products.items():
             if 'category_id' in p and isinstance(p['category_id'], str) and p['category_id'].isdigit():
@@ -776,8 +798,7 @@ def print_products_tree_by_leaf(products_by_pid, categories):
     for pid, p in products_by_pid.items():
         tree[p.get('category_id')].append(p)
     for catid in sorted(tree, key=lambda x: (0 if x is None else int(x))):
-        cat_name = CATEGORY_NAMES.get(catid, "نامشخص")
-        logger.info(f"دسته [{catid}] {cat_name}:")
+        logger.info(f"دسته [{catid}] {cat_map.get(int(catid), 'نامشخص') if catid else 'نامشخص'}:")
         for p in sorted(tree[catid], key=lambda x: int(x['id'])):
             logger.info(f"   - {p['name']} (ID: {p['id']})")
 
@@ -795,31 +816,28 @@ def main():
         logger.error("❌ دسته‌بندی‌ها بارگذاری نشد.")
         return
     init_category_index_global(all_cats)
-    
-    # ایجاد نگاشت ID به نام برای لاگ‌های خوانا
-    cat_id_to_name = {cat['id']: cat['name'] for cat in all_cats}
 
     SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or "1582:14548-allz,1584-all-allz|16777:all-allz|4882:all-allz|16778:22570-all-allz"
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
 
+    # انتخاب‌ها (بدون افزودن خودکار والد)
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
-    
-    # نمایش نام دسته‌ها در کنار ID در لاگ
-    
-# باید به این صورت اصلاح شود
-    scrape_cat_names = ", ".join([f"{cat_id_to_name[c['id']]} ({c['id']})" for c in scrape_categories])
-    transfer_cat_names = ", ".join([f"{cat_id_to_name[c['id']]} ({c['id']})" for c in transfer_categories])
-    logger.info(f"✅ دسته‌های اسکرپ: {scrape_cat_names}")
-    logger.info(f"✅ دسته‌های انتقال: {transfer_cat_names}")
+    scrape_list = [f"{c['id']} ({c['name']})" for c in scrape_categories]
+    transfer_list = [f"{c['id']} ({c['name']})" for c in transfer_categories]
+    logger.info(f"✅ دسته‌های اسکرپ: {scrape_list}")
+    logger.info(f"✅ دسته‌های انتقال: {transfer_list}")
 
+    # ساخت فقط همان دسته‌هایی که خودت خواستی
     category_mapping = transfer_categories_to_wc(transfer_categories)
     if not category_mapping:
         logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد.")
         return
 
+    # کش
     cached_products_raw = load_cache()
     cached_products = normalize_cache(cached_products_raw, all_cats)
 
+    # جمع‌آوری محصولات با throttle تطبیقی (صف دسته + تاخیر مشترک)
     selected_ids = [cat['id'] for cat in scrape_categories]
     all_products = {}
     all_lock = Lock()
@@ -853,7 +871,7 @@ def main():
                 with delay_lock:
                     shared['delay'] = max(min_delay, shared['delay'] - 0.05) if len(products_in_cat) > 0 else min(max_delay, shared['delay'] + 0.1)
             except Exception as e:
-                logger.warning(f"⚠️ خطا در دسته {cat_id}: {e}")
+                logger.warning(f"⚠️ خطا در دسته {cat_label(cat_id)}: {e}")
                 with delay_lock:
                     shared['delay'] = min(max_delay, shared['delay'] + 0.2)
             finally:
@@ -872,10 +890,18 @@ def main():
 
     logger.info(f"✅ استخراج محصولات تمام شد. (کل کلیدهای id|leaf: {len(all_products)})")
 
+    # انتخاب leaf نهایی برای هر محصول
     canonical_products = condense_products_to_leaf(all_products, all_cats)
     logger.info(f"🧭 محصولات پس از نگاشت به عمیق‌ترین زیرشاخه: {len(canonical_products)}")
     print_products_tree_by_leaf(canonical_products, transfer_categories or all_cats)
 
+    # ——— آمار تعداد محصولات هر دسته (leaf) ———
+    cat_counts = Counter(p.get('category_id') for p in canonical_products.values())
+    logger.info("📊 آمار تعداد محصولات به تفکیک دسته (leaf):")
+    for cid, cnt in sorted(cat_counts.items(), key=lambda kv: (-kv[1], CATEGORY_NAME.get(kv[0], '') or '')):
+        logger.info(f"   - {cat_label(cid)}: {cnt}")
+
+    # ادغام با کش و تشخیص تغییر (قیمت/موجودی/مشخصات/دسته)
     updated_cache = {}
     changed_items = {}
     new_products_by_category = {}
@@ -898,7 +924,7 @@ def main():
     save_cache(updated_cache)
 
     # ============================
-    # گپ‌گیری همگام‌سازی با ووکامرس
+    # گپ‌گیری همگام‌سازی با ووکامرس: افزودن موارد مفقود + دسته نامنطبق
     # ============================
     logger.info("\n⛽️ بررسی گپ همگام‌سازی با ووکامرس (افزودن موارد مفقود و دسته‌های نامنطبق)...")
     wc_products = get_all_wc_products_with_prefix("EWAYS-")
@@ -927,24 +953,32 @@ def main():
             mismatch_count += 1
     logger.info(f"🧭 موارد با دسته نامنطبق که به ارسال اضافه شدند: {mismatch_count}")
 
+    # ——— آمار اقلامی که قرار است به ووکامرس ارسال شوند ———
+    send_counts = Counter(p['category_id'] for p in to_send_items.values())
+    logger.info("🛰️ اقلام ارسالی به ووکامرس به تفکیک دسته:")
+    for cid, cnt in sorted(send_counts.items(), key=lambda kv: (-kv[1], CATEGORY_NAME.get(kv[0], '') or '')):
+        logger.info(f"   - {cat_label(cid)}: {cnt}")
+
     send_count = len(to_send_items)
     logger.info(f"\n🚀 شروع پردازش و ارسال {send_count} قلم به ووکامرس...")
 
-    # مدیریت ناموجودها
+    # مدیریت ناموجودها (بدون تکرار) با استفاده از همان wc_products
     logger.info("\n⏳ مدیریت محصولات ناموجود...")
     extracted_skus = {f"EWAYS-{pid}" for pid in canonical_products.keys()}
     to_oos_ids = set()
+    # از کش قبلی
     for pid in cached_products.keys():
         sku = f"EWAYS-{pid}"
         if sku not in extracted_skus:
             wcp = wc_by_sku.get(sku)
             if wcp and wcp.get('stock_status') != "outofstock":
                 to_oos_ids.add(wcp['id'])
+    # از ووکامرس
     for wcp in wc_products:
         if wcp['sku'] not in extracted_skus and wcp.get('stock_status') != "outofstock":
             to_oos_ids.add(wcp['id'])
 
-    # صف ارسال با استفاده از wc_by_sku برای بهینه‌سازی
+    # صف ارسال
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0, 'outofstock_updated': 0, 'lock': Lock()}
 
     product_queue = Queue()
