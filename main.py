@@ -821,11 +821,24 @@ def main():
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
 
     # انتخاب‌ها (بدون افزودن خودکار والد)
+    # انتخاب‌ها (بدون افزودن خودکار والد)
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
+
+# اطمینان از حضور دسته‌های والد (سمت چپ :) در لیست انتقال تا نام‌شان ساخته/نمایش داده شود
+    parent_ids = [block['parent_id'] for block in parsed_selection]
+    parent_cats = [cat for cat in all_cats if cat['id'] in parent_ids]
+
+# ادغام بدون تکرار با لیست انتقال
+    transfer_by_id = {c['id']: c for c in transfer_categories}
+    for pc in parent_cats:
+        transfer_by_id.setdefault(pc['id'], pc)
+    transfer_categories = list(transfer_by_id.values())
+
+# لاگ دسته‌ها
     scrape_list = [f"{c['id']} ({c['name']})" for c in scrape_categories]
     transfer_list = [f"{c['id']} ({c['name']})" for c in transfer_categories]
     logger.info(f"✅ دسته‌های اسکرپ: {scrape_list}")
-    logger.info(f"✅ دسته‌های انتقال: {transfer_list}")
+    logger.info(f"✅ دسته‌های انتقال (با والدها): {transfer_list}")
 
     # ساخت فقط همان دسته‌هایی که خودت خواستی
     category_mapping = transfer_categories_to_wc(transfer_categories)
