@@ -805,8 +805,10 @@ def main():
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
     
     # نمایش نام دسته‌ها در کنار ID در لاگ
-    scrape_cat_names = ", ".join([f"{cat_id_to_name[c['id']} ({c['id']})" for c in scrape_categories])
-    transfer_cat_names = ", ".join([f"{cat_id_to_name[c['id']} ({c['id']})" for c in transfer_categories])
+    
+# باید به این صورت اصلاح شود
+    scrape_cat_names = ", ".join([f"{cat_id_to_name[c['id']]} ({c['id']})" for c in scrape_categories])
+    transfer_cat_names = ", ".join([f"{cat_id_to_name[c['id']]} ({c['id']})" for c in transfer_categories])
     logger.info(f"✅ دسته‌های اسکرپ: {scrape_cat_names}")
     logger.info(f"✅ دسته‌های انتقال: {transfer_cat_names}")
 
