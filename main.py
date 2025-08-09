@@ -57,28 +57,153 @@ def get_all_subcategories(parent_id, all_cats):
         result.extend(get_all_subcategories(sub_id, all_cats))
     return result
 
+# خروجی: (لیست دسته‌های اسکرپ، لیست دسته‌های انتقال به ووکامرس با والدها)
 def get_selected_categories_according_to_selection(parsed_selection, all_cats):
-    selected_ids = set()
+    selected_scrape = set()    # فقط دسته‌هایی که باید محصولات‌شان جمع شود
+    selected_transfer = set()  # دسته‌هایی که باید در ووکامرس ساخته شوند (اسکرپ‌ها + تمام والدها)
+
+    id_to_cat = {c['id']: c for c in all_cats}
+
+    def add_ancestors(cid):
+        while cid:
+            if cid in selected_transfer:
+                break
+            selected_transfer.add(cid)
+            cid = id_to_cat.get(cid, {}).get('parent_id')
+
+    def add_all_subs(xid):
+        # افزودن همه‌ی زیرشاخه‌ها (بازگشتی) به selected_scrape و والدها به selected_transfer
+        for c in all_cats:
+            if c['parent_id'] == xid:
+                selected_scrape.add(c['id'])
+                add_ancestors(c['id'])
+                add_all_subs(c['id'])
+
     for block in parsed_selection:
         parent_id = block['parent_id']
-        selected_ids.add(parent_id)
+        # والد را به‌صورت پیش‌فرض به لیست اسکرپ اضافه نمی‌کنیم
         for sel in block['selections']:
-            if sel['type'] == 'all_subcats' and sel['id'] == parent_id:
-                selected_ids.update(get_direct_subcategories(parent_id, all_cats))
-            elif sel['type'] == 'only_products' and sel['id'] == parent_id:
-                selected_ids.add(parent_id)
-            elif sel['type'] == 'all_subcats_and_products' and sel['id'] == parent_id:
-                direct_subs = get_direct_subcategories(parent_id, all_cats)
-                selected_ids.update(direct_subs)
-                for sub_id in direct_subs:
-                    selected_ids.update(get_all_subcategories(sub_id, all_cats))
-                selected_ids.add(parent_id)
-            elif sel['type'] == 'only_products' and sel['id'] != parent_id:
-                selected_ids.add(sel['id'])
-            elif sel['type'] == 'all_subcats_and_products' and sel['id'] != parent_id:
-                selected_ids.add(sel['id'])
-                selected_ids.update(get_all_subcategories(sel['id'], all_cats))
-    return [cat for cat in all_cats if cat['id'] in selected_ids]
+            typ, sid = sel['type'], sel['id']
+
+            if typ == 'all_subcats' and sid == parent_id:
+                # فقط زیرشاخه‌های مستقیم
+                subs = get_direct_subcategories(parent_id, all_cats)
+                for sc_id in subs:
+                    selected_scrape.add(sc_id)
+                    add_ancestors(sc_id)
+
+            elif typ == 'only_products' and sid == parent_id:
+                # خود والد
+                selected_scrape.add(parent_id)
+                add_ancestors(parent_id)
+
+            elif typ == 'all_subcats_and_products' and sid == parent_id:
+                # والد + همه زیرشاخه‌هایش
+                selected_scrape.add(parent_id)
+                add_ancestors(parent_id)
+                # تمام زیرشاخه‌های عمیق
+                for sub in get_all_subcategories(parent_id, all_cats):
+                    selected_scrape.add(sub)
+                    add_ancestors(sub)
+
+            elif typ == 'only_products' and sid != parent_id:
+                # فقط خود زیرشاخه انتخاب‌شده
+                selected_scrape.add(sid)
+                add_ancestors(sid)
+
+            elif typ == 'all_subcats_and_products' and sid != parent_id:
+                # زیرشاخه انتخاب‌شده + همه زیرشاخه‌هایش
+                selected_scrape.add(sid)
+                add_ancestors(sid)
+                for sub in get_all_subcategories(sid, all_cats):
+                    selected_scrape.add(sub)
+                    add_ancestors(sub)
+
+    scrape_categories = [cat for cat in all_cats if cat['id'] in selected_scrape]
+    transfer_categories = [cat for cat in all_cats if cat['id'] in selected_transfer]
+    return scrape_categories, transfer_categories
+
+# ==============================================================================
+# --- ابزارهای دسته‌ها: والد/فرزند، عمق، برگ‌ها ---
+# ==============================================================================
+def build_category_index(categories):
+    parent_of = {}
+    children_of = defaultdict(list)
+    ids = set()
+
+    for c in categories:
+        cid = c['id']
+        pid = c.get('parent_id')
+        ids.add(cid)
+        parent_of[cid] = pid
+        if pid:
+            children_of[pid].append(cid)
+
+    # عمق با memo
+    depth_memo = {}
+    def depth(cid):
+        if cid in depth_memo:
+            return depth_memo[cid]
+        p = parent_of.get(cid)
+        if not p:
+            depth_memo[cid] = 0
+        else:
+            depth_memo[cid] = 1 + depth(p)
+        return depth_memo[cid]
+
+    for cid in ids:
+        depth(cid)
+
+    leaf_ids = {cid for cid in ids if len(children_of.get(cid, [])) == 0}
+    return parent_of, children_of, depth_memo, leaf_ids
+
+def condense_products_to_leaf(all_products_by_catkey, categories):
+    # all_products_by_catkey: dict with key "pid|catid" and value product dict
+    parent_of, children_of, depth_of, leaf_ids = build_category_index(categories)
+
+    # گروهبندی برحسب pid
+    occurrences = defaultdict(list)
+    for key, p in all_products_by_catkey.items():
+        pid = str(p['id'])
+        occurrences[pid].append(p)
+
+    canonical = {}
+    for pid, plist in occurrences.items():
+        # کاندیدهای برگ
+        leaf_candidates = [p for p in plist if p.get('category_id') in leaf_ids]
+        candidates = leaf_candidates if leaf_candidates else plist
+        # انتخاب بر مبنای بیشترین عمق، سپس کمترین id دسته برای ثبات
+        candidates.sort(key=lambda p: (depth_of.get(p.get('category_id'), 0), -int(p.get('category_id', 0))), reverse=True)
+        chosen = candidates[0]
+        canonical[pid] = chosen
+    return canonical
+
+def normalize_cache(cached_products, categories):
+    # پشتیبانی از کش قدیمی (کلید id|cat) و تبدیل به کش جدید (کلید pid)
+    if not cached_products:
+        return {}
+    # اگر کلیدها شامل '|' هستند یعنی فرمت قدیم
+    if any('|' in k for k in cached_products.keys()):
+        # تبدیل به ساختار مورد نیاز condense
+        all_products_by_catkey = {}
+        for key, p in cached_products.items():
+            # اطمینان از وجود category_id داخل رکورد
+            if 'category_id' not in p:
+                try:
+                    _, catid = key.split('|')
+                    p['category_id'] = int(catid)
+                except:
+                    pass
+            all_products_by_catkey[key] = p
+        return condense_products_to_leaf(all_products_by_catkey, categories)
+    else:
+        # فرمت جدید: کلید pid است
+        normalized = {}
+        for pid, p in cached_products.items():
+            if 'category_id' in p and isinstance(p['category_id'], str) and p['category_id'].isdigit():
+                p['category_id'] = int(p['category_id'])
+            normalized[str(pid)] = p
+        return normalized
 
 # ==============================================================================
 # --- تنظیمات لاگینگ ---
@@ -154,7 +279,6 @@ def login_eways(username, password):
 # ==============================================================================
 # --- توابع مربوط به سایت مبدا (eways) ---
 # ==============================================================================
-
 @retry(
     retry=retry_if_exception_type(requests.exceptions.RequestException),
     stop=stop_after_attempt(5),
@@ -416,7 +540,7 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
     return all_products_in_category
 
 # ==============================================================================
-# --- کش برای محصولات (کلید ترکیبی id|category_id) ---
+# --- کش برای محصولات (کلید جدید: فقط id) ---
 # ==============================================================================
 def load_cache():
     if os.path.exists(CACHE_FILE):
@@ -593,21 +717,17 @@ def _send_to_woocommerce(sku, data, stats):
                 "stock_status": data["stock_status"],
                 "attributes": data["attributes"],
                 "tags": data.get("tags", []),
-                "categories": data.get("categories", []),  # همگام‌سازی دسته‌ها در آپدیت
+                "categories": data.get("categories", []),  # همگام‌سازی دسته‌ها (فقط leaf)
             }
-            logger.debug(f"   - آپدیت محصول {product_id} با {len(update_data['attributes'])} مشخصه فنی و دسته...")
+            logger.debug(f"   - آپدیت محصول {product_id} با {len(update_data['attributes'])} مشخصه فنی و دسته leaf...")
             res = requests.put(f"{WC_API_URL}/products/{product_id}", auth=auth, json=update_data, verify=False, timeout=20)
             res.raise_for_status()
-            response_json = res.json()
-            logger.debug(f"   ✅ آپدیت موفق برای {sku}. Attributes ذخیره‌شده در پاسخ: {response_json.get('attributes', 'خالی')} (تعداد: {len(response_json.get('attributes', []))})")
             with stats['lock']:
                 stats['updated'] += 1
         else:
             logger.debug(f"   - ایجاد محصول جدید با {sku} و {len(data['attributes'])} مشخصه فنی...")
             res = requests.post(f"{WC_API_URL}/products", auth=auth, json=data, verify=False, timeout=20)
             res.raise_for_status()
-            response_json = res.json()
-            logger.debug(f"   ✅ ایجاد موفق برای {sku}. Attributes ذخیره‌شده در پاسخ: {response_json.get('attributes', 'خالی')} (تعداد: {len(response_json.get('attributes', []))})")
             with stats['lock']:
                 stats['created'] += 1
     except requests.exceptions.HTTPError as e:
@@ -715,7 +835,7 @@ def process_product_wrapper(args):
             "type": "simple",
             "sku": f"EWAYS-{product.get('id')}",
             "regular_price": process_price(product.get('price', 0)),
-            "categories": [{"id": wc_cat_id}],
+            "categories": [{"id": wc_cat_id}],  # فقط برگ (leaf)
             "images": [{"src": abs_url(product.get("image"))}] if product.get("image") else [],
             "stock_quantity": product.get('stock', 0),
             "manage_stock": True,
@@ -732,19 +852,16 @@ def process_product_wrapper(args):
             stats['failed'] += 1
 
 # ==============================================================================
-# --- پرینت محصولات به صورت شاخه‌ای و مرتب ---
+# --- پرینت محصولات به صورت شاخه‌ای و مرتب (نسخهٔ جدید با کلید pid) ---
 # ==============================================================================
-def print_products_tree(products, categories):
+def print_products_tree_by_leaf(products_by_pid, categories):
     cat_map = {cat['id']: cat['name'] for cat in categories}
     tree = defaultdict(list)
-    for key, product in products.items():
-        if '|' not in key:
-            logger.warning(f"کلید نامعتبر در کش یا محصولات: {key} (رد شد)")
-            continue
-        pid, catid = key.split('|')
-        tree[catid].append(product)
-    for catid in sorted(tree, key=lambda x: int(x)):
-        logger.info(f"دسته [{catid}] {cat_map.get(int(catid), 'نامشخص')}:")
+    for pid, p in products_by_pid.items():
+        catid = p.get('category_id')
+        tree[catid].append(p)
+    for catid in sorted(tree, key=lambda x: (0 if x is None else int(x))):
+        logger.info(f"دسته [{catid}] {cat_map.get(int(catid), 'نامشخص') if catid else 'نامشخص'}:")
         for p in sorted(tree[catid], key=lambda x: int(x['id'])):
             logger.info(f"   - {p['name']} (ID: {p['id']})")
 
@@ -763,39 +880,43 @@ def main():
         return
     logger.info(f"✅ مرحله 1: بارگذاری دسته‌بندی‌ها کامل شد. تعداد: {len(all_cats)}")
 
-    SELECTED_IDS_STRING = "16777:all-allz|4882:all-allz|16778:22570-all-allz"
+    SELECTED_IDS_STRING = "16777:all-allz"
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
     logger.info(f"✅ انتخاب‌های دلخواه: {parsed_selection}")
 
-    filtered_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
-    logger.info(f"✅ دسته‌بندی‌های نهایی: {[cat['name'] for cat in filtered_categories]}")
+    # انتخاب دسته‌های اسکرپ و انتقال (والدها برای ساختار ووکامرس)
+    scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
+    logger.info(f"✅ دسته‌های اسکرپ: {[cat['name'] for cat in scrape_categories]}")
+    logger.info(f"✅ دسته‌های انتقال (با والدها): {[cat['name'] for cat in transfer_categories]}")
 
-    category_mapping = transfer_categories_to_wc(filtered_categories)
+    category_mapping = transfer_categories_to_wc(transfer_categories)
     if not category_mapping:
         logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد. برنامه خاتمه می‌یابد.")
         return
     logger.info(f"✅ مرحله 5: انتقال دسته‌بندی‌ها کامل شد. تعداد نگاشت‌شده: {len(category_mapping)}")
 
-    cached_products = load_cache()
+    # کش را بارگذاری و به فرمت جدید تبدیل کن
+    cached_products_raw = load_cache()
+    cached_products = normalize_cache(cached_products_raw, transfer_categories)
 
     # ==============================================================================
     # --- جمع‌آوری محصولات با throttle تطبیقی واقعی (صف دسته + تاخیر مشترک) ---
     # ==============================================================================
-    selected_ids = [cat['id'] for cat in filtered_categories]
+    selected_ids = [cat['id'] for cat in scrape_categories]
     all_products = {}
     all_lock = Lock()
     cat_queue = Queue()
     for cat_id in selected_ids:
         cat_queue.put(cat_id)
 
-    # پارامترهای throttle
+    # throttle
     shared = {'delay': 0.5}
     delay_lock = Lock()
     min_delay = 0.2
     max_delay = 2.0
     num_cat_workers = 3
 
-    logger.info(f"\n⏳ شروع فرآیند جمع‌آوری تمام محصولات از همه دسته‌بندی‌های انتخابی و زیرمجموعه‌ها...")
+    logger.info(f"\n⏳ شروع فرآیند جمع‌آوری تمام محصولات از همه دسته‌بندی‌های انتخابی...")
     pbar = tqdm(total=len(selected_ids), desc="دریافت محصولات دسته‌ها")
     pbar_lock = Lock()
 
@@ -813,7 +934,6 @@ def main():
                     for product in products_in_cat:
                         key = f"{product['id']}|{cat_id}"
                         all_products[key] = product
-                # تنظیم تطبیقی تاخیر: اگر موفق و پرمحصول بود، کمی کم کن؛ در غیر اینصورت کمی زیاد کن
                 with delay_lock:
                     if len(products_in_cat) > 0:
                         shared['delay'] = max(min_delay, shared['delay'] - 0.05)
@@ -838,59 +958,61 @@ def main():
         t.join()
     pbar.close()
 
-    logger.info(f"✅ مرحله 6: استخراج محصولات کامل شد. تعداد استخراج‌شده: {len(all_products)}")
+    logger.info(f"✅ مرحله 6: استخراج محصولات کامل شد. (کل id|cat: {len(all_products)})")
 
-    print_products_tree(all_products, filtered_categories)
+    # تبدیل محصولات به نگاشت بر اساس pid با انتخاب عمیق‌ترین زیرشاخه (leaf)
+    canonical_products = condense_products_to_leaf(all_products, transfer_categories)
+    logger.info(f"🧭 محصولات پس از نگاشت به عمیق‌ترین زیرشاخه: {len(canonical_products)}")
+    print_products_tree_by_leaf(canonical_products, transfer_categories)
 
     # ==============================================================================
-    # --- ادغام با کش و انتخاب فقط محصولات تغییرکرده/جدید برای ارسال ---
+    # --- ادغام با کش و انتخاب فقط محصولات تغییرکرده/جدید (تشخیص تغییر دسته هم انجام می‌شود) ---
     # ==============================================================================
-    updated_products = {}
+    updated_cache = {}
     changed_items = {}
     new_products_by_category = {}
 
-    for key, p in all_products.items():
-        if key in cached_products and cached_products[key].get('price') == p.get('price') and cached_products[key].get('stock') == p.get('stock') and cached_products[key].get('specs') == p.get('specs'):
-            updated_products[key] = cached_products[key]
-        else:
-            updated_products[key] = p
-            changed_items[key] = p
+    for pid, p in canonical_products.items():
+        old = cached_products.get(pid)
+        # تشخیص تغییر: قیمت، موجودی، مشخصات یا دسته
+        if (not old or
+            old.get('price') != p.get('price') or
+            old.get('stock') != p.get('stock') or
+            old.get('specs') != p.get('specs') or
+            old.get('category_id') != p.get('category_id')):
+            changed_items[pid] = p
+            updated_cache[pid] = p
             cat_id = p['category_id']
             new_products_by_category[cat_id] = new_products_by_category.get(cat_id, 0) + 1
+        else:
+            updated_cache[pid] = old
 
     changed_count = len(changed_items)
     logger.info(f"✅ مرحله 7: ادغام با کش کامل شد. تعداد محصولات تغییرشده/جدید برای ارسال: {changed_count}")
 
-    logger.info("📊 آمار محصولات جدید/تغییر یافته بر اساس دسته‌بندی:")
-    cat_map = {cat['id']: cat['name'] for cat in filtered_categories}
+    logger.info("📊 آمار محصولات جدید/تغییر یافته بر اساس دسته‌بندی (leaf):")
+    cat_map = {cat['id']: cat['name'] for cat in transfer_categories}
     for cat_id, count in sorted(new_products_by_category.items(), key=lambda x: -x[1]):
-        logger.info(f"  - {cat_map.get(cat_id, str(cat_id))}: {count} محصول جدید/تغییر یافته")
+        logger.info(f"  - {cat_map.get(cat_id, str(cat_id))}: {count} محصول")
 
-    save_cache(updated_products)
+    save_cache(updated_cache)
 
     # ==============================================================================
-    # --- مرحله جدید: مدیریت محصولات ناموجود (ادغام کش قبلی و ووکامرس) ---
+    # --- مدیریت محصولات ناموجود (بدون تکرار) ---
     # ==============================================================================
     logger.info("\n⏳ شروع مدیریت محصولات ناموجود...")
     wc_products = get_all_wc_products_with_prefix("EWAYS-")
-    extracted_skus = {f"EWAYS-{p['id']}" for p in all_products.values()}
-
-    # جلوگیری از آپدیت تکراری ناموجود
+    extracted_skus = {f"EWAYS-{pid}" for pid in canonical_products.keys()}
     to_oos_ids = set()
 
-    # محصولات کش قبلی که الان دیگر در استخراج فعلی نیستند
-    for key in cached_products:
-        if '|' not in key:
-            logger.warning(f"کلید نامعتبر در کش: {key} (رد شد)")
-            continue
-        pid, catid = key.split('|')
+    # با تکیه بر کش قبلی (نرمال شده) + ووکامرس
+    for pid in cached_products.keys():
         sku = f"EWAYS-{pid}"
         if sku not in extracted_skus:
             for wc_p in wc_products:
                 if wc_p['sku'] == sku and wc_p.get('stock_status') != "outofstock":
                     to_oos_ids.add(wc_p['id'])
 
-    # هر محصول ووکامرس با پیشوند که در استخراج فعلی نیست
     for wc_p in wc_products:
         if wc_p['sku'] not in extracted_skus and wc_p.get('stock_status') != "outofstock":
             to_oos_ids.add(wc_p['id'])
@@ -903,7 +1025,7 @@ def main():
     logger.info(f"🔍 تعداد محصولات برای آپدیت به ناموجود: {outofstock_count}")
 
     # ==============================================================================
-    # --- ارسال فقط محصولات تغییرکرده/جدید به ووکامرس ---
+    # --- ارسال فقط محصولات تغییرکرده/جدید به ووکامرس (با دسته leaf) ---
     # ==============================================================================
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0, 'outofstock_updated': 0, 'lock': Lock()}
     logger.info(f"\n🚀 شروع پردازش و ارسال {changed_count} محصول (تغییرشده/جدید) به ووکامرس...")
