@@ -531,12 +531,18 @@ def get_all_wc_products_with_prefix(prefix="EWAYS-"):
     page = 1
     while True:
         try:
-            res = requests.get(f"{WC_API_URL}/products", auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), params={"per_page": 100, "page": page}, verify=False)
+            res = requests.get(
+                f"{WC_API_URL}/products",
+                auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET),
+                params={"per_page": 100, "page": page},
+                verify=False
+            )
             res.raise_for_status()
             data = res.json()
             if not data:
                 break
-            products.extend([p for p in data if p.get('sku', '').startsWith(prefix) if hasattr(str, "startsWith") else p.get('sku','').startswith(prefix)])
+            # فقط محصولاتی که SKU با پیشوند مشخص شروع می‌شود
+            products.extend([p for p in data if (p.get('sku') or '').startswith(prefix)])
             if len(data) < 100:
                 break
             page += 1
