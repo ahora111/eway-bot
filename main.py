@@ -6,7 +6,7 @@ import json
 import random
 from tqdm import tqdm
 from bs4 import BeautifulSoup
-from threading import Lock, Thread
+from threading import Lock, Thread, Semaphore
 from queue import Queue
 import logging
 from logging.handlers import RotatingFileHandler
@@ -38,6 +38,31 @@ EWAYS_USERNAME = os.environ.get("EWAYS_USERNAME") or "شماره موبایل ی
 EWAYS_PASSWORD = os.environ.get("EWAYS_PASSWORD") or "پسورد"
 
 CACHE_FILE = 'products_cache.json'
+
+# ==============================================================================
+# تنظیمات ریت‌لیمیت جزئیات و سیاست نوسازی
+# ==============================================================================
+DETAILS_CONCURRENCY = int(os.environ.get("DETAILS_CONCURRENCY", "3"))
+DETAILS_MIN_INTERVAL = float(os.environ.get("DETAILS_MIN_INTERVAL", "0.3"))
+REFRESH_SPECS_DAYS = int(os.environ.get("REFRESH_SPECS_DAYS", "7"))
+ALWAYS_DETAILS_FOR_NEW = os.environ.get("ALWAYS_DETAILS_FOR_NEW", "true").lower() == "true"
+CREATE_WITHOUT_DETAILS = os.environ.get("CREATE_WITHOUT_DETAILS", "false").lower() == "true"
+
+class SimpleRateLimiter:
+    def __init__(self, min_interval):
+        self.min_interval = float(min_interval)
+        self._last = 0.0
+        self._lock = Lock()
+    def wait(self):
+        with self._lock:
+            now = time.monotonic()
+            wait_time = self.min_interval - (now - self._last)
+            if wait_time > 0:
+                time.sleep(wait_time)
+            self._last = time.monotonic()
+
+DETAILS_GATE = Semaphore(DETAILS_CONCURRENCY)
+DETAILS_RL = SimpleRateLimiter(DETAILS_MIN_INTERVAL)
 
 # ==============================================================================
 # ابزارهای دسته (ایندکس والد/عمق/نام)
@@ -278,7 +303,9 @@ def get_and_parse_categories(session):
 def get_product_details(session, cat_id, product_id):
     url = PRODUCT_DETAIL_URL_TEMPLATE.format(cat_id=cat_id, product_id=product_id)
     try:
-        response = session.get(url, timeout=60)
+        with DETAILS_GATE:
+            DETAILS_RL.wait()
+            response = session.get(url, timeout=60)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'lxml')
 
@@ -331,7 +358,7 @@ def get_product_details(session, cat_id, product_id):
         return {}, None
 
 # ==============================================================================
-# استخراج محصولات دسته (HTML + Lazy) با تعیین دقیق دسته leaf
+# استخراج محصولات دسته (HTML + Lazy) - مرحله سبک (بدون فراخوانی جزئیات)
 # ==============================================================================
 @retry(
     retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)),
@@ -383,22 +410,18 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                         image_url = abs_url(image_url)
 
                     if is_available and pid not in seen_product_ids:
-                        # خواندن جزئیات + دسته نهایی
-                        specs, canonical_id = get_product_details(session, cat_from_link or category_id, pid)
-                        eff_cat = pick_deepest(category_id, cat_from_link, canonical_id)
-                        if canonical_id and eff_cat != category_id:
-                            logger.debug(f"      - نگاشت دستهٔ محصول {pid}: {cat_label(category_id)} → {cat_label(eff_cat)} (breadcrumb)")
+                        eff_cat_guess = pick_deepest(category_id, cat_from_link)
                         html_products.append({
                             'id': pid,
                             'name': name,
-                            'category_id': eff_cat,
+                            'category_id': eff_cat_guess,
+                            'detail_hint_cat_id': cat_from_link or category_id,
                             'price': price,
                             'stock': 1,
                             'image': image_url,
-                            'specs': specs,
+                            'specs': {},  # فعلا نداریم
                         })
                         seen_product_ids.add(pid)
-                        time.sleep(random.uniform(delay, delay + 0.2))
             logger.info(f"🟢 محصولات موجود (HTML) صفحه {page}: {len(html_products)}")
 
             # Lazy (فقط موجودها)
@@ -454,19 +477,18 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                             if c:
                                 cat_from_link = c
                             break
-                    specs, canonical_id = get_product_details(session, cat_from_link or category_id, pid)
-                    eff_cat = pick_deepest(category_id, cat_from_link, canonical_id)
+                    eff_cat_guess = pick_deepest(category_id, cat_from_link)
                     lazy_products.append({
                         "id": pid,
                         "name": g["Name"],
-                        "category_id": eff_cat,
+                        "category_id": eff_cat_guess,
+                        "detail_hint_cat_id": cat_from_link or category_id,
                         "price": g.get("Price", "0"),
                         "stock": 1,
                         "image": abs_url(g.get("ImageUrl", "")),
-                        "specs": specs,
+                        "specs": {},  # فعلا نداریم
                     })
                     seen_product_ids.add(pid)
-                    time.sleep(random.uniform(delay, delay + 0.2))
                 logger.info(f"🟢 محصولات موجود (Lazy) این حلقه: {len([g for g in goods if g.get('Availability', True)])}")
                 lazy_page += 1
 
@@ -477,6 +499,7 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
             all_products_in_category.extend(available_in_page)
             page += 1
             error_count = 0
+            time.sleep(random.uniform(delay, delay + 0.2))
         except Exception as e:
             error_count += 1
             logger.error(f"    - خطا در پردازش صفحه محصولات: {e} (تعداد خطا: {error_count})")
@@ -641,14 +664,23 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
                 "regular_price": data["regular_price"],
                 "stock_quantity": data["stock_quantity"],
                 "stock_status": data["stock_status"],
-                "attributes": data["attributes"],
-                "tags": data.get("tags", []),
                 "categories": data.get("categories", []),  # فقط leaf
             }
+            # attributes و tags فقط وقتی حاضر باشند (برای حفظ مقدارهای قبلی)
+            if data.get("attributes") is not None:
+                update_data["attributes"] = data["attributes"]
+            if data.get("tags") is not None:
+                update_data["tags"] = data["tags"]
+
             res = requests.put(f"{WC_API_URL}/products/{existing_product_id}", auth=auth, json=update_data, verify=False, timeout=20)
             res.raise_for_status()
             with stats['lock']: stats['updated'] += 1
         else:
+            # ساخت: اگر اجازه ساخت بدون جزئیات نداریم و attributes نداریم → رد
+            if (data.get("attributes") is None) and (not CREATE_WITHOUT_DETAILS):
+                logger.warning(f"   ⚠️ ساخت {sku} رد شد؛ جزئیات نداریم و CREATE_WITHOUT_DETAILS=false است.")
+                with stats['lock']: stats['failed'] += 1
+                return
             res = requests.post(f"{WC_API_URL}/products", auth=auth, json=data, verify=False, timeout=20)
             res.raise_for_status()
             with stats['lock']: stats['created'] += 1
@@ -723,10 +755,14 @@ def process_product_wrapper(args):
             logger.warning(f"   ⚠️ دسته برای محصول {product.get('id')} پیدا نشد. رد شد.")
             with stats['lock']: stats['no_category'] = stats.get('no_category', 0) + 1
             return
-        specs = product.get('specs', {})
-        attributes = []
-        for idx, (key, value) in enumerate(specs.items()):
-            attributes.append({"name": key, "options": [value], "position": idx, "visible": True, "variation": False})
+        specs = product.get('specs') or {}
+        has_details = bool(specs)
+
+        attributes = None
+        if has_details:
+            attributes = []
+            for idx, (key, value) in enumerate(specs.items()):
+                attributes.append({"name": key, "options": [value], "position": idx, "visible": True, "variation": False})
 
         sku = f"EWAYS-{product.get('id')}"
         existing_wc_id = None
@@ -744,8 +780,8 @@ def process_product_wrapper(args):
             "stock_quantity": product.get('stock', 0),
             "manage_stock": True,
             "stock_status": "instock" if product.get('stock', 0) > 0 else "outofstock",
-            "attributes": attributes,
-            "tags": smart_tags_for_product(product, cat_map),
+            "attributes": attributes,  # فقط وقتی جزئیات داریم
+            "tags": smart_tags_for_product(product, cat_map) if has_details else None,
             "status": "publish"
         }
         _send_to_woocommerce(wc_data['sku'], wc_data, stats, existing_product_id=existing_wc_id)
@@ -755,7 +791,7 @@ def process_product_wrapper(args):
         with stats['lock']: stats['failed'] += 1
 
 # ==============================================================================
-# ابزارهای تجمیع محصول به leaf و کش
+# ابزارهای تجمیع، تغییرات، و جزئیات مرحله دوم
 # ==============================================================================
 def condense_products_to_leaf(all_products_by_catkey, categories):
     # اگر یک محصول در چند دسته دیده شد، عمیق‌ترین را انتخاب می‌کنیم
@@ -802,6 +838,83 @@ def print_products_tree_by_leaf(products_by_pid, categories):
         for p in sorted(tree[catid], key=lambda x: int(x['id'])):
             logger.info(f"   - {p['name']} (ID: {p['id']})")
 
+def light_changed(old, new):
+    # فقط قیمت/موجودی/دسته (بدون specs)
+    return (
+        not old or
+        str(old.get('price')) != str(new.get('price')) or
+        int(old.get('stock', 0)) != int(new.get('stock', 0)) or
+        old.get('category_id') != new.get('category_id')
+    )
+
+def full_changed(old, new):
+    # تغییر سبک یا تغییر specs
+    if light_changed(old, new):
+        return True
+    return (old or {}).get('specs') != (new or {}).get('specs')
+
+def is_specs_stale(old):
+    if not old:
+        return True
+    ts = old.get('last_details_ts')
+    if not ts:
+        return True
+    try:
+        return (time.time() - float(ts)) > REFRESH_SPECS_DAYS * 86400
+    except:
+        return True
+
+def merge_specs_from_cache(products_by_pid, cached):
+    # اگر در این اجرا specs نداریم، از کش قبلی برداریم تا در ارسال از بین نرود
+    for pid, p in products_by_pid.items():
+        old = cached.get(pid)
+        if (not p.get('specs')) and old and old.get('specs'):
+            p['specs'] = old['specs']
+            if old.get('last_details_ts'):
+                p['last_details_ts'] = old['last_details_ts']
+
+def enrich_products_with_details(session, products_by_pid, pids_to_enrich):
+    q = Queue()
+    for pid in pids_to_enrich:
+        if pid in products_by_pid:
+            q.put(pid)
+
+    stats = {'ok': 0, 'fail': 0}
+    def worker():
+        while True:
+            try:
+                pid = q.get_nowait()
+            except Exception:
+                break
+            try:
+                p = products_by_pid[pid]
+                cat_for_detail = p.get('detail_hint_cat_id') or p.get('category_id')
+                specs, canonical_id = get_product_details(session, cat_for_detail, pid)
+                if canonical_id:
+                    p['category_id'] = pick_deepest(p.get('category_id'), p.get('detail_hint_cat_id'), canonical_id)
+                p['specs'] = specs or {}
+                p['last_details_ts'] = time.time()
+                stats['ok'] += 1
+            except Exception as e:
+                logger.warning(f"   ⚠️ جزئیات محصول {pid} خطا: {e}")
+                p = products_by_pid.get(pid, {})
+                if p is not None:
+                    p.setdefault('specs', {})
+                stats['fail'] += 1
+            finally:
+                q.task_done()
+
+    num_workers = int(os.environ.get("DETAILS_WORKERS", str(max(1, DETAILS_CONCURRENCY))))
+    threads = []
+    for _ in range(num_workers):
+        t = Thread(target=worker, daemon=True)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+
+    logger.info(f"✅ جزئیات تکمیلی: موفق={stats['ok']} | ناموفق={stats['fail']}")
+
 # ==============================================================================
 # تابع اصلی
 # ==============================================================================
@@ -821,20 +934,19 @@ def main():
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
 
     # انتخاب‌ها (بدون افزودن خودکار والد)
-    # انتخاب‌ها (بدون افزودن خودکار والد)
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
 
-# اطمینان از حضور دسته‌های والد (سمت چپ :) در لیست انتقال تا نام‌شان ساخته/نمایش داده شود
+    # اطمینان از حضور دسته‌های والد در لیست انتقال تا نام‌شان ساخته/نمایش داده شود
     parent_ids = [block['parent_id'] for block in parsed_selection]
     parent_cats = [cat for cat in all_cats if cat['id'] in parent_ids]
 
-# ادغام بدون تکرار با لیست انتقال
+    # ادغام بدون تکرار با لیست انتقال
     transfer_by_id = {c['id']: c for c in transfer_categories}
     for pc in parent_cats:
         transfer_by_id.setdefault(pc['id'], pc)
     transfer_categories = list(transfer_by_id.values())
 
-# لاگ دسته‌ها
+    # لاگ دسته‌ها
     scrape_list = [f"{c['id']} ({c['name']})" for c in scrape_categories]
     transfer_list = [f"{c['id']} ({c['name']})" for c in transfer_categories]
     logger.info(f"✅ دسته‌های اسکرپ: {scrape_list}")
@@ -863,7 +975,7 @@ def main():
     min_delay, max_delay = 0.2, 2.0
     num_cat_workers = 3
 
-    logger.info("\n⏳ شروع جمع‌آوری محصولات...")
+    logger.info("\n⏳ شروع جمع‌آوری محصولات (مرحله Light)...")
     pbar = tqdm(total=len(selected_ids), desc="دریافت محصولات دسته‌ها")
     pbar_lock = Lock()
 
@@ -903,9 +1015,9 @@ def main():
 
     logger.info(f"✅ استخراج محصولات تمام شد. (کل کلیدهای id|leaf: {len(all_products)})")
 
-    # انتخاب leaf نهایی برای هر محصول
+    # انتخاب leaf نهایی برای هر محصول (Light)
     canonical_products = condense_products_to_leaf(all_products, all_cats)
-    logger.info(f"🧭 محصولات پس از نگاشت به عمیق‌ترین زیرشاخه: {len(canonical_products)}")
+    logger.info(f"🧭 محصولات (Light) پس از نگاشت به عمیق‌ترین زیرشاخه: {len(canonical_products)}")
     print_products_tree_by_leaf(canonical_products, transfer_categories or all_cats)
 
     # ——— آمار تعداد محصولات هر دسته (leaf) ———
@@ -914,46 +1026,30 @@ def main():
     for cid, cnt in sorted(cat_counts.items(), key=lambda kv: (-kv[1], CATEGORY_NAME.get(kv[0], '') or '')):
         logger.info(f"   - {cat_label(cid)}: {cnt}")
 
-    # ادغام با کش و تشخیص تغییر (قیمت/موجودی/مشخصات/دسته)
-    updated_cache = {}
-    changed_items = {}
-    new_products_by_category = {}
-    for pid, p in canonical_products.items():
-        old = cached_products.get(pid)
-        if (not old or
-            old.get('price') != p.get('price') or
-            old.get('stock') != p.get('stock') or
-            old.get('specs') != p.get('specs') or
-            old.get('category_id') != p.get('category_id')):
-            changed_items[pid] = p
-            updated_cache[pid] = p
-            cid = p['category_id']
-            new_products_by_category[cid] = new_products_by_category.get(cid, 0) + 1
-        else:
-            updated_cache[pid] = old
-
-    changed_count = len(changed_items)
-    logger.info(f"✅ ادغام با کش تمام شد. تعداد تغییرکرده/جدید: {changed_count}")
-    save_cache(updated_cache)
+    # ادغام specs از کش (فعلا جزئیات نگرفتیم)
+    merge_specs_from_cache(canonical_products, cached_products)
 
     # ============================
-    # گپ‌گیری همگام‌سازی با ووکامرس: افزودن موارد مفقود + دسته نامنطبق
+    # مرحله تصمیم‌گیری برای جزئیات و ارسال
     # ============================
-    logger.info("\n⛽️ بررسی گپ همگام‌سازی با ووکامرس (افزودن موارد مفقود و دسته‌های نامنطبق)...")
+    logger.info("\n⛽️ بررسی گپ همگام‌سازی با ووکامرس (Light)...")
     wc_products = get_all_wc_products_with_prefix("EWAYS-")
     wc_by_sku = {p.get('sku'): p for p in wc_products}
     wc_skus = set(wc_by_sku.keys())
 
-    to_send_items = dict(changed_items)
+    # تغییرات سبک
+    changed_light = {}
+    for pid, p in canonical_products.items():
+        old = cached_products.get(pid)
+        if light_changed(old, p):
+            changed_light[pid] = p
 
-    # 1) موارد مفقود در ووکامرس
+    # مفقود در ووکامرس
     missing_in_wc = {pid: p for pid, p in canonical_products.items() if f"EWAYS-{pid}" not in wc_skus}
-    for pid, p in missing_in_wc.items():
-        to_send_items[pid] = p
-    logger.info(f"🧩 موارد مفقود در ووکامرس که به ارسال اضافه شدند: {len(missing_in_wc)}")
 
-    # 2) دسته نامنطبق در ووکامرس
+    # دسته نامنطبق در ووکامرس (با دسته فعلی Light)
     mismatch_count = 0
+    mismatch = {}
     for pid, p in canonical_products.items():
         sku = f"EWAYS-{pid}"
         wcp = wc_by_sku.get(sku)
@@ -962,9 +1058,62 @@ def main():
         expected_wc_cat = category_mapping.get(p['category_id'])
         wc_cat_ids = {c.get('id') for c in wcp.get('categories', []) if isinstance(c, dict)}
         if expected_wc_cat and expected_wc_cat not in wc_cat_ids:
-            to_send_items[pid] = p
+            mismatch[pid] = p
             mismatch_count += 1
-    logger.info(f"🧭 موارد با دسته نامنطبق که به ارسال اضافه شدند: {mismatch_count}")
+    logger.info(f"🧭 موارد با دسته نامنطبق (Light): {mismatch_count}")
+
+    # تعیین اقلام نیازمند جزئیات
+    need_details = set(changed_light.keys()) | set(missing_in_wc.keys()) | set(mismatch.keys())
+    for pid, p in canonical_products.items():
+        old = cached_products.get(pid)
+        if ALWAYS_DETAILS_FOR_NEW and not old:
+            need_details.add(pid)
+        elif not (old and old.get('specs')):
+            need_details.add(pid)
+        elif is_specs_stale(old):
+            need_details.add(pid)
+
+    logger.info(f"🔎 اقلام نیازمند دریافت جزئیات: {len(need_details)}")
+    if need_details:
+        enrich_products_with_details(session, canonical_products, need_details)
+
+    # ذخیره کش به‌روز (پس از جزئیات مرحله دوم)
+    updated_cache = {}
+    for pid, p in canonical_products.items():
+        base = dict(p)
+        old = cached_products.get(pid)
+        if not base.get('specs') and old and old.get('specs'):
+            base['specs'] = old['specs']
+            if old.get('last_details_ts'):
+                base['last_details_ts'] = old['last_details_ts']
+        updated_cache[pid] = base
+
+    save_cache(updated_cache)
+
+    # ============================
+    # نهایی‌سازی اقلام ارسالی به ووکامرس
+    # ============================
+    to_send_items = {}
+    mismatch_count_after = 0
+    for pid, p in canonical_products.items():
+        old = cached_products.get(pid)
+        # تشخیص تغییر کامل (specs هم اگر تازه شد)
+        if full_changed(old, p):
+            to_send_items[pid] = p
+            continue
+        # مفقود در ووکامرس
+        if f"EWAYS-{pid}" not in wc_skus:
+            to_send_items[pid] = p
+            continue
+        # دسته نامنطبق با دسته فعلی (پس از جزئیات)
+        sku = f"EWAYS-{pid}"
+        wcp = wc_by_sku.get(sku)
+        if wcp:
+            expected_wc_cat = category_mapping.get(p['category_id'])
+            wc_cat_ids = {c.get('id') for c in wcp.get('categories', []) if isinstance(c, dict)}
+            if expected_wc_cat and expected_wc_cat not in wc_cat_ids:
+                to_send_items[pid] = p
+                mismatch_count_after += 1
 
     # ——— آمار اقلامی که قرار است به ووکامرس ارسال شوند ———
     send_counts = Counter(p['category_id'] for p in to_send_items.values())
