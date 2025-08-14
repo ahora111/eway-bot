@@ -93,6 +93,9 @@ SKIP_IMAGE_DOMAINS = [d.strip().lower() for d in os.environ.get("SKIP_IMAGE_DOMA
 SET_EXTERNAL_IMAGE_META = os.environ.get("SET_EXTERNAL_IMAGE_META", "true").lower() == "true"
 SEND_IMAGES_IF_EXISTS = os.environ.get("SEND_IMAGES_IF_EXISTS", "false").lower() == "true"
 
+# اگر true باشد، محصولات بدون تصویر منبع (Eways) اصلاً ارسال نمی‌شوند
+REQUIRE_SOURCE_IMAGE = os.environ.get("REQUIRE_SOURCE_IMAGE", "true").lower() == "true"
+
 # ==============================================================================
 # Session با Retry برای ووکامرس
 # ==============================================================================
@@ -919,7 +922,7 @@ def smart_tags_for_product(product, cat_map):
     return [{"name": t} for t in sorted(tags)]
 
 # ==============================================================================
-# ارسال محصول به ووکامرس
+# ارسال محصول به ووکامرس (با گیت تصویر منبع)
 # ==============================================================================
 def process_product_wrapper(args):
     product, stats, category_mapping, cat_map, wc_by_sku = args
@@ -929,6 +932,13 @@ def process_product_wrapper(args):
             logger.warning(f"   ⚠️ دسته برای محصول {product.get('id')} پیدا نشد. رد شد.")
             with stats['lock']: stats['no_category'] = stats.get('no_category', 0) + 1
             return
+
+        # گیت: اگر در Eways تصویر ندارد، اصلاً ارسال نشود
+        if REQUIRE_SOURCE_IMAGE and not product.get('image'):
+            logger.info(f"   🚫 رد شد: محصول {product.get('id')} تصویر منبع (Eways) ندارد.")
+            with stats['lock']: stats['skipped_no_image'] = stats.get('skipped_no_image', 0) + 1
+            return
+
         specs = product.get('specs') or {}
         has_details = bool(specs)
 
@@ -961,9 +971,8 @@ def process_product_wrapper(args):
         images_payload, meta_payload = build_images_payload(product, sku)
 
         send_images = True
-        if existing_wcp_obj and existing_wcp_obj.get('images'):
-            if not SEND_IMAGES_IF_EXISTS:
-                send_images = False
+        if existing_wcp_obj and existing_wcp_obj.get('images') and not SEND_IMAGES_IF_EXISTS:
+            send_images = False
 
         wc_data = {
             "name": product.get('name', 'بدون نام'),
@@ -1291,6 +1300,16 @@ def main():
                 to_send_items[pid] = p
                 mismatch_count_after += 1
 
+    # فیلتر پیشینی: اگر تصویر منبع موجود نیست و REQUIRE_SOURCE_IMAGE=true، از ارسال حذف شود
+    if REQUIRE_SOURCE_IMAGE:
+        removed = 0
+        for pid, p in list(to_send_items.items()):
+            if not p.get('image'):
+                to_send_items.pop(pid, None)
+                removed += 1
+        if removed:
+            logger.info(f"🚫 {removed} قلم به‌دلیل نداشتن تصویر منبع (Eways) از صف ارسال حذف شد.")
+
     send_counts = Counter(p['category_id'] for p in to_send_items.values())
     logger.info("🛰️ اقلام ارسالی به ووکامرس به تفکیک دسته:")
     for cid, cnt in sorted(send_counts.items(), key=lambda kv: (-kv[1], CATEGORY_NAME.get(kv[0], '') or '')):
@@ -1321,7 +1340,11 @@ def main():
         if sku not in extracted_skus and wcp.get('stock_status') != "outofstock":
             to_oos_ids.add(wcp['id'])
 
-    stats = {'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0, 'outofstock_updated': 0, 'image_skipped': 0, 'lock': Lock()}
+    stats = {
+        'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0,
+        'outofstock_updated': 0, 'image_skipped': 0, 'skipped_no_image': 0,
+        'lock': Lock()
+    }
 
     product_queue = Queue()
     for p in to_send_items.values():
@@ -1375,7 +1398,8 @@ def main():
     logger.info(f"🟢 ایجاد شده: {stats['created']}")
     logger.info(f"🔵 آپدیت شده: {stats['updated']}")
     logger.info(f"🟠 به ناموجود: {stats['outofstock_updated']}")
-    logger.info(f"🖼️ تصویر-اسکیپ: {stats.get('image_skipped', 0)}")
+    logger.info(f"🖼️ تصویر-اسکیپ (سایدلود ناموفق): {stats.get('image_skipped', 0)}")
+    logger.info(f"📷 بدون تصویر منبع (رد شده): {stats.get('skipped_no_image', 0)}")
     logger.info(f"🔴 شکست: {stats['failed']}")
     logger.info(f"🟡 بدون دسته: {stats.get('no_category', 0)}")
     logger.info("===============================\nتمام!")
