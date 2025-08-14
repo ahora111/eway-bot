@@ -1,3 +1,12 @@
+این نسخه‌ی ادغام‌شده طوری تغییر داده شده که فقط وقتی محصول در ووکامرس تصویر ندارد (محصول جدید یا قبلاً بدون تصویر ثبت شده) فیلد images ارسال شود؛ در غیر این صورت اصلاً images در PUT ارسال نمی‌شود تا آپلود تکراری رخ ندهد و سرعت بالاتر برود.
+
+- تابع جدید get_wc_product_by_id برای چک تصویر محصول موجود
+- در _send_to_woocommerce، images فقط وقتی در data موجود باشد در آپدیت/duplicate-SKU ارسال می‌شود
+- در process_product_wrapper تصمیم هوشمندانه برای include_images (ارسال تصویر فقط برای جدیدها یا فاقد تصویر)
+
+کد کامل:
+
+```python
 import requests
 import os
 import re
@@ -714,6 +723,11 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
                 update_data["attributes"] = data["attributes"]
             if data.get("tags") is not None:
                 update_data["tags"] = data["tags"]
+
+            # فقط اگر عمداً images گذاشته باشیم (محصول در WC تصویر ندارد)
+            if data.get("images"):
+                update_data["images"] = data["images"]
+
             if MIGRATE_REMOTE_SKU_TO_CANONICAL:
                 update_data["sku"] = data["sku"]
 
@@ -750,6 +764,9 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
                         update_data["attributes"] = data["attributes"]
                     if data.get("tags") is not None:
                         update_data["tags"] = data["tags"]
+                    # فقط اگر images داده شده باشد (یعنی قصد آپلود داریم)
+                    if data.get("images"):
+                        update_data["images"] = data["images"]
                     if MIGRATE_REMOTE_SKU_TO_CANONICAL:
                         update_data["sku"] = data["sku"]
                     res2 = requests.put(f"{WC_API_URL}/products/{resource_id}", auth=auth, json=update_data, verify=False, timeout=20)
@@ -821,6 +838,20 @@ def smart_tags_for_product(product, cat_map):
 # ==============================================================================
 # ارسال محصول به ووکامرس
 # ==============================================================================
+def get_wc_product_by_id(product_id):
+    """برای چک داشتن/نداشتن تصویر محصول موجود در ووکامرس."""
+    try:
+        res = requests.get(
+            f"{WC_API_URL}/products/{product_id}",
+            auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET),
+            verify=False, timeout=20
+        )
+        res.raise_for_status()
+        return res.json()
+    except Exception as e:
+        logger.debug(f"⚠️ دریافت محصول ووکامرس {product_id} برای چک تصاویر ناموفق: {e}")
+        return None
+
 def process_product_wrapper(args):
     product, stats, category_mapping, cat_map, wc_by_sku = args
     try:
@@ -844,12 +875,15 @@ def process_product_wrapper(args):
 
         # موجود بودن در کش محلی
         existing_wc_id = None
-        # ابتدا با تمام پیشوندها در کش لوکال wc_by_sku چک کنیم
+        existing_wc_product = None
+
+        # ابتدا با تمام پیشوندها در کش wc_by_sku چک کنیم
         for pref in SKU_PREFIXES:
             s = f"{pref}{pid_str}"
             wcp = wc_by_sku.get(s)
             if wcp:
                 existing_wc_id = wcp.get('id')
+                existing_wc_product = wcp  # ممکن است شامل images باشد
                 break
 
         # اگر در کش نبود، با API براساس همه پیشوندها جست‌وجو کن
@@ -858,6 +892,32 @@ def process_product_wrapper(args):
             if alt_id:
                 logger.info(f"🔎 محصول یافت شد با SKU جایگزین: {alt_sku} → ID={alt_id} (آپدیت به‌جای ساخت)")
                 existing_wc_id = alt_id
+                # گرفتن جزئیات برای چک تصاویر
+                existing_wc_product = get_wc_product_by_id(alt_id)
+
+        # تصمیم‌گیری برای ارسال تصویر:
+        # - اگر محصول جدید است ⇒ تصاویر را ارسال کن (در POST)
+        # - اگر موجود است و هیچ تصویری در WC ندارد ⇒ تصاویر را در PUT بفرست
+        include_images = False
+        if not existing_wc_id:
+            include_images = True
+        else:
+            imgs_list = None
+            if existing_wc_product and isinstance(existing_wc_product, dict):
+                imgs_list = existing_wc_product.get('images')
+            # اگر از لیست محصولات images نداشتیم، یکبار جزئیات محصول را بگیریم
+            if imgs_list is None:
+                fetched = get_wc_product_by_id(existing_wc_id)
+                if fetched:
+                    existing_wc_product = fetched
+                    imgs_list = fetched.get('images')
+            has_wc_images = isinstance(imgs_list, list) and len(imgs_list) > 0
+            include_images = not has_wc_images
+
+        # فقط اگر واقعاً می‌خواهیم تصویر بفرستیم، فیلد images را بسازیم (وگرنه اصلاً نفرست)
+        images_data = None
+        if include_images and product.get("image"):
+            images_data = [{"src": abs_url(product.get("image"))}]
 
         wc_data = {
             "name": product.get('name', 'بدون نام'),
@@ -865,7 +925,7 @@ def process_product_wrapper(args):
             "sku": sku,
             "regular_price": process_price(product.get('price', 0)),
             "categories": [{"id": wc_cat_id}],  # فقط leaf
-            "images": [{"src": abs_url(product.get("image"))}] if product.get("image") else [],
+            # تصاویر فقط در صورت نیاز اضافه می‌شود (پایین‌تر)
             "stock_quantity": product.get('stock', 0),
             "manage_stock": True,
             "stock_status": "instock" if product.get('stock', 0) > 0 else "outofstock",
@@ -873,6 +933,9 @@ def process_product_wrapper(args):
             "tags": smart_tags_for_product(product, cat_map) if has_details else None,
             "status": "publish"
         }
+        if images_data:
+            wc_data["images"] = images_data
+
         _send_to_woocommerce(wc_data['sku'], wc_data, stats, existing_product_id=existing_wc_id)
         time.sleep(random.uniform(0.5, 1.5))
     except Exception as e:
@@ -1312,3 +1375,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
