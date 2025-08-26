@@ -7,6 +7,7 @@ import random
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 from threading import Lock, Thread, Semaphore
+import threading
 from queue import Queue
 import logging
 from logging.handlers import RotatingFileHandler
@@ -26,9 +27,10 @@ WC_SENDER_WORKERS = int(os.environ.get("WC_SENDER_WORKERS", "6"))
 SENDER_SLEEP_SEC = float(os.environ.get("SENDER_SLEEP_SEC", "0.05"))
 
 ALT_SKU_LOOKUP = os.environ.get("ALT_SKU_LOOKUP", "false").lower() == "true"
-FORCE_WC_QUERY_AUTH = os.environ.get("FORCE_WC_QUERY_AUTH", "true").lower() == "true"
+FORCE_WC_QUERY_AUTH = os.environ.get("FORCE_WC_QUERY_AUTH", "false").lower() == "true"
 WC_VERIFY_SSL = os.environ.get("WC_VERIFY_SSL", "true").lower() == "true"
-DISABLE_TLS_WARNINGS = os.environ.get("DISABLE_TLS_WARNINGS", "true").lower() == "true"
+EWAYS_VERIFY_SSL = os.environ.get("EWAYS_VERIFY_SSL", "true").lower() == "true"
+DISABLE_TLS_WARNINGS = os.environ.get("DISABLE_TLS_WARNINGS", "false").lower() == "true"
 
 OUTOFSTOCK_WORKERS = int(os.environ.get("OUTOFSTOCK_WORKERS", "2"))
 OUTOFSTOCK_SLEEP_SEC = float(os.environ.get("OUTOFSTOCK_SLEEP_SEC", "0.2"))
@@ -221,8 +223,8 @@ def login_eways(username, password):
         'X-Requested-With': 'XMLHttpRequest',
         'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'
     })
-    # eways SSL مشکل CA دارد؛ همین را نگه می‌داریم
-    session.verify = False
+    # SSL verify: به صورت پیش‌فرض فعال؛ در صورت نیاز قابل خاموش کردن با EWAYS_VERIFY_SSL
+    session.verify = certifi.where() if EWAYS_VERIFY_SSL else False
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(f"{BASE_URL}/User/Login",
                         data={"UserName": username, "Password": password, "RememberMe": "true"},
@@ -545,14 +547,30 @@ def save_cache(products):
     logger.info(f"✅ کش ذخیره شد. تعداد: {len(products)}")
 
 # ==============================================================================
-# رَپر ووکامرس (Query Auth + Session + SSL verify)
+# رَپر ووکامرس (Query Auth + Session + SSL verify) — thread-safe
 # ==============================================================================
-wc_session = requests.Session()
-wc_session.headers.update({
+_WC_BASE_SESSION = requests.Session()
+_WC_BASE_SESSION.headers.update({
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'
 })
 # SSL verify (بهتر است فعال باشد)
-wc_session.verify = certifi.where() if WC_VERIFY_SSL else False
+_WC_BASE_SESSION.verify = certifi.where() if WC_VERIFY_SSL else False
+
+_WC_SESSION_LOCAL = threading.local()
+
+def _clone_session(base_session):
+    new_session = requests.Session()
+    new_session.headers.update(base_session.headers)
+    new_session.cookies.update(base_session.cookies)
+    new_session.verify = base_session.verify
+    return new_session
+
+def _get_wc_session():
+    sess = getattr(_WC_SESSION_LOCAL, 'session', None)
+    if sess is None:
+        sess = _clone_session(_WC_BASE_SESSION)
+        _WC_SESSION_LOCAL.session = sess
+    return sess
 
 def wc_request(method, path, params=None, json=None, timeout=30, allow_redirects=True):
     url = f"{WC_API_URL}{path}"
@@ -562,8 +580,8 @@ def wc_request(method, path, params=None, json=None, timeout=30, allow_redirects
         params.update({"consumer_key": WC_CONSUMER_KEY, "consumer_secret": WC_CONSUMER_SECRET})
     else:
         auth = (WC_CONSUMER_KEY, WC_CONSUMER_SECRET)
-    res = wc_session.request(method=method.upper(), url=url, params=params, json=json,
-                             auth=auth, timeout=timeout, allow_redirects=allow_redirects)
+    res = _get_wc_session().request(method=method.upper(), url=url, params=params, json=json,
+                                    auth=auth, timeout=timeout, allow_redirects=allow_redirects)
     return res
 
 # ==============================================================================
@@ -932,10 +950,12 @@ def process_product_wrapper(args):
             "stock_quantity": product.get('stock', 0),
             "manage_stock": True,
             "stock_status": "instock" if product.get('stock', 0) > 0 else "outofstock",
-            "attributes": attributes,
-            "tags": smart_tags_for_product(product, cat_map) if has_details else None,
             "status": "publish"
         }
+        if attributes:
+            wc_data["attributes"] = attributes
+        if has_details:
+            wc_data["tags"] = smart_tags_for_product(product, cat_map)
         if images_data:
             wc_data["images"] = images_data
 
@@ -1029,6 +1049,7 @@ def enrich_products_with_details(session, products_by_pid, pids_to_enrich):
 
     stats = {'ok': 0, 'fail': 0}
     lock = Lock()
+    tls = threading.local()
 
     def worker():
         while True:
@@ -1037,9 +1058,13 @@ def enrich_products_with_details(session, products_by_pid, pids_to_enrich):
             except Exception:
                 break
             try:
+                th_sess = getattr(tls, 'session', None)
+                if th_sess is None:
+                    tls.session = _clone_session(session)
+                    th_sess = tls.session
                 p = products_by_pid[pid]
                 cat_for_detail = p.get('detail_hint_cat_id') or p.get('category_id')
-                specs, canonical_id = get_product_details(session, cat_for_detail, pid)
+                specs, canonical_id = get_product_details(th_sess, cat_for_detail, pid)
                 if canonical_id:
                     p['category_id'] = pick_deepest(p.get('category_id'), p.get('detail_hint_cat_id'), canonical_id)
                 p['specs'] = specs or {}
@@ -1131,6 +1156,8 @@ def main():
     pbar_lock = Lock()
 
     def cat_worker():
+        # Clone eways session once per worker thread for thread-safety
+        th_sess = _clone_session(session)
         while True:
             try:
                 cat_id = cat_queue.get_nowait()
@@ -1139,7 +1166,7 @@ def main():
             with delay_lock:
                 d = shared['delay']
             try:
-                products_in_cat = get_products_from_category_page(session, cat_id, 10, d)
+                products_in_cat = get_products_from_category_page(th_sess, cat_id, 10, d)
                 with all_lock:
                     for product in products_in_cat:
                         key = f"{product['id']}|{product['category_id']}"
