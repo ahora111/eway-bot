@@ -26,8 +26,9 @@ WC_SENDER_WORKERS = int(os.environ.get("WC_SENDER_WORKERS", "6"))
 SENDER_SLEEP_SEC = float(os.environ.get("SENDER_SLEEP_SEC", "0.05"))
 
 ALT_SKU_LOOKUP = os.environ.get("ALT_SKU_LOOKUP", "false").lower() == "true"
-FORCE_WC_QUERY_AUTH = os.environ.get("FORCE_WC_QUERY_AUTH", "true").lower() == "true"
+FORCE_WC_QUERY_AUTH = os.environ.get("FORCE_WC_QUERY_AUTH", "false").lower() == "true"
 WC_VERIFY_SSL = os.environ.get("WC_VERIFY_SSL", "true").lower() == "true"
+EWAYS_VERIFY_SSL = os.environ.get("EWAYS_VERIFY_SSL", "true").lower() == "true"
 DISABLE_TLS_WARNINGS = os.environ.get("DISABLE_TLS_WARNINGS", "true").lower() == "true"
 
 OUTOFSTOCK_WORKERS = int(os.environ.get("OUTOFSTOCK_WORKERS", "2"))
@@ -126,7 +127,10 @@ def pick_deepest(*cat_ids):
 def abs_url(u):
     if not u:
         return u
-    return u if str(u).startswith('http') else urljoin(BASE_URL, u)
+    s = str(u)
+    if s.startswith('//'):
+        return 'https:' + s
+    return s if s.startswith('http') else urljoin(BASE_URL, s)
 
 def extract_ids_from_href(href):
     # استخراج cat_id و product_id از /Store/Detail/<cat>/<pid>
@@ -221,8 +225,8 @@ def login_eways(username, password):
         'X-Requested-With': 'XMLHttpRequest',
         'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'
     })
-    # eways SSL مشکل CA دارد؛ همین را نگه می‌داریم
-    session.verify = False
+    # امکان تنظیم اعتبارسنجی SSL برای eways (به‌صورت پیش‌فرض فعال)
+    session.verify = certifi.where() if EWAYS_VERIFY_SSL else False
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(f"{BASE_URL}/User/Login",
                         data={"UserName": username, "Password": password, "RememberMe": "true"},
