@@ -8,6 +8,7 @@ from tqdm import tqdm
 from bs4 import BeautifulSoup
 from threading import Lock, Thread, Semaphore
 import threading
+import unicodedata
 from queue import Queue
 import logging
 from logging.handlers import RotatingFileHandler
@@ -31,6 +32,11 @@ FORCE_WC_QUERY_AUTH = os.environ.get("FORCE_WC_QUERY_AUTH", "false").lower() == 
 WC_VERIFY_SSL = os.environ.get("WC_VERIFY_SSL", "true").lower() == "true"
 EWAYS_VERIFY_SSL = os.environ.get("EWAYS_VERIFY_SSL", "true").lower() == "true"
 DISABLE_TLS_WARNINGS = os.environ.get("DISABLE_TLS_WARNINGS", "false").lower() == "true"
+
+# Secondary source merge options
+SECOND_SOURCE_ENABLED = os.environ.get("SECOND_SOURCE_ENABLED", "false").lower() == "true"
+SECOND_SOURCE_FILE = os.environ.get("SECOND_SOURCE_FILE", "secondary_products.json")
+PRODUCT_MATCH_MODE = os.environ.get("PRODUCT_MATCH_MODE", "name_exact")  # name_exact | id_map (future)
 
 OUTOFSTOCK_WORKERS = int(os.environ.get("OUTOFSTOCK_WORKERS", "2"))
 OUTOFSTOCK_SLEEP_SEC = float(os.environ.get("OUTOFSTOCK_SLEEP_SEC", "0.2"))
