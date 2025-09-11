@@ -13,6 +13,7 @@ from logging.handlers import RotatingFileHandler
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
 from collections import defaultdict, Counter
 from urllib.parse import urljoin
+import unicodedata  # برای نرمال‌سازی یونی‌کد
 
 # SSL helpers
 import certifi
@@ -140,7 +141,7 @@ def cat_label(catid):
     return f"{catid} ({name if name else 'نامشخص'})"
 
 # ==============================================================================
-# Parser فقط-کاما برای SELECTED_IDS_STRING + لاگ دیباگ
+# Parser فقط-کاما + نرمال‌سازی یونی‌کد برای SELECTED_IDS_STRING
 # ==============================================================================
 def parse_selected_ids_string(selected_ids_string):
     """
@@ -150,26 +151,54 @@ def parse_selected_ids_string(selected_ids_string):
     - pid:sub1(child1-allz,child2-all-allz),sub2(child3-allz,...)
     - آیدی تنها → all_subcats_and_products
     - بالانس خودکار پرانتز
+    - نرمال‌سازی dashهای یونیکدی به '-'، حذف کاراکترهای Cf، و تبدیل ارقام فارسی/عربی به لاتین
     """
 
+    PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
+    ARABIC_DIGITS  = '٠١٢٣٤٥٦٧٨٩'
+    DIGIT_MAP = str.maketrans(PERSIAN_DIGITS + ARABIC_DIGITS, '0123456789' * 2)
+
+    def unify_digits(s: str) -> str:
+        return s.translate(DIGIT_MAP)
+
+    def remove_format_chars(s: str) -> str:
+        # حذف همه کاراکترهای دسته Cf (LRM/RLM/LRE/RLE/PDF/FSI/RLI/LRI/PDI/ZWNJ/BOM/...)
+        return ''.join(ch for ch in s if unicodedata.category(ch) != 'Cf')
+
     def normalize_selection_string(s):
-        # نرمال‌سازی علائم فارسی/غیراستاندارد به ASCII
-        replacements = {
-            '؛': ',',  # سمی‌کالن فارسی → کاما
-            '،': ',',  # کاما فارسی → کاما
-            ';': ',',  # اگر اشتباها ; باشد → کاما
-            'ـ': '-',  # کشیده → خط تیره
-            '–': '-', '—': '-', '−': '-',  # انواع dash
-            '\u200c': '', '\u200f': '', '\ufeff': ''  # ZWNJ, RLM, BOM حذف
-        }
-        for a, b in replacements.items():
-            s = s.replace(a, b)
-        # حذف کوتیشن انتهایی اشتباهی
+        s = (s or "")
+        # تبدیل انواع dash/hyphen یونیکدی به '-'
+        dash_variants = [
+            '\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015',
+            '\u2212', '\u2043', '\u058a', '\ufe63', '\uff0d', 'ـ'
+        ]
+        for ch in dash_variants:
+            s = s.replace(ch, '-')
+        # حذف soft hyphen
+        s = s.replace('\u00ad', '')
+        # حذف کاراکترهای Cf
+        s = remove_format_chars(s)
+        # نرمال‌سازی فاصله‌های خاص
+        for sp in ['\u00a0', '\u2002', '\u2003', '\u2007', '\u2009', '\u200a', '\u202f']:
+            s = s.replace(sp, ' ')
+        # نرمال‌سازی جداکننده‌ها به کاما
+        s = s.replace('؛', ',').replace('،', ',').replace(';', ',')
+        # تبدیل ارقام فارسی/عربی به لاتین
+        s = unify_digits(s)
+        # حذف کوتیشن‌های ناخواسته و فضاهای اضافی
         s = s.strip().strip('"').strip("'").strip()
+        # حذف فاصله‌های اطراف '-' و ':'
+        s = re.sub(r'\s*-\s*', '-', s)
+        s = re.sub(r'\s*:\s*', ':', s)
+        # حذف فاصله‌های اضافه اطراف کاما
+        s = re.sub(r'\s*,\s*', ',', s)
         return s
 
     def normalize_token(t):
-        return (t or '').strip().strip('"').strip("'").strip()
+        t = (t or '').strip().strip('"').strip("'").strip()
+        t = remove_format_chars(t)
+        t = unify_digits(t)
+        return t
 
     def balance_parens(text):
         open_c = text.count('(')
@@ -226,19 +255,22 @@ def parse_selected_ids_string(selected_ids_string):
         if not tok:
             return out
 
-        # گروه با پرانتز کامل یا ناقص: 2389(...), 2390(...
+        # گروه با پرانتز کامل/ناقص: 2389(...), 2390(...
         m = re.match(r'^(\d+)KATEX_INLINE_OPEN(.*)KATEX_INLINE_CLOSE$', tok)
         if not m:
             m = re.match(r'^(\d+)KATEX_INLINE_OPEN(.*)$', tok)
         if m:
             group_id = int(m.group(1))
-            inner = m.group(2).strip()
+            inner = normalize_token(m.group(2))
             inner_tokens = split_top_level_commas(inner)
+            logger.info(f"   ↳ inner tokens for {group_id}: {inner_tokens} | repr={list(map(repr, inner_tokens))}")
             for it in inner_tokens:
                 out.extend(parse_token(it, default_parent_id=group_id))
             return out
 
         key = tok.lower()
+
+        # کلیدواژه‌ها روی والد فعلی
         if key == 'all':
             out.append({"id": int(default_parent_id), "type": "all_subcats"})
             return out
@@ -249,7 +281,8 @@ def parse_selected_ids_string(selected_ids_string):
             out.append({"id": int(default_parent_id), "type": "all_subcats_and_products"})
             return out
 
-        m2 = re.match(r'^(\d+)-(all|allz|all-allz)$', key)
+        # فرم id-suffix (با اجازه فاصله اطراف '-')
+        m2 = re.match(r'^(\d+)\s*-\s*(all|allz|all-allz)$', key)
         if m2:
             sid = int(m2.group(1))
             typ_key = m2.group(2)
@@ -257,17 +290,18 @@ def parse_selected_ids_string(selected_ids_string):
             out.append({"id": sid, "type": typ})
             return out
 
+        # آیدی تنها → all_subcats_and_products
         if tok.isdigit():
             out.append({"id": int(tok), "type": "all_subcats_and_products"})
             return out
 
         return out
 
-    s = normalize_selection_string(selected_ids_string or "")
+    s = normalize_selection_string(selected_ids_string)
     if not s:
         return []
 
-    # دیباگ: لاگ رشته خام پس از نرمال‌سازی
+    # لاگ دیباگ: رشته نهایی
     logger.info(f"🎯 SELECTED_IDS_STRING = {s}")
 
     result = []
@@ -287,7 +321,7 @@ def parse_selected_ids_string(selected_ids_string):
             continue
 
         top_tokens = split_top_level_commas(children_str)
-        logger.info(f"🔹 Block {parent_id}: tokens = {top_tokens}")
+        logger.info(f"🔹 Block {parent_id}: tokens = {top_tokens} | repr = {[repr(t) for t in top_tokens]}")
 
         selections = []
         for tok in top_tokens:
@@ -298,7 +332,7 @@ def parse_selected_ids_string(selected_ids_string):
         else:
             logger.warning(f"⚠️ هیچ انتخاب معتبری برای بلاک '{block}' پیدا نشد.")
 
-    # خلاصه برای دیباگ
+    # خلاصه
     try:
         debug_simple = []
         for blk in result:
@@ -830,6 +864,7 @@ wc_session = requests.Session()
 wc_session.headers.update({
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'
 })
+# SSL verify (بهتر است فعال باشد)
 wc_session.verify = certifi.where() if WC_VERIFY_SSL else False
 
 def wc_request(method, path, params=None, json=None, timeout=30, allow_redirects=True):
@@ -1322,7 +1357,7 @@ def enrich_products_with_details(session, products_by_pid, pids_to_enrich):
                     stats['fail'] += 1
             finally:
                 q.task_done()
-                time.sleep(random.uniform(0.05, 0.2))
+                time.sleep(random.uniform(0.05, 0.2))  # کمی تنفس بین کارها
 
     threads = []
     for _ in range(max(1, DETAILS_CONCURRENCY)):
@@ -1338,6 +1373,7 @@ def enrich_products_with_details(session, products_by_pid, pids_to_enrich):
 # تابع اصلی
 # ==============================================================================
 def main():
+    # یادآوری: WC_API_URL باید روی https + www باشد
     if "www." not in WC_API_URL:
         logger.warning(f"⚠️ پیشنهاد: WC_API_URL را با www تنظیم کنید. مقدار فعلی: {WC_API_URL}")
 
@@ -1471,7 +1507,7 @@ def main():
     wc_by_sku = {p.get('sku'): p for p in wc_products}
     wc_skus = set(wc_by_sku.keys())
 
-    # SKUهایی که تصویر ندارند
+    # SKUهایی که تصویر ندارند (بدون GET اضافی)
     wc_missing_image_skus = set()
     for p in wc_products:
         sku = p.get('sku') or ''
@@ -1595,7 +1631,7 @@ def main():
     logger.info("\n🚧 آپدیت ناموجودها ...")
     extracted_skus = set()
     for pid in canonical_products.keys():
-        extracted_skus.update(sku_candidates_for_pid(pid))
+        extracted_skus.update([f"{pref}{pid}" for pref in SKU_PREFIXES])
 
     to_oos_ids = set()
     # از کش قبلی
@@ -1603,7 +1639,7 @@ def main():
         pid_str = str(pid)
         if not any(f"{pref}{pid_str}" in extracted_skus for pref in SKU_PREFIXES):
             found_id = None
-            for s in sku_candidates_for_pid(pid_str):
+            for s in [f"{pref}{pid_str}" for pref in SKU_PREFIXES]:
                 wcp = wc_by_sku.get(s)
                 if wcp and wcp.get('stock_status') != "outofstock":
                     found_id = wcp['id']; break
