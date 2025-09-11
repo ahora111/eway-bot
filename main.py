@@ -142,181 +142,162 @@ def cat_label(catid):
     return f"{catid} ({name if name else 'نامشخص'})"
 
 # ==============================================================================
-# توابع انتخاب منعطف با SELECTED_IDS_STRING — نسخه ارتقا یافته
+# <<<<<<<<<<<< بخش اصلاح شده: توابع انتخاب منعطف با فرمت درختی و قدیمی >>>>>>>>>>
 # ==============================================================================
 
-def _parse_selections(selection_str):
-    """پارس کردن بخش بعد از : در ساختار قدیمی یا داخل (...) در ساختار جدید"""
-    selections = []
-    parts = selection_str.split(',')
-    for sel in parts:
-        sel = sel.strip()
-        if not sel:
-            continue
-        if sel == 'all':
-            selections.append({"id": None, "type": "all_subcats"})  # والد مشخص می‌شود در context
-        elif sel == 'allz':
-            selections.append({"id": None, "type": "only_products"})
-        elif sel == 'all-allz':
-            selections.append({"id": None, "type": "all_subcats_and_products"})
-        elif re.match(r'^\d+-allz$', sel):
-            sub_id = int(sel.split('-')[0])
-            selections.append({"id": sub_id, "type": "only_products"})
-        elif re.match(r'^\d+-all-allz$', sel):
-            sub_id = int(sel.split('-')[0])
-            selections.append({"id": sub_id, "type": "all_subcats_and_products"})
-        elif sel.isdigit():
-            selections.append({"id": int(sel), "type": "explicit_id"})
-    return selections
+def _parse_selection_leaf(selection_str, context_id):
+    """یک دستورالعمل تکی مثل '123-allz' یا 'all' را پارس می‌کند."""
+    selection_str = selection_str.strip()
+    if not selection_str:
+        return None
 
-
-def _split_parallel_branches(text):
-    """جدا کردن شاخه‌های موازی با ',' با در نظر گرفتن تو در توی پرانتزها"""
-    branches = []
-    current = []
-    paren_level = 0
+    if selection_str == 'all':
+        return {"id": context_id, "type": "all_subcats"}
+    elif selection_str == 'allz':
+        return {"id": context_id, "type": "only_products"}
+    elif selection_str == 'all-allz':
+        return {"id": context_id, "type": "all_subcats_and_products"}
     
-    for char in text:
-        if char == '(':
-            paren_level += 1
-        elif char == ')':
-            paren_level -= 1
-        elif char == ',' and paren_level == 0:
-            branches.append(''.join(current).strip())
-            current = []
-            continue
-        current.append(char)
-    
-    if current:
-        branches.append(''.join(current).strip())
-    
-    return branches
+    match_allz = re.match(r'^\s*(\d+)\s*-\s*allz\s*$', selection_str)
+    if match_allz:
+        sub_id = int(match_allz.group(1))
+        return {"id": sub_id, "type": "only_products"}
 
+    match_all_allz = re.match(r'^\s*(\d+)\s*-\s*all-allz\s*$', selection_str)
+    if match_all_allz:
+        sub_id = int(match_all_allz.group(1))
+        return {"id": sub_id, "type": "all_subcats_and_products"}
 
-def _parse_simple_path(path_str):
+    logger.warning(f"  - فرمت انتخاب ناشناخته: '{selection_str}' در زمینه ID={context_id}. نادیده گرفته شد.")
+    return None
+
+def _split_at_top_level(text, delimiter):
+    """یک رشته را بر اساس جداکننده در سطح بالا تقسیم می‌کند (داخل پرانتزها و براکت‌ها را نادیده می‌گیرد)."""
+    parts = []
+    balance = 0
+    last_split = 0
+    for i, char in enumerate(text):
+        if char in '([':
+            balance += 1
+        elif char in ')]':
+            balance -= 1
+        elif char == delimiter and balance == 0:
+            parts.append(text[last_split:i])
+            last_split = i + 1
+    parts.append(text[last_split:])
+    return [p.strip() for p in parts if p.strip()]
+
+def _parse_path_recursively(path_str, expected_parent_id):
     """
-    پارس کردن ساختار ساده: A > B > C > (D-allz, E)
+    یک مسیر مانند '1593 > [ ... ]' را به صورت بازگشتی پارس می‌کند.
+    expected_parent_id برای اعتبارسنجی ساختار درخت استفاده می‌شود.
     """
-    if '(' not in path_str or not path_str.endswith(')'):
-        raise ValueError("ساختار ساده باید با (...) تمام شود")
-    
-    last_gt = path_str.rfind('>')
-    if last_gt == -1:
-        raise ValueError("حداقل یک '>' قبل از '(' مورد نیاز است")
-    
-    path_part = path_str[:last_gt].strip()
-    selection_part = path_str[last_gt+1:].strip()
-    
-    if not (selection_part.startswith('(') and selection_part.endswith(')')):
-        raise ValueError("انتخاب‌ها باید داخل (...) باشند")
-    selection_part = selection_part[1:-1]  # حذف پرانتز
-    
-    path_ids = [int(x.strip()) for x in path_part.split('>') if x.strip().isdigit()]
-    if len(path_ids) < 1:
-        raise ValueError("مسیر باید حداقل یک ID داشته باشد")
-    
-    parent_id = path_ids[-1]
-    selections = _parse_selections(selection_part)
-    
-    for sel in selections:
-        if sel['id'] is None:
-            sel['id'] = parent_id
-    
-    return [{
-        "parent_id": parent_id,
-        "selections": selections
-    }]
+    path_str = path_str.strip()
+    final_selections = []
 
+    # حالت ۱: گروه موازی [...]
+    if path_str.startswith('[') and path_str.endswith(']'):
+        inner_content = path_str[1:-1].strip()
+        sub_paths = _split_at_top_level(inner_content, ',')
+        for sub_path in sub_paths:
+            final_selections.extend(_parse_path_recursively(sub_path, expected_parent_id))
+        return final_selections
 
-def _parse_nested_structure(path_str):
-    """
-    پارس کردن ساختارهای تو در تو مثل:
-    "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]"
-    """
-    path_str = re.sub(r'\s+', ' ', path_str.strip())
-    
-    parallel_start = path_str.rfind('> [')
-    if parallel_start == -1:
-        return _parse_simple_path(path_str)
-    
-    prefix_path = path_str[:parallel_start].strip()
-    parallel_part = path_str[parallel_start + 3:].strip()
-    
-    if not parallel_part.endswith(']'):
-        raise ValueError("براکت باز شده بسته نشده است")
-    parallel_part = parallel_part[:-1]
+    # حالت ۲: گروه انتخاب نهایی (...)
+    if path_str.startswith('(') and path_str.endswith(')'):
+        inner_content = path_str[1:-1].strip()
+        leaf_selections = _split_at_top_level(inner_content, ',')
+        for leaf_str in leaf_selections:
+            parsed_leaf = _parse_selection_leaf(leaf_str, expected_parent_id)
+            if parsed_leaf:
+                # اعتبارسنجی: آیا این فرزند واقعاً زیرمجموعه والد مورد انتظار است؟
+                leaf_id = parsed_leaf['id']
+                if CATEGORY_PARENT.get(leaf_id) != expected_parent_id:
+                    logger.warning(
+                        f"  - عدم تطابق والد برای {cat_label(leaf_id)}! "
+                        f"انتظار والد {cat_label(expected_parent_id)} را داشتیم اما والد واقعی {cat_label(CATEGORY_PARENT.get(leaf_id))} است. "
+                        f"ممکن است این انتخاب نادیده گرفته شود."
+                    )
+                final_selections.append(parsed_leaf)
+        return final_selections
 
-    prefix_parts = [int(x.strip()) for x in prefix_path.split('>') if x.strip().isdigit()]
-    if len(prefix_parts) < 2:
-        raise ValueError("مسیر prefix باید حداقل دو سطح داشته باشد")
+    # حالت ۳: یک گره در مسیر (ID > rest_of_path)
+    path_parts = _split_at_top_level(path_str, '>')
+    if not path_parts:
+        return []
 
-    branches = _split_parallel_branches(parallel_part)
-    results = []
-    
-    for branch in branches:
-        branch = branch.strip()
-        if '>' in branch and '(' in branch and branch.endswith(')'):
-            idx = branch.find('>')
-            mid_id_str = branch[:idx].strip()
-            if not mid_id_str.isdigit():
-                raise ValueError(f"ID نامعتبر در شاخه: {mid_id_str}")
-            mid_id = int(mid_id_str)
-            
-            content = branch[idx+1:].strip()
-            if not (content.startswith('(') and content.endswith(')')):
-                raise ValueError(f"محتوای داخل پرانتز نامعتبر: {content}")
-            content = content[1:-1]
-            
-            selections = _parse_selections(content)
-            parent_id = prefix_parts[-1]
-            for sel in selections:
-                if sel['id'] is None:
-                    sel['id'] = mid_id
-            results.append({
-                "parent_id": parent_id,
-                "selections": selections
-            })
-        else:
-            raise ValueError(f"ساختار شاخه نامعتبر: {branch}")
-    
-    return results
+    try:
+        current_id = int(path_parts[0])
+    except (ValueError, IndexError):
+        logger.error(f"  - شناسه نامعتبر در مسیر: '{path_parts[0]}'.")
+        return []
 
+    # اعتبارسنجی والد
+    if expected_parent_id is not None and CATEGORY_PARENT.get(current_id) != expected_parent_id:
+        logger.error(
+            f"  - مسیر نامعتبر! {cat_label(current_id)} فرزند {cat_label(expected_parent_id)} نیست. "
+            f"این شاخه از پردازش حذف می‌شود."
+        )
+        return []
+
+    if len(path_parts) > 1:
+        rest_of_path = '>'.join(path_parts[1:])
+        return _parse_path_recursively(rest_of_path, current_id)
+    else:
+        logger.error(f"  - مسیر ناقص: '{path_str}'. هر مسیر باید به یک گروه انتخاب (...) ختم شود.")
+        return []
 
 def parse_selected_ids_string(selected_ids_string):
-    """
-    پشتیبانی از ساختارهای پیچیده مثل:
-    "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|..."
-    """
-    result = []
-    blocks = selected_ids_string.split('|')
+    """هر دو فرمت انتخاب (قدیمی و جدید) را پارس کرده و یک لیست مسطح از دستورالعمل‌ها برمی‌گرداند."""
+    final_selections = []
     
-    for block in blocks:
-        block = block.strip()
-        if not block:
+    # جدا کردن بلاک‌های اصلی با |
+    for part in selected_ids_string.split('|'):
+        part = part.strip()
+        if not part:
             continue
-
-        if '>' in block:
+            
+        # تشخیص فرمت جدید (درختی)
+        if '>' in part:
+            logger.info(f"🔍 پردازش انتخاب درختی: '{part}'")
+            final_selections.extend(_parse_path_recursively(part, None))
+        
+        # تشخیص فرمت قدیمی (مسطح)
+        elif ':' in part:
+            logger.info(f"🔍 پردازش انتخاب مسطح: '{part}'")
             try:
-                parsed = _parse_nested_structure(block)
-                result.extend(parsed)
+                parent_id_str, children_str = part.split(':', 1)
+                parent_id = int(parent_id_str.strip())
+                
+                for sel_str in children_str.split(','):
+                    parsed_leaf = _parse_selection_leaf(sel_str, parent_id)
+                    if parsed_leaf:
+                        # اعتبارسنجی ساده برای فرمت قدیمی
+                        leaf_id = parsed_leaf['id']
+                        if leaf_id != parent_id and CATEGORY_PARENT.get(leaf_id) != parent_id:
+                             logger.warning(
+                                f"  - عدم تطابق والد برای {cat_label(leaf_id)} در انتخاب مسطح! "
+                                f"انتظار والد {cat_label(parent_id)} را داشتیم."
+                            )
+                        final_selections.append(parsed_leaf)
             except Exception as e:
-                logger.error(f"❌ خطای پارس ساختار تو در تو '{block}': {e}")
-                continue
-        else:
-            if ':' not in block:
-                continue
-            parent_id_str, children_str = block.split(':', 1)
-            parent_id = int(parent_id_str.strip())
-            selections = _parse_selections(children_str)
-            result.append({"parent_id": parent_id, "selections": selections})
-    
-    return result
+                logger.error(f"  - خطا در پردازش انتخاب مسطح '{part}': {e}")
+                
+    # حذف موارد تکراری احتمالی
+    unique_selections = []
+    seen = set()
+    for sel in final_selections:
+        # ساخت یک شناسه منحصر به فرد برای هر دیکشنری
+        identifier = (sel['id'], sel['type'])
+        if identifier not in seen:
+            unique_selections.append(sel)
+            seen.add(identifier)
+            
+    logger.info(f"✅ کل دستورالعمل‌های انتخاب پارس شده (منحصر به فرد): {len(unique_selections)}")
+    return unique_selections
 
-# ==============================================================================
-# توابع کمکی دسته‌بندی
-# ==============================================================================
 def get_direct_subcategories(parent_id, all_cats):
-    return [cat['id'] for cat in all_cats if cat['parent_id'] == parent_id]
+    return [cat['id'] for cat in all_cats if cat.get('parent_id') == parent_id]
 
 def get_all_subcategories(parent_id, all_cats):
     result = []
@@ -326,31 +307,49 @@ def get_all_subcategories(parent_id, all_cats):
         result.extend(get_all_subcategories(sub_id, all_cats))
     return result
 
-def get_selected_categories_according_to_selection(parsed_selection, all_cats):
+def get_selected_categories_according_to_selection(parsed_selections, all_cats):
+    """بر اساس لیست مسطح دستورالعمل‌ها، دسته‌های اسکرپ و انتقال را مشخص می‌کند."""
     selected_scrape = set()
     selected_transfer = set()
-    for block in parsed_selection:
-        parent_id = block['parent_id']
-        for sel in block['selections']:
-            typ, sid = sel['type'], sel['id']
-            if typ == 'all_subcats' and sid == parent_id:
-                subs = get_direct_subcategories(parent_id, all_cats)
-                for sc_id in subs:
-                    selected_scrape.add(sc_id); selected_transfer.add(sc_id)
-            elif typ == 'only_products' and sid == parent_id:
-                selected_scrape.add(parent_id); selected_transfer.add(parent_id)
-            elif typ == 'all_subcats_and_products' and sid == parent_id:
-                selected_scrape.add(parent_id); selected_transfer.add(parent_id)
-                for sub in get_all_subcategories(parent_id, all_cats):
-                    selected_scrape.add(sub); selected_transfer.add(sub)
-            elif typ == 'only_products' and sid != parent_id:
-                selected_scrape.add(sid); selected_transfer.add(sid)
-            elif typ == 'all_subcats_and_products' and sid != parent_id:
-                selected_scrape.add(sid); selected_transfer.add(sid)
-                for sub in get_all_subcategories(sid, all_cats):
-                    selected_scrape.add(sub); selected_transfer.add(sub)
+
+    for sel in parsed_selections:
+        typ, sid = sel['type'], sel['id']
+
+        # محصولاتی که مستقیماً در یک دسته هستند
+        if typ == 'only_products':
+            selected_scrape.add(sid)
+            selected_transfer.add(sid)
+
+        # همه زیرشاخه‌های مستقیم
+        elif typ == 'all_subcats':
+            subs = get_direct_subcategories(sid, all_cats)
+            for sc_id in subs:
+                selected_scrape.add(sc_id)
+                selected_transfer.add(sc_id)
+        
+        # محصولات خود دسته + همه زیرشاخه‌ها (بازگشتی)
+        elif typ == 'all_subcats_and_products':
+            selected_scrape.add(sid)
+            selected_transfer.add(sid)
+            for sub in get_all_subcategories(sid, all_cats):
+                selected_scrape.add(sub)
+                selected_transfer.add(sub)
+    
+    # همچنین تمام والدهای دسته‌های انتخاب شده را به لیست انتقال اضافه می‌کنیم تا ساختار حفظ شود
+    all_transfer_ids = set(selected_transfer)
+    for cat_id in list(all_transfer_ids):
+        current_id = cat_id
+        while current_id is not None:
+            parent_id = CATEGORY_PARENT.get(current_id)
+            if parent_id is not None:
+                all_transfer_ids.add(parent_id)
+                current_id = parent_id
+            else:
+                break
+    
     scrape_categories = [cat for cat in all_cats if cat['id'] in selected_scrape]
-    transfer_categories = [cat for cat in all_cats if cat['id'] in selected_transfer]
+    transfer_categories = [cat for cat in all_cats if cat['id'] in all_transfer_ids]
+    
     return scrape_categories, transfer_categories
 
 # ==============================================================================
@@ -364,6 +363,7 @@ def login_eways(username, password):
         'X-Requested-With': 'XMLHttpRequest',
         'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'
     })
+    # eways SSL مشکل CA دارد؛ همین را نگه می‌داریم
     session.verify = False
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(f"{BASE_URL}/User/Login",
@@ -470,6 +470,7 @@ def get_product_details(session, cat_id, product_id):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'lxml')
 
+        # دسته نهایی از breadcrumb
         canonical_cat_id = None
         try:
             selectors = [
@@ -493,6 +494,7 @@ def get_product_details(session, cat_id, product_id):
         except Exception:
             pass
 
+        # جدول مشخصات
         specs_table = soup.select_one('#link1 .table-responsive table') \
                       or soup.select_one('.table-responsive table') \
                       or soup.find('table', class_='table')
@@ -529,6 +531,7 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
     page = 1
     error_count = 0
     while page <= max_pages:
+        # HTML
         if page == 1:
             url = f"{BASE_URL}/Store/List/{category_id}/2/2/0/0/0/10000000000"
         else:
@@ -575,11 +578,12 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                             'price': price,
                             'stock': 1,
                             'image': image_url,
-                            'specs': {},
+                            'specs': {},  # فعلا نداریم
                         })
                         seen_product_ids.add(pid)
             logger.info(f"🟢 محصولات موجود (HTML) صفحه {page}: {len(html_products)}")
 
+            # Lazy
             lazy_products = []
             lazy_page = 1
             referer_url = url
@@ -623,6 +627,7 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                     pid = str(g["Id"])
                     if pid in seen_product_ids:
                         continue
+                    # تلاش برای گرفتن cat از لینک
                     cat_from_link = None
                     for k in ("Url", "Link", "Href", "RelativeUrl"):
                         u = g.get(k)
@@ -688,6 +693,7 @@ wc_session = requests.Session()
 wc_session.headers.update({
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'
 })
+# SSL verify (بهتر است فعال باشد)
 wc_session.verify = certifi.where() if WC_VERIFY_SSL else False
 
 def wc_request(method, path, params=None, json=None, timeout=30, allow_redirects=True):
@@ -823,6 +829,7 @@ def transfer_categories_to_wc(source_categories):
                 source_to_wc_id_map[cat["id"]] = new_id
                 transferred += 1
             else:
+                # term_exists
                 try:
                     error_data = res.json()
                 except Exception:
@@ -874,6 +881,7 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
                 update_data["attributes"] = data["attributes"]
             if data.get("tags") is not None:
                 update_data["tags"] = data["tags"]
+            # تصاویر فقط اگر عمداً گذاشته شده باشد
             if data.get("images"):
                 update_data["images"] = data["images"]
             if MIGRATE_REMOTE_SKU_TO_CANONICAL:
@@ -883,6 +891,7 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
             res.raise_for_status()
             with stats['lock']: stats['updated'] += 1
         else:
+            # ساخت: ترجیحاً با جزئیات؛ اگر نداریم و اجازه false است، رد
             if (data.get("attributes") is None) and (not CREATE_WITHOUT_DETAILS):
                 logger.warning(f"   ⚠️ ساخت {sku} رد شد؛ جزئیات نداریم و CREATE_WITHOUT_DETAILS=false است.")
                 with stats['lock']: stats['failed'] += 1
@@ -949,12 +958,14 @@ def mark_outofstock_batch(ids):
         data = res.json()
     except Exception:
         return False, ids
+    # سعی می‌کنیم بفهمیم کدام‌ها موفق شدند
     succeeded = set()
     failed = set()
     for item in (data.get("update") or []):
         pid = item.get("id")
         if pid:
             succeeded.add(int(pid))
+    # اگر Woo به‌خاطر خطاهایی برخی را برگرداند، باقی را failed می‌گذاریم
     for pid in ids:
         if int(pid) not in succeeded:
             failed.add(int(pid))
@@ -1031,6 +1042,7 @@ def process_product_wrapper(args):
         canonical_sku = f"EWAYS-{pid_str}"
         sku = canonical_sku
 
+        # وجود در WC (بدون GET اضافه)
         existing_wc_id = None
         candidate_skus = [f"{pref}{pid_str}" for pref in SKU_PREFIXES]
         for s in candidate_skus:
@@ -1039,12 +1051,14 @@ def process_product_wrapper(args):
                 existing_wc_id = wcp.get('id')
                 break
 
+        # جست‌وجوی alt SKU (اختیاری برای سرعت)
         if not existing_wc_id and ALT_SKU_LOOKUP:
             alt_id, alt_sku = find_wc_product_id_by_possible_skus(pid_str)
             if alt_id:
                 logger.info(f"🔎 محصول یافت شد با SKU جایگزین: {alt_sku} → ID={alt_id} (آپدیت به‌جای ساخت)")
                 existing_wc_id = alt_id
 
+        # ارسال تصویر فقط اگر: جدید است یا در WC تصویر ندارد
         include_images = (existing_wc_id is None) or any(s in wc_missing_image_skus for s in candidate_skus)
 
         images_data = None
@@ -1180,7 +1194,7 @@ def enrich_products_with_details(session, products_by_pid, pids_to_enrich):
                     stats['fail'] += 1
             finally:
                 q.task_done()
-                time.sleep(random.uniform(0.05, 0.2))
+                time.sleep(random.uniform(0.05, 0.2))  # کمی تنفس بین کارها
 
     threads = []
     for _ in range(max(1, DETAILS_CONCURRENCY)):
@@ -1196,6 +1210,7 @@ def enrich_products_with_details(session, products_by_pid, pids_to_enrich):
 # تابع اصلی
 # ==============================================================================
 def main():
+    # یادآوری: WC_API_URL باید روی https + www باشد
     if "www." not in WC_API_URL:
         logger.warning(f"⚠️ پیشنهاد: WC_API_URL را با www تنظیم کنید. مقدار فعلی: {WC_API_URL}")
 
@@ -1210,33 +1225,33 @@ def main():
         return
     init_category_index_global(all_cats)
 
-    # 🆕 تست ساختار جدید:
-    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
+    # <<<<<<<<<<<< بخش اصلاح شده: استفاده از فرمت جدید و ترکیبی برای انتخاب دسته‌ها >>>>>>>>>>
+    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or \
+        "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|16777:all-allz|4882 > (all-allz)"
 
+    # این تابع حالا هر دو فرمت قدیمی و جدید را می‌فهمد
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
 
+    # این تابع با خروجی جدید پارسر کار می‌کند
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
+    
+    # لاگ دسته‌ها
+    scrape_list = sorted([f"{c['id']} ({c['name']})" for c in scrape_categories])
+    transfer_list = sorted([f"{c['id']} ({c['name']})" for c in transfer_categories])
+    logger.info(f"✅ دسته‌های اسکرپ ({len(scrape_list)}): {scrape_list}")
+    logger.info(f"✅ دسته‌های انتقال با والدها ({len(transfer_list)}): {transfer_list}")
 
-    parent_ids = [block['parent_id'] for block in parsed_selection]
-    parent_cats = [cat for cat in all_cats if cat['id'] in parent_ids]
-    transfer_by_id = {c['id']: c for c in transfer_categories}
-    for pc in parent_cats:
-        transfer_by_id.setdefault(pc['id'], pc)
-    transfer_categories = list(transfer_by_id.values())
-
-    scrape_list = [f"{c['id']} ({c['name']})" for c in scrape_categories]
-    transfer_list = [f"{c['id']} ({c['name']})" for c in transfer_categories]
-    logger.info(f"✅ دسته‌های اسکرپ: {scrape_list}")
-    logger.info(f"✅ دسته‌های انتقال (با والدها): {transfer_list}")
-
+    # ساخت دسته‌ها در ووکامرس
     category_mapping = transfer_categories_to_wc(transfer_categories)
     if not category_mapping:
         logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد.")
         return
 
+    # کش
     cached_products_raw = load_cache()
     cached_products = normalize_cache(cached_products_raw, all_cats)
 
+    # جمع‌آوری محصولات Light
     selected_ids = [cat['id'] for cat in scrape_categories]
     all_products = {}
     all_lock = Lock()
@@ -1289,22 +1304,29 @@ def main():
 
     logger.info(f"✅ استخراج محصولات تمام شد. (کل کلیدهای id|leaf: {len(all_products)})")
 
+    # انتخاب leaf نهایی
     canonical_products = condense_products_to_leaf(all_products, all_cats)
     logger.info(f"🧭 محصولات (Light) پس از نگاشت به عمیق‌ترین زیرشاخه: {len(canonical_products)}")
     print_products_tree_by_leaf(canonical_products, transfer_categories or all_cats)
 
+    # آمار دسته‌ای
     cat_counts = Counter(p.get('category_id') for p in canonical_products.values())
     logger.info("📊 آمار تعداد محصولات به تفکیک دسته (leaf):")
     for cid, cnt in sorted(cat_counts.items(), key=lambda kv: (-kv[1], CATEGORY_NAME.get(kv[0], '') or '')):
         logger.info(f"   - {cat_label(cid)}: {cnt}")
 
+    # ادغام specs از کش
     merge_specs_from_cache(canonical_products, cached_products)
 
+    # ============================
+    # بررسی گپ همگام‌سازی و جزئیات
+    # ============================
     logger.info("\n⛽️ بررسی گپ همگام‌سازی با ووکامرس (Light)...")
     wc_products = get_all_wc_products_with_prefixes(SKU_PREFIXES)
     wc_by_sku = {p.get('sku'): p for p in wc_products}
     wc_skus = set(wc_by_sku.keys())
 
+    # SKUهایی که تصویر ندارند (بدون GET اضافی)
     wc_missing_image_skus = set()
     for p in wc_products:
         sku = p.get('sku') or ''
@@ -1312,6 +1334,7 @@ def main():
         if sku and len(imgs) == 0:
             wc_missing_image_skus.add(sku)
 
+    # تغییرات سبک
     changed_light = {}
     for pid, p in canonical_products.items():
         old = cached_products.get(pid)
@@ -1321,8 +1344,10 @@ def main():
     def sku_candidates_for_pid(pid):
         return [f"{pref}{pid}" for pref in SKU_PREFIXES]
 
+    # مفقود در ووکامرس
     missing_in_wc = {pid: p for pid, p in canonical_products.items() if not any(s in wc_skus for s in sku_candidates_for_pid(pid))}
 
+    # دسته نامنطبق
     mismatch = {}
     for pid, p in canonical_products.items():
         wcp = None
@@ -1338,6 +1363,7 @@ def main():
             mismatch[pid] = p
     logger.info(f"🧭 موارد با دسته نامنطبق (Light): {len(mismatch)}")
 
+    # تعیین اقلام نیازمند جزئیات
     need_details = set(changed_light.keys()) | set(missing_in_wc.keys()) | set(mismatch.keys())
     for pid, p in canonical_products.items():
         old = cached_products.get(pid)
@@ -1352,6 +1378,7 @@ def main():
     if need_details:
         enrich_products_with_details(session, canonical_products, need_details)
 
+    # ذخیره کش به‌روز
     updated_cache = {}
     for pid, p in canonical_products.items():
         base = dict(p)
@@ -1363,6 +1390,9 @@ def main():
         updated_cache[pid] = base
     save_cache(updated_cache)
 
+    # ============================
+    # اقلام ارسالی به ووکامرس
+    # ============================
     to_send_items = {}
     for pid, p in canonical_products.items():
         old = cached_products.get(pid)
@@ -1391,6 +1421,7 @@ def main():
     send_count = len(to_send_items)
     logger.info(f"\n🚀 شروع پردازش و ارسال {send_count} قلم به ووکامرس...")
 
+    # ——— ارسال ———
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0, 'outofstock_updated': 0, 'lock': Lock()}
 
     product_queue = Queue()
@@ -1415,14 +1446,17 @@ def main():
     for t in threads:
         t.join()
 
+    # ——— ناموجودها ———
     logger.info("\n🚧 آپدیت ناموجودها ...")
     extracted_skus = set()
     for pid in canonical_products.keys():
         extracted_skus.update(sku_candidates_for_pid(pid))
 
     to_oos_ids = set()
+    # از کش قبلی
     for pid in cached_products.keys():
         pid_str = str(pid)
+        # اگر هیچ‌یک از SKUهای آن pid در استخراج فعلی نیست
         if not any(f"{pref}{pid_str}" in extracted_skus for pref in SKU_PREFIXES):
             found_id = None
             for s in sku_candidates_for_pid(pid_str):
@@ -1432,11 +1466,13 @@ def main():
             if found_id:
                 to_oos_ids.add(found_id)
 
+    # از ووکامرس: هر محصول با پیشوند ما که در استخراج فعلی نیست و instock است
     for wcp in wc_products:
         sku = wcp.get('sku')
         if sku not in extracted_skus and wcp.get('stock_status') != "outofstock":
             to_oos_ids.add(wcp['id'])
 
+    # Batch اول
     failed_ids_after_batch = set()
     if to_oos_ids:
         logger.info(f"🚧 ناموجود کردن Batch: {len(to_oos_ids)} قلم در بچ‌های {BATCH_SIZE_OUTOFSTOCK}تایی ...")
@@ -1447,12 +1483,14 @@ def main():
                     failed_ids_after_batch.update(group)
                 else:
                     failed_ids_after_batch.update(failed_list)
+                # تنفس کوچک بین بچ‌ها
                 if OUTOFSTOCK_SLEEP_SEC > 0:
                     time.sleep(random.uniform(0, OUTOFSTOCK_SLEEP_SEC))
             except Exception as e:
                 logger.error(f"   ❌ خطا در Batch ناموجودها برای گروه {group[:3]}... : {e}")
                 failed_ids_after_batch.update(group)
 
+    # Fallback تکی با retry
     if failed_ids_after_batch:
         logger.info(f"🔁 تلاش تکی برای {len(failed_ids_after_batch)} قلم که در Batch ناموفق بودند...")
         outofstock_queue = Queue()
