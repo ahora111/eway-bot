@@ -35,11 +35,6 @@ OUTOFSTOCK_SLEEP_SEC = float(os.environ.get("OUTOFSTOCK_SLEEP_SEC", "0.2"))
 OUTOFSTOCK_TIMEOUT = float(os.environ.get("OUTOFSTOCK_TIMEOUT", "45"))
 BATCH_SIZE_OUTOFSTOCK = int(os.environ.get("BATCH_SIZE_OUTOFSTOCK", "30"))
 
-# سخت‌گیری مسیر DSL (فرزند مستقیم یا هر عمقی)
-DSL_REQUIRE_DIRECT_CHILD = os.environ.get("DSL_REQUIRE_DIRECT_CHILD", "false").lower() == "true"
-# دیباگ ساختار درخت (چاپ والد/فرزند/گام‌ها)
-DSL_DEBUG_TREE = os.environ.get("DSL_DEBUG_TREE", "true").lower() == "true"
-
 if DISABLE_TLS_WARNINGS:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -122,6 +117,7 @@ def init_category_index_global(categories):
         depth(c['id'])
 
 def pick_deepest(*cat_ids):
+    # انتخاب عمیق‌ترین دسته از بین ورودی‌ها (نادیده گرفتن None)
     candidates = [c for c in cat_ids if c is not None]
     if not candidates:
         return None
@@ -133,6 +129,7 @@ def abs_url(u):
     return u if str(u).startswith('http') else urljoin(BASE_URL, u)
 
 def extract_ids_from_href(href):
+    # استخراج cat_id و product_id از /Store/Detail/<cat>/<pid>
     m = re.search(r'/Store/Detail/(\d+)/(\d+)', href or '')
     if not m:
         return None, None
@@ -145,329 +142,178 @@ def cat_label(catid):
     return f"{catid} ({name if name else 'نامشخص'})"
 
 # ==============================================================================
-# DSL جدید: Parser/Tokenizer برای ساختارهای درختی
+# توابع انتخاب منعطف با SELECTED_IDS_STRING — نسخه ارتقا یافته
 # ==============================================================================
-class DSLParseError(Exception):
-    pass
 
-class CategoryDSLTokenizer:
-    def __init__(self, s):
-        self.s = s
-        self.n = len(s)
-        self.i = 0
-        self.cur = None
-        self._advance()
-
-    def _advance(self):
-        s, n = self.s, self.n
-        i = self.i
-        while i < n and s[i].isspace():
-            i += 1
-        if i >= n:
-            self.cur = ('EOF', None)
-            self.i = i
-            return
-        ch = s[i]
-        if ch.isdigit():
-            j = i + 1
-            while j < n and s[j].isdigit():
-                j += 1
-            self.cur = ('NUMBER', s[i:j])
-            self.i = j
-            return
-        if ch == '>':
-            self.cur = ('ARROW', '>')
-            self.i = i + 1
-            return
-        if ch == '[':
-            self.cur = ('LBRACK', '[')
-            self.i = i + 1
-            return
-        if ch == ']':
-            self.cur = ('RBRACK', ']')
-            self.i = i + 1
-            return
-        if ch == '(':
-            self.cur = ('LPAREN', '(')
-            self.i = i + 1
-            return
-        if ch == ')':
-            self.cur = ('RPAREN', ')')
-            self.i = i + 1
-            return
-        if ch == ',':
-            self.cur = ('COMMA', ',')
-            self.i = i + 1
-            return
-        if ch == '-':
-            rest = s[i:].lower()
-            if rest.startswith('-all-allz'):
-                self.cur = ('MODE', 'all-allz')
-                self.i = i + len('-all-allz')
-                return
-            if rest.startswith('-allz'):
-                self.cur = ('MODE', 'allz')
-                self.i = i + len('-allz')
-                return
-            raise DSLParseError(f"توکن MODE نامعتبر در موقعیت {i}: '{s[i:i+10]}'")
-        raise DSLParseError(f"کاراکتر نامعتبر در موقعیت {i}: '{ch}'")
-
-    def peek(self):
-        return self.cur[0]
-
-    def value(self):
-        return self.cur[1]
-
-    def accept(self, typ):
-        if self.cur[0] == typ:
-            v = self.cur[1]
-            self._advance()
-            return v
-        return None
-
-    def expect(self, typ):
-        if self.cur[0] != typ:
-            raise DSLParseError(f"انتظار '{typ}' داشتیم اما '{self.cur[0]}' دیدیم")
-        v = self.cur[1]
-        self._advance()
-        return v
-
-def _mode_from_token(tok):
-    if not tok:
-        return 'only_products'
-    tok = tok.lower()
-    if tok == 'all-allz':
-        return 'all_subcats_and_products'
-    return 'only_products'
-
-def _parse_tree_piece_to_block(part):
-    """
-    1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]
-    """
-    tk = CategoryDSLTokenizer(part)
-    parent_id = int(tk.expect('NUMBER'))
+def _parse_selections(selection_str):
+    """پارس کردن بخش بعد از : در ساختار قدیمی یا داخل (...) در ساختار جدید"""
     selections = []
+    parts = selection_str.split(',')
+    for sel in parts:
+        sel = sel.strip()
+        if not sel:
+            continue
+        if sel == 'all':
+            selections.append({"id": None, "type": "all_subcats"})  # والد مشخص می‌شود در context
+        elif sel == 'allz':
+            selections.append({"id": None, "type": "only_products"})
+        elif sel == 'all-allz':
+            selections.append({"id": None, "type": "all_subcats_and_products"})
+        elif re.match(r'^\d+-allz$', sel):
+            sub_id = int(sel.split('-')[0])
+            selections.append({"id": sub_id, "type": "only_products"})
+        elif re.match(r'^\d+-all-allz$', sel):
+            sub_id = int(sel.split('-')[0])
+            selections.append({"id": sub_id, "type": "all_subcats_and_products"})
+        elif sel.isdigit():
+            selections.append({"id": int(sel), "type": "explicit_id"})
+    return selections
 
-    def add_leaf(path_nodes, mode):
-        selections.append({"type": "path", "path": path_nodes, "mode": mode})
 
-    def parse_leaf_group(prefix):
-        tk.expect('LPAREN')
-        while True:
-            leaf_id = int(tk.expect('NUMBER'))
-            mode_tok = tk.accept('MODE')
-            mode = _mode_from_token(mode_tok)
-            add_leaf(prefix + [leaf_id], mode)
-            if tk.accept('COMMA'):
-                continue
-            break
-        tk.expect('RPAREN')
+def _split_parallel_branches(text):
+    """جدا کردن شاخه‌های موازی با ',' با در نظر گرفتن تو در توی پرانتزها"""
+    branches = []
+    current = []
+    paren_level = 0
+    
+    for char in text:
+        if char == '(':
+            paren_level += 1
+        elif char == ')':
+            paren_level -= 1
+        elif char == ',' and paren_level == 0:
+            branches.append(''.join(current).strip())
+            current = []
+            continue
+        current.append(char)
+    
+    if current:
+        branches.append(''.join(current).strip())
+    
+    return branches
 
-    def parse_after_number(prefix):
-        if tk.accept('ARROW'):
-            if tk.peek() == 'LPAREN':
-                parse_leaf_group(prefix)
-            elif tk.peek() == 'NUMBER':
-                nid = int(tk.expect('NUMBER'))
-                parse_after_number(prefix + [nid])
-            elif tk.peek() == 'LBRACK':
-                tk.expect('LBRACK')
-                while True:
-                    nid = int(tk.expect('NUMBER'))
-                    parse_after_number(prefix + [nid])
-                    if tk.accept('COMMA'):
-                        continue
-                    break
-                tk.expect('RBRACK')
-            else:
-                raise DSLParseError("بعد از '>' باید '(' یا عدد یا '[' بیاید.")
+
+def _parse_simple_path(path_str):
+    """
+    پارس کردن ساختار ساده: A > B > C > (D-allz, E)
+    """
+    if '(' not in path_str or not path_str.endswith(')'):
+        raise ValueError("ساختار ساده باید با (...) تمام شود")
+    
+    last_gt = path_str.rfind('>')
+    if last_gt == -1:
+        raise ValueError("حداقل یک '>' قبل از '(' مورد نیاز است")
+    
+    path_part = path_str[:last_gt].strip()
+    selection_part = path_str[last_gt+1:].strip()
+    
+    if not (selection_part.startswith('(') and selection_part.endswith(')')):
+        raise ValueError("انتخاب‌ها باید داخل (...) باشند")
+    selection_part = selection_part[1:-1]  # حذف پرانتز
+    
+    path_ids = [int(x.strip()) for x in path_part.split('>') if x.strip().isdigit()]
+    if len(path_ids) < 1:
+        raise ValueError("مسیر باید حداقل یک ID داشته باشد")
+    
+    parent_id = path_ids[-1]
+    selections = _parse_selections(selection_part)
+    
+    for sel in selections:
+        if sel['id'] is None:
+            sel['id'] = parent_id
+    
+    return [{
+        "parent_id": parent_id,
+        "selections": selections
+    }]
+
+
+def _parse_nested_structure(path_str):
+    """
+    پارس کردن ساختارهای تو در تو مثل:
+    "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]"
+    """
+    path_str = re.sub(r'\s+', ' ', path_str.strip())
+    
+    parallel_start = path_str.rfind('> [')
+    if parallel_start == -1:
+        return _parse_simple_path(path_str)
+    
+    prefix_path = path_str[:parallel_start].strip()
+    parallel_part = path_str[parallel_start + 3:].strip()
+    
+    if not parallel_part.endswith(']'):
+        raise ValueError("براکت باز شده بسته نشده است")
+    parallel_part = parallel_part[:-1]
+
+    prefix_parts = [int(x.strip()) for x in prefix_path.split('>') if x.strip().isdigit()]
+    if len(prefix_parts) < 2:
+        raise ValueError("مسیر prefix باید حداقل دو سطح داشته باشد")
+
+    branches = _split_parallel_branches(parallel_part)
+    results = []
+    
+    for branch in branches:
+        branch = branch.strip()
+        if '>' in branch and '(' in branch and branch.endswith(')'):
+            idx = branch.find('>')
+            mid_id_str = branch[:idx].strip()
+            if not mid_id_str.isdigit():
+                raise ValueError(f"ID نامعتبر در شاخه: {mid_id_str}")
+            mid_id = int(mid_id_str)
+            
+            content = branch[idx+1:].strip()
+            if not (content.startswith('(') and content.endswith(')')):
+                raise ValueError(f"محتوای داخل پرانتز نامعتبر: {content}")
+            content = content[1:-1]
+            
+            selections = _parse_selections(content)
+            parent_id = prefix_parts[-1]
+            for sel in selections:
+                if sel['id'] is None:
+                    sel['id'] = mid_id
+            results.append({
+                "parent_id": parent_id,
+                "selections": selections
+            })
         else:
-            mode_tok = tk.accept('MODE')
-            mode = _mode_from_token(mode_tok)
-            add_leaf(prefix, mode)
+            raise ValueError(f"ساختار شاخه نامعتبر: {branch}")
+    
+    return results
 
-    def parse_node_or_group(prefix):
-        if tk.peek() == 'NUMBER':
-            nid = int(tk.expect('NUMBER'))
-            parse_after_number(prefix + [nid])
-        elif tk.peek() == 'LBRACK':
-            tk.expect('LBRACK')
-            while True:
-                nid = int(tk.expect('NUMBER'))
-                parse_after_number(prefix + [nid])
-                if tk.accept('COMMA'):
-                    continue
-                break
-            tk.expect('RBRACK')
-        else:
-            raise DSLParseError("انتظار عدد یا '[' در مسیر داشتیم.")
 
-    if tk.accept('ARROW'):
-        parse_node_or_group([])
-    else:
-        pass
-
-    if tk.peek() != 'EOF':
-        logger.warning(f"⚠️ کاراکترهای اضافه در انتهای DSL: '{tk.s[tk.i:]}'")
-
-    return {"parent_id": parent_id, "selections": selections}
-
-# ==============================================================================
-# توابع انتخاب منعطف با SELECTED_IDS_STRING (قدیم + DSL جدید)
-# ==============================================================================
 def parse_selected_ids_string(selected_ids_string):
     """
-    پشتیبانی از:
-      - فرمت قدیمی: parent: children,children | parent2: ...
-        نمونه‌ها: all, allz, all-allz, 123-allz, 123-all-allz, 1593>2389>13203-allz
-      - فرمت جدید درختی (DSL)
+    پشتیبانی از ساختارهای پیچیده مثل:
+    "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|..."
     """
     result = []
-    parts = [p.strip() for p in (selected_ids_string or '').split('|') if p.strip()]
-    for part in parts:
-        if ':' in part:
-            parent_id_str, children_str = part.split(':', 1)
+    blocks = selected_ids_string.split('|')
+    
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+
+        if '>' in block:
             try:
-                parent_id = int(parent_id_str.strip())
-            except ValueError:
-                logger.warning(f"⚠️ parent_id نامعتبر در '{part}'")
-                continue
-            selections = []
-            for raw in children_str.split(','):
-                sel = raw.strip()
-                if not sel:
-                    continue
-                if sel.lower() == 'all':
-                    selections.append({"type": "all_subcats", "id": parent_id})
-                    continue
-                if sel.lower() == 'allz':
-                    selections.append({"type": "only_products", "id": parent_id})
-                    continue
-                if sel.lower() == 'all-allz':
-                    selections.append({"type": "all_subcats_and_products", "id": parent_id})
-                    continue
-                m = re.match(r'^(?P<path>\d+(?:>\d+)*)(?:-(?P<mode>allz|all-allz))?$', sel, flags=re.IGNORECASE)
-                if m:
-                    nodes = [int(x) for x in m.group('path').split('>')]
-                    mode = (m.group('mode') or 'allz').lower()
-                    mode_type = 'only_products' if mode == 'allz' else 'all_subcats_and_products'
-                    selections.append({"type": "path", "path": nodes, "mode": mode_type})
-                    continue
-                if re.match(r'^\d+-all-allz$', sel):
-                    sub_id = int(sel.split('-')[0])
-                    selections.append({"type": "all_subcats_and_products", "id": sub_id})
-                    continue
-                if re.match(r'^\d+-allz$', sel):
-                    sub_id = int(sel.split('-')[0])
-                    selections.append({"type": "only_products", "id": sub_id})
-                    continue
-                if re.match(r'^\d+$', sel):
-                    sub_id = int(sel)
-                    selections.append({"type": "only_products", "id": sub_id})
-                    continue
-                logger.warning(f"⚠️ الگوی انتخاب ناشناخته: '{sel}' (بخش='{part}') - نادیده گرفته شد.")
-            result.append({"parent_id": parent_id, "selections": selections})
-        else:
-            try:
-                block = _parse_tree_piece_to_block(part)
-                result.append(block)
+                parsed = _parse_nested_structure(block)
+                result.extend(parsed)
             except Exception as e:
-                logger.warning(f"⚠️ خطا در پارس DSL جدید: {e} | بخش: {part}")
+                logger.error(f"❌ خطای پارس ساختار تو در تو '{block}': {e}")
                 continue
+        else:
+            if ':' not in block:
+                continue
+            parent_id_str, children_str = block.split(':', 1)
+            parent_id = int(parent_id_str.strip())
+            selections = _parse_selections(children_str)
+            result.append({"parent_id": parent_id, "selections": selections})
+    
     return result
 
-# ------------------- دیباگ ساختار درخت و مسیرهای DSL -------------------
-def _build_children_index(all_cats):
-    ch = defaultdict(list)
-    for c in all_cats:
-        pid = c.get('parent_id')
-        ch[pid].append(c['id'])
-    return ch
-
-def _fmt_cat(cid, id_to_name):
-    return f"{cid} ({id_to_name.get(cid, '?')})"
-
-def _is_ancestor_of(id_to_parent, anc, node):
-    cur = id_to_parent.get(node)
-    while cur is not None:
-        if cur == anc:
-            return True
-        cur = id_to_parent.get(cur)
-    return False
-
-def _chain_leaf_to_root(id_to_parent, id_to_name, cid):
-    chain = []
-    cur = cid
-    while cur is not None:
-        chain.append(f"{cur} ({id_to_name.get(cur,'?')})")
-        cur = id_to_parent.get(cur)
-    return " -> ".join(chain) if chain else "(empty)"
-
-def _list_children_line(children_index, id_to_name, node_id, max_items=40):
-    kids = children_index.get(node_id, [])
-    parts = [f"{k} ({id_to_name.get(k,'?')})" for k in kids[:max_items]]
-    more = "" if len(kids) <= max_items else f" ... +{len(kids)-max_items} more"
-    return f"[{', '.join(parts)}]{more} (count={len(kids)})"
-
-def debug_dsl_structure(parsed_selection, all_cats):
-    """
-    لاگ دیباگ برای مسیرهای DSL:
-      - صحت وجود هر نود
-      - زنجیره leaf→root
-      - فرزندهای مستقیم نودهای مسیر
-      - وضعیت direct/ancestor برای هر گام
-    """
-    id_to_parent = {c['id']: c.get('parent_id') for c in all_cats}
-    id_to_name   = {c['id']: (c.get('name') or '').strip() for c in all_cats}
-    id_set       = set(id_to_parent.keys())
-    children_idx = _build_children_index(all_cats)
-
-    any_path = False
-    for block in parsed_selection:
-        parent_id = block['parent_id']
-        path_selections = [s for s in block.get('selections', []) if s.get('type') == 'path']
-        if not path_selections:
-            continue
-        any_path = True
-
-        logger.info(f"🔎 DSL Debug | Parent Block: {_fmt_cat(parent_id, id_to_name)}")
-        logger.info(f"   • children of parent {parent_id}: {_list_children_line(children_idx, id_to_name, parent_id)}")
-
-        for sel in path_selections:
-            nodes = sel.get('path') or []
-            mode = sel.get('mode', 'only_products')
-            path_str_ids   = " > ".join(str(n) for n in nodes)
-            path_str_names = " > ".join(id_to_name.get(n, '?') for n in nodes)
-            logger.info(f"   • requested path: {path_str_ids}  |  {path_str_names}  |  mode={mode}")
-
-            for n in nodes:
-                exists = "yes" if n in id_set else "NO"
-                logger.info(f"      - exists? {_fmt_cat(n, id_to_name)} → {exists}")
-
-            for i in range(1, len(nodes)):
-                prev_, cur_ = nodes[i-1], nodes[i]
-                direct_ok = (id_to_parent.get(cur_) == prev_)
-                anc_ok    = _is_ancestor_of(id_to_parent, prev_, cur_)
-                logger.info(f"      - step {prev_} → {cur_}: direct={direct_ok}, ancestor={anc_ok}")
-
-            if nodes:
-                leaf = nodes[-1]
-                if leaf in id_set:
-                    logger.info(f"      - chain leaf→root: {_chain_leaf_to_root(id_to_parent, id_to_name, leaf)}")
-                else:
-                    logger.warning(f"      - leaf {leaf} در لیست دسته‌ها یافت نشد.")
-
-            for n in nodes:
-                if n in id_set:
-                    logger.info(f"      - children of {n}: {_list_children_line(children_idx, id_to_name, n)}")
-                else:
-                    logger.info(f"      - children of {n}: (node not found)")
-
-    if not any_path:
-        logger.info("ℹ️ DSL Debug: هیچ selection از نوع path پیدا نشد (احتمالا فقط فرمت قدیمی استفاده شده).")
-
 # ==============================================================================
-# انتخاب دسته‌ها طبق selection
+# توابع کمکی دسته‌بندی
 # ==============================================================================
 def get_direct_subcategories(parent_id, all_cats):
     return [cat['id'] for cat in all_cats if cat['parent_id'] == parent_id]
@@ -483,110 +329,26 @@ def get_all_subcategories(parent_id, all_cats):
 def get_selected_categories_according_to_selection(parsed_selection, all_cats):
     selected_scrape = set()
     selected_transfer = set()
-
-    id_to_parent = {c['id']: c.get('parent_id') for c in all_cats}
-    id_set = set(id_to_parent.keys())
-
-    def add_descendants(root_id):
-        return get_all_subcategories(root_id, all_cats)
-
-    def add_ancestors_to_transfer(cid, stop_at=None):
-        cur = id_to_parent.get(cid)
-        while cur is not None and cur != stop_at:
-            if cur in id_set:
-                selected_transfer.add(cur)
-            cur = id_to_parent.get(cur)
-        if stop_at and stop_at in id_set:
-            selected_transfer.add(stop_at)
-
-    def is_ancestor_of(anc, node):
-        cur = id_to_parent.get(node)
-        while cur is not None:
-            if cur == anc:
-                return True
-            cur = id_to_parent.get(cur)
-        return False
-
-    def is_path_valid(nodes):
-        if not nodes:
-            return False
-        if DSL_REQUIRE_DIRECT_CHILD:
-            for i in range(1, len(nodes)):
-                if id_to_parent.get(nodes[i]) != nodes[i-1]:
-                    return False
-            return True
-        # descendant-of
-        for i in range(1, len(nodes)):
-            if not is_ancestor_of(nodes[i-1], nodes[i]):
-                return False
-        return True
-
-    def parent_is_ancestor_of(parent_id, node_id):
-        return is_ancestor_of(parent_id, node_id)
-
     for block in parsed_selection:
         parent_id = block['parent_id']
-        if parent_id in id_set:
-            selected_transfer.add(parent_id)
-
         for sel in block['selections']:
-            typ = sel.get('type')
-
-            if typ == 'all_subcats':
+            typ, sid = sel['type'], sel['id']
+            if typ == 'all_subcats' and sid == parent_id:
                 subs = get_direct_subcategories(parent_id, all_cats)
                 for sc_id in subs:
                     selected_scrape.add(sc_id); selected_transfer.add(sc_id)
-                    add_ancestors_to_transfer(sc_id, stop_at=parent_id)
-
-            elif typ == 'only_products':
-                sid = sel.get('id', parent_id)
-                selected_scrape.add(sid); selected_transfer.add(sid)
-                add_ancestors_to_transfer(sid, stop_at=parent_id)
-
-            elif typ == 'all_subcats_and_products':
-                sid = sel.get('id', parent_id)
-                selected_scrape.add(sid); selected_transfer.add(sid)
-                for sub in add_descendants(sid):
+            elif typ == 'only_products' and sid == parent_id:
+                selected_scrape.add(parent_id); selected_transfer.add(parent_id)
+            elif typ == 'all_subcats_and_products' and sid == parent_id:
+                selected_scrape.add(parent_id); selected_transfer.add(parent_id)
+                for sub in get_all_subcategories(parent_id, all_cats):
                     selected_scrape.add(sub); selected_transfer.add(sub)
-                add_ancestors_to_transfer(sid, stop_at=parent_id)
-
-            elif typ == 'path':
-                nodes = sel.get('path') or []
-                if not nodes:
-                    continue
-                last = nodes[-1]
-
-                path_ok = is_path_valid(nodes)
-                anc_ok = parent_is_ancestor_of(parent_id, last)
-
-                if path_ok and anc_ok:
-                    mode = sel.get('mode', 'only_products')
-                    if mode == 'only_products':
-                        selected_scrape.add(last); selected_transfer.add(last)
-                        add_ancestors_to_transfer(last, stop_at=parent_id)
-                    else:
-                        selected_scrape.add(last); selected_transfer.add(last)
-                        for sub in add_descendants(last):
-                            selected_scrape.add(sub); selected_transfer.add(sub)
-                        add_ancestors_to_transfer(last, stop_at=parent_id)
-                else:
-                    if last in id_set:
-                        if not path_ok:
-                            logger.warning(f"⚠️ مسیر نامعتبر (میانی) {nodes} → فقط leaf={last} اعمال شد.")
-                        elif not anc_ok:
-                            logger.warning(f"⚠️ مسیر نامعتبر (رابطه اجدادی برقرار نیست): {nodes} → فقط leaf={last} اعمال شد.")
-                        mode = sel.get('mode', 'only_products')
-                        selected_scrape.add(last); selected_transfer.add(last)
-                        add_ancestors_to_transfer(last, stop_at=parent_id)
-                        for mid in nodes[:-1]:
-                            if mid in id_set:
-                                selected_transfer.add(mid)
-                    else:
-                        logger.warning(f"⚠️ leaf={last} در لیست دسته‌ها یافت نشد؛ مسیر {nodes} نادیده گرفته شد.")
-
-            else:
-                logger.warning(f"⚠️ نوع انتخاب ناشناخته: {typ}")
-
+            elif typ == 'only_products' and sid != parent_id:
+                selected_scrape.add(sid); selected_transfer.add(sid)
+            elif typ == 'all_subcats_and_products' and sid != parent_id:
+                selected_scrape.add(sid); selected_transfer.add(sid)
+                for sub in get_all_subcategories(sid, all_cats):
+                    selected_scrape.add(sub); selected_transfer.add(sub)
     scrape_categories = [cat for cat in all_cats if cat['id'] in selected_scrape]
     transfer_categories = [cat for cat in all_cats if cat['id'] in selected_transfer]
     return scrape_categories, transfer_categories
@@ -602,7 +364,6 @@ def login_eways(username, password):
         'X-Requested-With': 'XMLHttpRequest',
         'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'
     })
-    # eways SSL مشکل CA دارد؛ همین را نگه می‌داریم
     session.verify = False
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(f"{BASE_URL}/User/Login",
@@ -927,7 +688,6 @@ wc_session = requests.Session()
 wc_session.headers.update({
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'
 })
-# SSL verify (بهتر است فعال باشد)
 wc_session.verify = certifi.where() if WC_VERIFY_SSL else False
 
 def wc_request(method, path, params=None, json=None, timeout=30, allow_redirects=True):
@@ -1093,7 +853,7 @@ def process_price(price_value):
     return str(int(round(new_price, -4)))
 
 # ==============================================================================
-# ارسال/آپدیت ووکامرس
+# ارسال/آپدیت ووکامرس با هندلینگ SKU تکراری و تصاویر مشروط
 # ==============================================================================
 @retry(
     retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)),
@@ -1154,7 +914,7 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
                         update_data["images"] = data["images"]
                     if MIGRATE_REMOTE_SKU_TO_CANONICAL:
                         update_data["sku"] = data["sku"]
-                    res2 = wc_request("put", f"/products/{resource_id}", json=update_data}, timeout=40)
+                    res2 = wc_request("put", f"/products/{resource_id}", json=update_data, timeout=40)
                     res2.raise_for_status()
                     with stats['lock']: stats['updated'] += 1
                 else:
@@ -1168,7 +928,7 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
         raise
 
 # ==============================================================================
-# ناموجود کردن
+# ناموجود کردن: Batch + Fallback تکی با retry
 # ==============================================================================
 def chunked(iterable, size):
     iterable = list(iterable)
@@ -1226,7 +986,7 @@ def smart_tags_for_product(product, cat_map):
         price = 0
 
     name_parts = [w for w in re.split(r'\s+', name) if w and len(w) > 2]
-    common_words = {'گوشی','موبایل','تبلت','لپتاپ','לپ‌تاپ','مدل','محصول','کالا','جدید'}
+    common_words = {'گوشی','موبایل','تبلت','لپتاپ','لپ‌تاپ','مدل','محصول','کالا','جدید'}
     for part in name_parts[:2]:
         if part not in common_words: tags.add(part)
     if cat_name and cat_name not in common_words: tags.add(cat_name)
@@ -1315,7 +1075,7 @@ def process_product_wrapper(args):
         with stats['lock']: stats['failed'] += 1
 
 # ==============================================================================
-# ابزارهای تجمیع/کش/جزئیات
+# ابزارهای تجمیع محصول به leaf و کش و جزئیات Selective
 # ==============================================================================
 def condense_products_to_leaf(all_products_by_catkey, categories):
     occurrences = defaultdict(list)
@@ -1450,19 +1210,13 @@ def main():
         return
     init_category_index_global(all_cats)
 
-    # رشته ترکیبی (DSL جدید + فرمت قدیمی) مطابق درخواست شما
-    default_selected = "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
-    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or default_selected
+    # 🆕 تست ساختار جدید:
+    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
+
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
 
-    # دیباگ ساختار DSL و چاپ والد/فرزند/گام‌ها
-    if DSL_DEBUG_TREE:
-        debug_dsl_structure(parsed_selection, all_cats)
-
-    # انتخاب‌ها
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
 
-    # اطمینان از حضور والدها در انتقال (ایمنی بیشتر)
     parent_ids = [block['parent_id'] for block in parsed_selection]
     parent_cats = [cat for cat in all_cats if cat['id'] in parent_ids]
     transfer_by_id = {c['id']: c for c in transfer_categories}
@@ -1470,23 +1224,19 @@ def main():
         transfer_by_id.setdefault(pc['id'], pc)
     transfer_categories = list(transfer_by_id.values())
 
-    # لاگ دسته‌ها
     scrape_list = [f"{c['id']} ({c['name']})" for c in scrape_categories]
     transfer_list = [f"{c['id']} ({c['name']})" for c in transfer_categories]
     logger.info(f"✅ دسته‌های اسکرپ: {scrape_list}")
     logger.info(f"✅ دسته‌های انتقال (با والدها): {transfer_list}")
 
-    # ساخت دسته‌ها در ووکامرس
     category_mapping = transfer_categories_to_wc(transfer_categories)
     if not category_mapping:
         logger.error("❌ نگاشت دسته‌بندی ووکامرس ساخته نشد.")
         return
 
-    # کش
     cached_products_raw = load_cache()
     cached_products = normalize_cache(cached_products_raw, all_cats)
 
-    # جمع‌آوری محصولات Light
     selected_ids = [cat['id'] for cat in scrape_categories]
     all_products = {}
     all_lock = Lock()
@@ -1539,21 +1289,17 @@ def main():
 
     logger.info(f"✅ استخراج محصولات تمام شد. (کل کلیدهای id|leaf: {len(all_products)})")
 
-    # انتخاب leaf نهایی
     canonical_products = condense_products_to_leaf(all_products, all_cats)
     logger.info(f"🧭 محصولات (Light) پس از نگاشت به عمیق‌ترین زیرشاخه: {len(canonical_products)}")
     print_products_tree_by_leaf(canonical_products, transfer_categories or all_cats)
 
-    # آمار دسته‌ای
     cat_counts = Counter(p.get('category_id') for p in canonical_products.values())
     logger.info("📊 آمار تعداد محصولات به تفکیک دسته (leaf):")
     for cid, cnt in sorted(cat_counts.items(), key=lambda kv: (-kv[1], CATEGORY_NAME.get(kv[0], '') or '')):
         logger.info(f"   - {cat_label(cid)}: {cnt}")
 
-    # ادغام specs از کش
     merge_specs_from_cache(canonical_products, cached_products)
 
-    # بررسی گپ همگام‌سازی و جزئیات
     logger.info("\n⛽️ بررسی گپ همگام‌سازی با ووکامرس (Light)...")
     wc_products = get_all_wc_products_with_prefixes(SKU_PREFIXES)
     wc_by_sku = {p.get('sku'): p for p in wc_products}
@@ -1606,7 +1352,6 @@ def main():
     if need_details:
         enrich_products_with_details(session, canonical_products, need_details)
 
-    # ذخیره کش
     updated_cache = {}
     for pid, p in canonical_products.items():
         base = dict(p)
@@ -1618,7 +1363,6 @@ def main():
         updated_cache[pid] = base
     save_cache(updated_cache)
 
-    # اقلام ارسالی به ووکامرس
     to_send_items = {}
     for pid, p in canonical_products.items():
         old = cached_products.get(pid)
@@ -1671,7 +1415,6 @@ def main():
     for t in threads:
         t.join()
 
-    # ناموجود کردن‌ها
     logger.info("\n🚧 آپدیت ناموجودها ...")
     extracted_skus = set()
     for pid in canonical_products.keys():
