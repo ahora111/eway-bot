@@ -117,7 +117,6 @@ def init_category_index_global(categories):
         depth(c['id'])
 
 def pick_deepest(*cat_ids):
-    # انتخاب عمیق‌ترین دسته از بین ورودی‌ها (نادیده گرفتن None)
     candidates = [c for c in cat_ids if c is not None]
     if not candidates:
         return None
@@ -129,7 +128,6 @@ def abs_url(u):
     return u if str(u).startswith('http') else urljoin(BASE_URL, u)
 
 def extract_ids_from_href(href):
-    # استخراج cat_id و product_id از /Store/Detail/<cat>/<pid>
     m = re.search(r'/Store/Detail/(\d+)/(\d+)', href or '')
     if not m:
         return None, None
@@ -142,76 +140,240 @@ def cat_label(catid):
     return f"{catid} ({name if name else 'نامشخص'})"
 
 # ==============================================================================
-# توابع انتخاب منعطف با SELECTED_IDS_STRING
+# DSL جدید: Parser/Tokenizer برای ساختارهای درختی
+# ==============================================================================
+class DSLParseError(Exception):
+    pass
+
+class CategoryDSLTokenizer:
+    def __init__(self, s):
+        self.s = s
+        self.n = len(s)
+        self.i = 0
+        self.cur = None
+        self._advance()
+
+    def _advance(self):
+        s, n = self.s, self.n
+        i = self.i
+        while i < n and s[i].isspace():
+            i += 1
+        if i >= n:
+            self.cur = ('EOF', None)
+            self.i = i
+            return
+        ch = s[i]
+        if ch.isdigit():
+            j = i + 1
+            while j < n and s[j].isdigit():
+                j += 1
+            self.cur = ('NUMBER', s[i:j])
+            self.i = j
+            return
+        if ch == '>':
+            self.cur = ('ARROW', '>')
+            self.i = i + 1
+            return
+        if ch == '[':
+            self.cur = ('LBRACK', '[')
+            self.i = i + 1
+            return
+        if ch == ']':
+            self.cur = ('RBRACK', ']')
+            self.i = i + 1
+            return
+        if ch == '(':
+            self.cur = ('LPAREN', '(')
+            self.i = i + 1
+            return
+        if ch == ')':
+            self.cur = ('RPAREN', ')')
+            self.i = i + 1
+            return
+        if ch == ',':
+            self.cur = ('COMMA', ',')
+            self.i = i + 1
+            return
+        if ch == '-':
+            rest = s[i:].lower()
+            if rest.startswith('-all-allz'):
+                self.cur = ('MODE', 'all-allz')
+                self.i = i + len('-all-allz')
+                return
+            if rest.startswith('-allz'):
+                self.cur = ('MODE', 'allz')
+                self.i = i + len('-allz')
+                return
+            raise DSLParseError(f"توکن MODE نامعتبر در موقعیت {i}: '{s[i:i+10]}'")
+        raise DSLParseError(f"کاراکتر نامعتبر در موقعیت {i}: '{ch}'")
+
+    def peek(self):
+        return self.cur[0]
+
+    def value(self):
+        return self.cur[1]
+
+    def accept(self, typ):
+        if self.cur[0] == typ:
+            v = self.cur[1]
+            self._advance()
+            return v
+        return None
+
+    def expect(self, typ):
+        if self.cur[0] != typ:
+            raise DSLParseError(f"انتظار '{typ}' داشتیم اما '{self.cur[0]}' دیدیم")
+        v = self.cur[1]
+        self._advance()
+        return v
+
+def _mode_from_token(tok):
+    if not tok:
+        return 'only_products'
+    tok = tok.lower()
+    if tok == 'all-allz':
+        return 'all_subcats_and_products'
+    return 'only_products'
+
+def _parse_tree_piece_to_block(part):
+    """
+    یک عبارت درختی را به یک بلاک parent_id + selections (از نوع path) تبدیل می‌کند.
+    مثال:
+      1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]
+    """
+    tk = CategoryDSLTokenizer(part)
+    parent_id = int(tk.expect('NUMBER'))
+    selections = []
+
+    def add_leaf(path_nodes, mode):
+        selections.append({"type": "path", "path": path_nodes, "mode": mode})
+
+    def parse_leaf_group(prefix):
+        tk.expect('LPAREN')
+        while True:
+            leaf_id = int(tk.expect('NUMBER'))
+            mode_tok = tk.accept('MODE')
+            mode = _mode_from_token(mode_tok)
+            add_leaf(prefix + [leaf_id], mode)
+            if tk.accept('COMMA'):
+                continue
+            break
+        tk.expect('RPAREN')
+
+    def parse_after_number(prefix):
+        if tk.accept('ARROW'):
+            if tk.peek() == 'LPAREN':
+                parse_leaf_group(prefix)
+            elif tk.peek() == 'NUMBER':
+                nid = int(tk.expect('NUMBER'))
+                parse_after_number(prefix + [nid])
+            elif tk.peek() == 'LBRACK':
+                tk.expect('LBRACK')
+                while True:
+                    nid = int(tk.expect('NUMBER'))
+                    parse_after_number(prefix + [nid])
+                    if tk.accept('COMMA'):
+                        continue
+                    break
+                tk.expect('RBRACK')
+            else:
+                raise DSLParseError("بعد از '>' باید '(' یا عدد یا '[' بیاید.")
+        else:
+            mode_tok = tk.accept('MODE')
+            mode = _mode_from_token(mode_tok)
+            add_leaf(prefix, mode)
+
+    def parse_node_or_group(prefix):
+        if tk.peek() == 'NUMBER':
+            nid = int(tk.expect('NUMBER'))
+            parse_after_number(prefix + [nid])
+        elif tk.peek() == 'LBRACK':
+            tk.expect('LBRACK')
+            while True:
+                nid = int(tk.expect('NUMBER'))
+                parse_after_number(prefix + [nid])
+                if tk.accept('COMMA'):
+                    continue
+                break
+            tk.expect('RBRACK')
+        else:
+            raise DSLParseError("انتظار عدد یا '[' در مسیر داشتیم.")
+
+    if tk.accept('ARROW'):
+        parse_node_or_group([])
+    else:
+        # بدون مسیر، انتخابی ثبت نمی‌شود
+        pass
+
+    if tk.peek() != 'EOF':
+        logger.warning(f"⚠️ کاراکترهای اضافه در انتهای DSL: '{tk.s[tk.i:]}'")
+
+    return {"parent_id": parent_id, "selections": selections}
+
+# ==============================================================================
+# توابع انتخاب منعطف با SELECTED_IDS_STRING (قدیم + DSL جدید)
 # ==============================================================================
 def parse_selected_ids_string(selected_ids_string):
     """
-    پشتیبانی از الگوهای قدیمی و مسیر چندسطحی با '>'.
-
-    مثال DSL چندسطحی:
-      1582:1593>2389>13203-allz,1593>2389>12896-allz,1593>2390>16711-allz,1593>2390>16712-allz,1593>2390>22570-allz
+    پشتیبانی از:
+      - فرمت قدیمی: parent: children,children | parent2: ...
+        نمونه‌ها: all, allz, all-allz, 123-allz, 123-all-allz, 1593>2389>13203-allz
+      - فرمت جدید درختی (DSL): 
+        1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]
+    خروجی: لیست بلاک‌ها به شکل {"parent_id": int, "selections": [ ... ]}
     """
     result = []
-    for part in selected_ids_string.split('|'):
-        part = part.strip()
-        if not part:
-            continue
-        if ':' not in part:
-            logger.warning(f"⚠️ بخش انتخاب نامعتبر (علامت ':' ندارد): {part}")
-            continue
-
-        parent_id_str, children_str = part.split(':', 1)
-        try:
-            parent_id = int(parent_id_str.strip())
-        except ValueError:
-            logger.warning(f"⚠️ parent_id نامعتبر در '{part}'")
-            continue
-
-        selections = []
-        for raw in children_str.split(','):
-            sel = raw.strip()
-            if not sel:
+    parts = [p.strip() for p in (selected_ids_string or '').split('|') if p.strip()]
+    for part in parts:
+        if ':' in part:
+            parent_id_str, children_str = part.split(':', 1)
+            try:
+                parent_id = int(parent_id_str.strip())
+            except ValueError:
+                logger.warning(f"⚠️ parent_id نامعتبر در '{part}'")
                 continue
-
-            # سازگاری قبلی
-            if sel.lower() == 'all':
-                selections.append({"type": "all_subcats", "id": parent_id})
+            selections = []
+            for raw in children_str.split(','):
+                sel = raw.strip()
+                if not sel:
+                    continue
+                if sel.lower() == 'all':
+                    selections.append({"type": "all_subcats", "id": parent_id})
+                    continue
+                if sel.lower() == 'allz':
+                    selections.append({"type": "only_products", "id": parent_id})
+                    continue
+                if sel.lower() == 'all-allz':
+                    selections.append({"type": "all_subcats_and_products", "id": parent_id})
+                    continue
+                m = re.match(r'^(?P<path>\d+(?:>\d+)*)(?:-(?P<mode>allz|all-allz))?$', sel, flags=re.IGNORECASE)
+                if m:
+                    nodes = [int(x) for x in m.group('path').split('>')]
+                    mode = (m.group('mode') or 'allz').lower()
+                    mode_type = 'only_products' if mode == 'allz' else 'all_subcats_and_products'
+                    selections.append({"type": "path", "path": nodes, "mode": mode_type})
+                    continue
+                if re.match(r'^\d+-all-allz$', sel):
+                    sub_id = int(sel.split('-')[0])
+                    selections.append({"type": "all_subcats_and_products", "id": sub_id})
+                    continue
+                if re.match(r'^\d+-allz$', sel):
+                    sub_id = int(sel.split('-')[0])
+                    selections.append({"type": "only_products", "id": sub_id})
+                    continue
+                if re.match(r'^\d+$', sel):
+                    sub_id = int(sel)
+                    selections.append({"type": "only_products", "id": sub_id})
+                    continue
+                logger.warning(f"⚠️ الگوی انتخاب ناشناخته: '{sel}' (بخش='{part}') - نادیده گرفته شد.")
+            result.append({"parent_id": parent_id, "selections": selections})
+        else:
+            try:
+                block = _parse_tree_piece_to_block(part)
+                result.append(block)
+            except Exception as e:
+                logger.warning(f"⚠️ خطا در پارس DSL جدید: {e} | بخش: {part}")
                 continue
-            if sel.lower() == 'allz':
-                selections.append({"type": "only_products", "id": parent_id})
-                continue
-            if sel.lower() == 'all-allz':
-                selections.append({"type": "all_subcats_and_products", "id": parent_id})
-                continue
-
-            # مسیر چندسطحی با '>'
-            m = re.match(r'^(?P<path>\d+(?:>\d+)*)(?:-(?P<mode>allz|all-allz))?$', sel, flags=re.IGNORECASE)
-            if m:
-                nodes = [int(x) for x in m.group('path').split('>')]
-                mode = (m.group('mode') or 'allz').lower()
-                mode_type = 'only_products' if mode == 'allz' else 'all_subcats_and_products'
-                selections.append({"type": "path", "path": nodes, "mode": mode_type})
-                continue
-
-            # id + پسوند قدیمی
-            if re.match(r'^\d+-all-allz$', sel):
-                sub_id = int(sel.split('-')[0])
-                selections.append({"type": "all_subcats_and_products", "id": sub_id})
-                continue
-            if re.match(r'^\d+-allz$', sel):
-                sub_id = int(sel.split('-')[0])
-                selections.append({"type": "only_products", "id": sub_id})
-                continue
-
-            # فقط عدد: پیشفرض فقط محصولات
-            if re.match(r'^\d+$', sel):
-                sub_id = int(sel)
-                selections.append({"type": "only_products", "id": sub_id})
-                continue
-
-            logger.warning(f"⚠️ الگوی انتخاب ناشناخته: '{sel}' (بخش='{part}') - نادیده گرفته شد.")
-
-        result.append({"parent_id": parent_id, "selections": selections})
     return result
 
 def get_direct_subcategories(parent_id, all_cats):
@@ -226,11 +388,6 @@ def get_all_subcategories(parent_id, all_cats):
     return result
 
 def get_selected_categories_according_to_selection(parsed_selection, all_cats):
-    """
-    خروجی:
-      - scrape_categories: دسته‌هایی که باید اسکرپ شوند
-      - transfer_categories: دسته‌هایی که برای ساخت در ووکامرس لازم‌اند (شامل والدهای مسیر)
-    """
     selected_scrape = set()
     selected_transfer = set()
 
@@ -238,11 +395,9 @@ def get_selected_categories_according_to_selection(parsed_selection, all_cats):
     id_set = set(id_to_parent.keys())
 
     def add_descendants(root_id):
-        """برگرداندن کل زیردسته‌ها (بازگشتی)"""
         return get_all_subcategories(root_id, all_cats)
 
     def add_ancestors_to_transfer(cid, stop_at=None):
-        """تمام والدهای بین cid تا stop_at (شامل stop_at) را به transfer اضافه می‌کند"""
         cur = id_to_parent.get(cid)
         while cur is not None and cur != stop_at:
             if cur in id_set:
@@ -252,7 +407,6 @@ def get_selected_categories_according_to_selection(parsed_selection, all_cats):
             selected_transfer.add(stop_at)
 
     def is_path_valid(nodes):
-        """بررسی می‌کند هر نود دقیقا فرزند قبلی‌اش باشد"""
         if not nodes:
             return False
         for i in range(1, len(nodes)):
@@ -261,7 +415,6 @@ def get_selected_categories_according_to_selection(parsed_selection, all_cats):
         return True
 
     def parent_is_ancestor_of(parent_id, node_id):
-        """آیا parent_id یکی از والدهای node_id است؟"""
         cur = id_to_parent.get(node_id)
         while cur is not None:
             if cur == parent_id:
@@ -271,7 +424,6 @@ def get_selected_categories_according_to_selection(parsed_selection, all_cats):
 
     for block in parsed_selection:
         parent_id = block['parent_id']
-        # اطمینان از حضور والد بلاک در انتقال
         if parent_id in id_set:
             selected_transfer.add(parent_id)
 
@@ -343,7 +495,6 @@ def login_eways(username, password):
         'X-Requested-With': 'XMLHttpRequest',
         'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'
     })
-    # eways SSL مشکل CA دارد؛ همین را نگه می‌داریم
     session.verify = False
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(f"{BASE_URL}/User/Login",
@@ -450,7 +601,6 @@ def get_product_details(session, cat_id, product_id):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'lxml')
 
-        # دسته نهایی از breadcrumb
         canonical_cat_id = None
         try:
             selectors = [
@@ -474,7 +624,6 @@ def get_product_details(session, cat_id, product_id):
         except Exception:
             pass
 
-        # جدول مشخصات
         specs_table = soup.select_one('#link1 .table-responsive table') \
                       or soup.select_one('.table-responsive table') \
                       or soup.find('table', class_='table')
@@ -511,7 +660,6 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
     page = 1
     error_count = 0
     while page <= max_pages:
-        # HTML
         if page == 1:
             url = f"{BASE_URL}/Store/List/{category_id}/2/2/0/0/0/10000000000"
         else:
@@ -558,12 +706,11 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                             'price': price,
                             'stock': 1,
                             'image': image_url,
-                            'specs': {},  # فعلا نداریم
+                            'specs': {},
                         })
                         seen_product_ids.add(pid)
             logger.info(f"🟢 محصولات موجود (HTML) صفحه {page}: {len(html_products)}")
 
-            # Lazy
             lazy_products = []
             lazy_page = 1
             referer_url = url
@@ -607,7 +754,6 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                     pid = str(g["Id"])
                     if pid in seen_product_ids:
                         continue
-                    # تلاش برای گرفتن cat از لینک
                     cat_from_link = None
                     for k in ("Url", "Link", "Href", "RelativeUrl"):
                         u = g.get(k)
@@ -673,7 +819,6 @@ wc_session = requests.Session()
 wc_session.headers.update({
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'
 })
-# SSL verify (بهتر است فعال باشد)
 wc_session.verify = certifi.where() if WC_VERIFY_SSL else False
 
 def wc_request(method, path, params=None, json=None, timeout=30, allow_redirects=True):
@@ -809,7 +954,6 @@ def transfer_categories_to_wc(source_categories):
                 source_to_wc_id_map[cat["id"]] = new_id
                 transferred += 1
             else:
-                # term_exists
                 try:
                     error_data = res.json()
                 except Exception:
@@ -861,7 +1005,6 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
                 update_data["attributes"] = data["attributes"]
             if data.get("tags") is not None:
                 update_data["tags"] = data["tags"]
-            # تصاویر فقط اگر عمداً گذاشته شده باشد
             if data.get("images"):
                 update_data["images"] = data["images"]
             if MIGRATE_REMOTE_SKU_TO_CANONICAL:
@@ -871,7 +1014,6 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
             res.raise_for_status()
             with stats['lock']: stats['updated'] += 1
         else:
-            # ساخت: ترجیحاً با جزئیات؛ اگر نداریم و اجازه false است، رد
             if (data.get("attributes") is None) and (not CREATE_WITHOUT_DETAILS):
                 logger.warning(f"   ⚠️ ساخت {sku} رد شد؛ جزئیات نداریم و CREATE_WITHOUT_DETAILS=false است.")
                 with stats['lock']: stats['failed'] += 1
@@ -938,14 +1080,12 @@ def mark_outofstock_batch(ids):
         data = res.json()
     except Exception:
         return False, ids
-    # سعی می‌کنیم بفهمیم کدام‌ها موفق شدند
     succeeded = set()
     failed = set()
     for item in (data.get("update") or []):
         pid = item.get("id")
         if pid:
             succeeded.add(int(pid))
-    # اگر Woo به‌خاطر خطاهایی برخی را برگرداند، باقی را failed می‌گذاریم
     for pid in ids:
         if int(pid) not in succeeded:
             failed.add(int(pid))
@@ -977,7 +1117,7 @@ def smart_tags_for_product(product, cat_map):
         price = 0
 
     name_parts = [w for w in re.split(r'\s+', name) if w and len(w) > 2]
-    common_words = {'گوشی','موبایل','تبلت','لپتاپ','لپ‌تاپ','مدل','محصول','کالا','جدید'}
+    common_words = {'گوشی','موبایل','تبلت','لپتاپ','לپ‌تاپ','مدل','محصول','کالا','جدید'}
     for part in name_parts[:2]:
         if part not in common_words: tags.add(part)
     if cat_name and cat_name not in common_words: tags.add(cat_name)
@@ -1022,7 +1162,6 @@ def process_product_wrapper(args):
         canonical_sku = f"EWAYS-{pid_str}"
         sku = canonical_sku
 
-        # وجود در WC (بدون GET اضافه)
         existing_wc_id = None
         candidate_skus = [f"{pref}{pid_str}" for pref in SKU_PREFIXES]
         for s in candidate_skus:
@@ -1031,14 +1170,12 @@ def process_product_wrapper(args):
                 existing_wc_id = wcp.get('id')
                 break
 
-        # جست‌وجوی alt SKU (اختیاری برای سرعت)
         if not existing_wc_id and ALT_SKU_LOOKUP:
             alt_id, alt_sku = find_wc_product_id_by_possible_skus(pid_str)
             if alt_id:
                 logger.info(f"🔎 محصول یافت شد با SKU جایگزین: {alt_sku} → ID={alt_id} (آپدیت به‌جای ساخت)")
                 existing_wc_id = alt_id
 
-        # ارسال تصویر فقط اگر: جدید است یا در WC تصویر ندارد
         include_images = (existing_wc_id is None) or any(s in wc_missing_image_skus for s in candidate_skus)
 
         images_data = None
@@ -1174,7 +1311,7 @@ def enrich_products_with_details(session, products_by_pid, pids_to_enrich):
                     stats['fail'] += 1
             finally:
                 q.task_done()
-                time.sleep(random.uniform(0.05, 0.2))  # کمی تنفس بین کارها
+                time.sleep(random.uniform(0.05, 0.2))
 
     threads = []
     for _ in range(max(1, DETAILS_CONCURRENCY)):
@@ -1190,7 +1327,6 @@ def enrich_products_with_details(session, products_by_pid, pids_to_enrich):
 # تابع اصلی
 # ==============================================================================
 def main():
-    # یادآوری: WC_API_URL باید روی https + www باشد
     if "www." not in WC_API_URL:
         logger.warning(f"⚠️ پیشنهاد: WC_API_URL را با www تنظیم کنید. مقدار فعلی: {WC_API_URL}")
 
@@ -1205,16 +1341,15 @@ def main():
         return
     init_category_index_global(all_cats)
 
-    # توجه: می‌تونی این مثال DSL رو برای سناریوی موردنظرت ست کنی:
-    ""
-    # SELECTED_IDS_STRING = "1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz|1582:1593>2389>13203-allz,1593>2389>12896-allz,1593>2390>16711-allz,1593>2390>16712-allz,1593>2390>22570-allz"
-    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or "1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz|1582:1593>2389>13203-allz,1593>2389>12896-allz,1593>2390>16711-allz,1593>2390>16712-allz,1593>2390>22570-allz"
+    # مثال DSL جدید مطابق سناریوی شما:
+    default_dsl = "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]"
+    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or default_dsl
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
 
     # انتخاب‌ها
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
 
-    # اطمینان از حضور والدها در انتقال (اضافی/ایمن)
+    # اطمینان از حضور والدها در انتقال (ایمن‌سازی بیشتر)
     parent_ids = [block['parent_id'] for block in parsed_selection]
     parent_cats = [cat for cat in all_cats if cat['id'] in parent_ids]
     transfer_by_id = {c['id']: c for c in transfer_categories}
@@ -1222,7 +1357,6 @@ def main():
         transfer_by_id.setdefault(pc['id'], pc)
     transfer_categories = list(transfer_by_id.values())
 
-    # لاگ دسته‌ها
     scrape_list = [f"{c['id']} ({c['name']})" for c in scrape_categories]
     transfer_list = [f"{c['id']} ({c['name']})" for c in transfer_categories]
     logger.info(f"✅ دسته‌های اسکرپ: {scrape_list}")
@@ -1305,15 +1439,12 @@ def main():
     # ادغام specs از کش
     merge_specs_from_cache(canonical_products, cached_products)
 
-    # ============================
     # بررسی گپ همگام‌سازی و جزئیات
-    # ============================
     logger.info("\n⛽️ بررسی گپ همگام‌سازی با ووکامرس (Light)...")
     wc_products = get_all_wc_products_with_prefixes(SKU_PREFIXES)
     wc_by_sku = {p.get('sku'): p for p in wc_products}
     wc_skus = set(wc_by_sku.keys())
 
-    # SKUهایی که تصویر ندارند (بدون GET اضافی)
     wc_missing_image_skus = set()
     for p in wc_products:
         sku = p.get('sku') or ''
@@ -1321,7 +1452,6 @@ def main():
         if sku and len(imgs) == 0:
             wc_missing_image_skus.add(sku)
 
-    # تغییرات سبک
     changed_light = {}
     for pid, p in canonical_products.items():
         old = cached_products.get(pid)
@@ -1331,10 +1461,8 @@ def main():
     def sku_candidates_for_pid(pid):
         return [f"{pref}{pid}" for pref in SKU_PREFIXES]
 
-    # مفقود در ووکامرس
     missing_in_wc = {pid: p for pid, p in canonical_products.items() if not any(s in wc_skus for s in sku_candidates_for_pid(pid))}
 
-    # دسته نامنطبق
     mismatch = {}
     for pid, p in canonical_products.items():
         wcp = None
@@ -1350,7 +1478,6 @@ def main():
             mismatch[pid] = p
     logger.info(f"🧭 موارد با دسته نامنطبق (Light): {len(mismatch)}")
 
-    # تعیین اقلام نیازمند جزئیات
     need_details = set(changed_light.keys()) | set(missing_in_wc.keys()) | set(mismatch.keys())
     for pid, p in canonical_products.items():
         old = cached_products.get(pid)
@@ -1365,7 +1492,7 @@ def main():
     if need_details:
         enrich_products_with_details(session, canonical_products, need_details)
 
-    # ذخیره کش به‌روز
+    # ذخیره کش
     updated_cache = {}
     for pid, p in canonical_products.items():
         base = dict(p)
@@ -1377,9 +1504,7 @@ def main():
         updated_cache[pid] = base
     save_cache(updated_cache)
 
-    # ============================
     # اقلام ارسالی به ووکامرس
-    # ============================
     to_send_items = {}
     for pid, p in canonical_products.items():
         old = cached_products.get(pid)
@@ -1408,7 +1533,6 @@ def main():
     send_count = len(to_send_items)
     logger.info(f"\n🚀 شروع پردازش و ارسال {send_count} قلم به ووکامرس...")
 
-    # ——— ارسال ———
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0, 'outofstock_updated': 0, 'lock': Lock()}
 
     product_queue = Queue()
@@ -1433,17 +1557,15 @@ def main():
     for t in threads:
         t.join()
 
-    # ——— ناموجودها ———
+    # ناموجود کردن‌ها
     logger.info("\n🚧 آپدیت ناموجودها ...")
     extracted_skus = set()
     for pid in canonical_products.keys():
         extracted_skus.update(sku_candidates_for_pid(pid))
 
     to_oos_ids = set()
-    # از کش قبلی
     for pid in cached_products.keys():
         pid_str = str(pid)
-        # اگر هیچ‌یک از SKUهای آن pid در استخراج فعلی نیست
         if not any(f"{pref}{pid_str}" in extracted_skus for pref in SKU_PREFIXES):
             found_id = None
             for s in sku_candidates_for_pid(pid_str):
@@ -1453,13 +1575,11 @@ def main():
             if found_id:
                 to_oos_ids.add(found_id)
 
-    # از ووکامرس: هر محصول با پیشوند ما که در استخراج فعلی نیست و instock است
     for wcp in wc_products:
         sku = wcp.get('sku')
         if sku not in extracted_skus and wcp.get('stock_status') != "outofstock":
             to_oos_ids.add(wcp['id'])
 
-    # Batch اول
     failed_ids_after_batch = set()
     if to_oos_ids:
         logger.info(f"🚧 ناموجود کردن Batch: {len(to_oos_ids)} قلم در بچ‌های {BATCH_SIZE_OUTOFSTOCK}تایی ...")
@@ -1470,14 +1590,12 @@ def main():
                     failed_ids_after_batch.update(group)
                 else:
                     failed_ids_after_batch.update(failed_list)
-                # تنفس کوچک بین بچ‌ها
                 if OUTOFSTOCK_SLEEP_SEC > 0:
                     time.sleep(random.uniform(0, OUTOFSTOCK_SLEEP_SEC))
             except Exception as e:
                 logger.error(f"   ❌ خطا در Batch ناموجودها برای گروه {group[:3]}... : {e}")
                 failed_ids_after_batch.update(group)
 
-    # Fallback تکی با retry
     if failed_ids_after_batch:
         logger.info(f"🔁 تلاش تکی برای {len(failed_ids_after_batch)} قلم که در Batch ناموفق بودند...")
         outofstock_queue = Queue()
