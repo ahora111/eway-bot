@@ -140,7 +140,7 @@ def cat_label(catid):
     return f"{catid} ({name if name else 'نامشخص'})"
 
 # ==============================================================================
-# Parser فقط-کاما برای SELECTED_IDS_STRING
+# Parser فقط-کاما برای SELECTED_IDS_STRING + لاگ دیباگ
 # ==============================================================================
 def parse_selected_ids_string(selected_ids_string):
     """
@@ -151,6 +151,23 @@ def parse_selected_ids_string(selected_ids_string):
     - آیدی تنها → all_subcats_and_products
     - بالانس خودکار پرانتز
     """
+
+    def normalize_selection_string(s):
+        # نرمال‌سازی علائم فارسی/غیراستاندارد به ASCII
+        replacements = {
+            '؛': ',',  # سمی‌کالن فارسی → کاما
+            '،': ',',  # کاما فارسی → کاما
+            ';': ',',  # اگر اشتباها ; باشد → کاما
+            'ـ': '-',  # کشیده → خط تیره
+            '–': '-', '—': '-', '−': '-',  # انواع dash
+            '\u200c': '', '\u200f': '', '\ufeff': ''  # ZWNJ, RLM, BOM حذف
+        }
+        for a, b in replacements.items():
+            s = s.replace(a, b)
+        # حذف کوتیشن انتهایی اشتباهی
+        s = s.strip().strip('"').strip("'").strip()
+        return s
+
     def normalize_token(t):
         return (t or '').strip().strip('"').strip("'").strip()
 
@@ -216,7 +233,8 @@ def parse_selected_ids_string(selected_ids_string):
         if m:
             group_id = int(m.group(1))
             inner = m.group(2).strip()
-            for it in split_top_level_commas(inner):
+            inner_tokens = split_top_level_commas(inner)
+            for it in inner_tokens:
                 out.extend(parse_token(it, default_parent_id=group_id))
             return out
 
@@ -245,12 +263,17 @@ def parse_selected_ids_string(selected_ids_string):
 
         return out
 
-    s = normalize_token(selected_ids_string)
+    s = normalize_selection_string(selected_ids_string or "")
     if not s:
         return []
 
+    # دیباگ: لاگ رشته خام پس از نرمال‌سازی
+    logger.info(f"🎯 SELECTED_IDS_STRING = {s}")
+
     result = []
     blocks = split_blocks_resilient(s)  # بلاک‌ها با | جدا
+    logger.info(f"🧱 Blocks detected: {blocks}")
+
     for block in blocks:
         block = normalize_token(block)
         if not block or ':' not in block:
@@ -263,12 +286,30 @@ def parse_selected_ids_string(selected_ids_string):
         except:
             continue
 
+        top_tokens = split_top_level_commas(children_str)
+        logger.info(f"🔹 Block {parent_id}: tokens = {top_tokens}")
+
         selections = []
-        for tok in split_top_level_commas(children_str):
+        for tok in top_tokens:
             selections.extend(parse_token(tok, default_parent_id=parent_id))
 
         if selections:
             result.append({"parent_id": parent_id, "selections": selections})
+        else:
+            logger.warning(f"⚠️ هیچ انتخاب معتبری برای بلاک '{block}' پیدا نشد.")
+
+    # خلاصه برای دیباگ
+    try:
+        debug_simple = []
+        for blk in result:
+            debug_simple.append({
+                "parent": blk['parent_id'],
+                "sel": [(s['id'], s['type']) for s in blk.get('selections', [])]
+            })
+        logger.info(f"🧩 Parsed selection: {debug_simple}")
+    except Exception:
+        pass
+
     return result
 
 def get_direct_subcategories(parent_id, all_cats):
@@ -344,7 +385,7 @@ def login_eways(username, password):
         'X-Requested-With': 'XMLHttpRequest',
         'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'
     })
-    # eways SSL مشکل CA دارد
+    # eways SSL مشکل CA دارد؛ همین را نگه می‌داریم
     session.verify = False
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(f"{BASE_URL}/User/Login",
@@ -976,6 +1017,7 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
                 update_data["attributes"] = data["attributes"]
             if data.get("tags") is not None:
                 update_data["tags"] = data["tags"]
+            # تصاویر فقط اگر عمداً گذاشته شده باشد
             if data.get("images"):
                 update_data["images"] = data["images"]
             if MIGRATE_REMOTE_SKU_TO_CANONICAL:
@@ -985,6 +1027,7 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
             res.raise_for_status()
             with stats['lock']: stats['updated'] += 1
         else:
+            # ساخت: ترجیحاً با جزئیات؛ اگر نداریم و اجازه false است، رد
             if (data.get("attributes") is None) and (not CREATE_WITHOUT_DETAILS):
                 logger.warning(f"   ⚠️ ساخت {sku} رد شد؛ جزئیات نداریم و CREATE_WITHOUT_DETAILS=false است.")
                 with stats['lock']: stats['failed'] += 1
@@ -1322,6 +1365,7 @@ def main():
 
     # اطمینان از حضور دسته‌های انتخابی (اگر در all_cats نبودند، از breadcrumb تزریق کن)
     desired_ids = collect_selected_ids(parsed_selection)
+    logger.info(f"🎯 Desired IDs (from selection): {sorted(desired_ids)}")
     all_cats = ensure_categories_present(session, all_cats, desired_ids)
     init_category_index_global(all_cats)
 
