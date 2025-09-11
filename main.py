@@ -35,6 +35,9 @@ OUTOFSTOCK_SLEEP_SEC = float(os.environ.get("OUTOFSTOCK_SLEEP_SEC", "0.2"))
 OUTOFSTOCK_TIMEOUT = float(os.environ.get("OUTOFSTOCK_TIMEOUT", "45"))
 BATCH_SIZE_OUTOFSTOCK = int(os.environ.get("BATCH_SIZE_OUTOFSTOCK", "30"))
 
+# سخت‌گیری مسیر DSL (فرزند مستقیم یا هر عمقی)
+DSL_REQUIRE_DIRECT_CHILD = os.environ.get("DSL_REQUIRE_DIRECT_CHILD", "false").lower() == "true"
+
 if DISABLE_TLS_WARNINGS:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -237,9 +240,7 @@ def _mode_from_token(tok):
 
 def _parse_tree_piece_to_block(part):
     """
-    یک عبارت درختی را به یک بلاک parent_id + selections (از نوع path) تبدیل می‌کند.
-    مثال:
-      1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]
+    1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]
     """
     tk = CategoryDSLTokenizer(part)
     parent_id = int(tk.expect('NUMBER'))
@@ -302,7 +303,6 @@ def _parse_tree_piece_to_block(part):
     if tk.accept('ARROW'):
         parse_node_or_group([])
     else:
-        # بدون مسیر، انتخابی ثبت نمی‌شود
         pass
 
     if tk.peek() != 'EOF':
@@ -318,9 +318,7 @@ def parse_selected_ids_string(selected_ids_string):
     پشتیبانی از:
       - فرمت قدیمی: parent: children,children | parent2: ...
         نمونه‌ها: all, allz, all-allz, 123-allz, 123-all-allz, 1593>2389>13203-allz
-      - فرمت جدید درختی (DSL): 
-        1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]
-    خروجی: لیست بلاک‌ها به شکل {"parent_id": int, "selections": [ ... ]}
+      - فرمت جدید درختی (DSL)
     """
     result = []
     parts = [p.strip() for p in (selected_ids_string or '').split('|') if p.strip()]
@@ -406,21 +404,30 @@ def get_selected_categories_according_to_selection(parsed_selection, all_cats):
         if stop_at and stop_at in id_set:
             selected_transfer.add(stop_at)
 
+    def is_ancestor_of(anc, node):
+        cur = id_to_parent.get(node)
+        while cur is not None:
+            if cur == anc:
+                return True
+            cur = id_to_parent.get(cur)
+        return False
+
     def is_path_valid(nodes):
         if not nodes:
             return False
+        if DSL_REQUIRE_DIRECT_CHILD:
+            for i in range(1, len(nodes)):
+                if id_to_parent.get(nodes[i]) != nodes[i-1]:
+                    return False
+            return True
+        # حالت descendant-of
         for i in range(1, len(nodes)):
-            if id_to_parent.get(nodes[i]) != nodes[i-1]:
+            if not is_ancestor_of(nodes[i-1], nodes[i]):
                 return False
         return True
 
     def parent_is_ancestor_of(parent_id, node_id):
-        cur = id_to_parent.get(node_id)
-        while cur is not None:
-            if cur == parent_id:
-                return True
-            cur = id_to_parent.get(cur)
-        return False
+        return is_ancestor_of(parent_id, node_id)
 
     for block in parsed_selection:
         parent_id = block['parent_id']
@@ -433,48 +440,58 @@ def get_selected_categories_according_to_selection(parsed_selection, all_cats):
             if typ == 'all_subcats':
                 subs = get_direct_subcategories(parent_id, all_cats)
                 for sc_id in subs:
-                    selected_scrape.add(sc_id)
-                    selected_transfer.add(sc_id)
+                    selected_scrape.add(sc_id); selected_transfer.add(sc_id)
                     add_ancestors_to_transfer(sc_id, stop_at=parent_id)
 
             elif typ == 'only_products':
                 sid = sel.get('id', parent_id)
-                selected_scrape.add(sid)
-                selected_transfer.add(sid)
+                selected_scrape.add(sid); selected_transfer.add(sid)
                 add_ancestors_to_transfer(sid, stop_at=parent_id)
 
             elif typ == 'all_subcats_and_products':
                 sid = sel.get('id', parent_id)
-                selected_scrape.add(sid)
-                selected_transfer.add(sid)
+                selected_scrape.add(sid); selected_transfer.add(sid)
                 for sub in add_descendants(sid):
-                    selected_scrape.add(sub)
-                    selected_transfer.add(sub)
+                    selected_scrape.add(sub); selected_transfer.add(sub)
                 add_ancestors_to_transfer(sid, stop_at=parent_id)
 
             elif typ == 'path':
                 nodes = sel.get('path') or []
                 if not nodes:
                     continue
-                if not is_path_valid(nodes):
-                    logger.warning(f"⚠️ مسیر نامعتبر (رابطه والد-فرزند غلط): {nodes} - نادیده گرفته شد.")
-                    continue
                 last = nodes[-1]
+
+                if not is_path_valid(nodes):
+                    # اگر مسیر میانی غلط است ولی leaf زیر parent است، فقط leaf را اعمال کن
+                    if parent_is_ancestor_of(parent_id, last):
+                        logger.warning(f"⚠️ مسیر نامعتبر (میانی) {nodes}؛ اما leaf={last} زیر {parent_id} است → فقط leaf اعمال شد.")
+                        mode = sel.get('mode', 'only_products')
+                        if mode == 'only_products':
+                            selected_scrape.add(last); selected_transfer.add(last)
+                            add_ancestors_to_transfer(last, stop_at=parent_id)
+                        else:
+                            selected_scrape.add(last); selected_transfer.add(last)
+                            for sub in add_descendants(last):
+                                selected_scrape.add(sub); selected_transfer.add(sub)
+                            add_ancestors_to_transfer(last, stop_at=parent_id)
+                        continue
+                    else:
+                        logger.warning(f"⚠️ مسیر نامعتبر (رابطه اجدادی برقرار نیست): {nodes} - نادیده گرفته شد.")
+                        continue
+
+                # مسیر معتبر است؛ بررسی زیرمجموعه بودن leaf از parent
                 if not parent_is_ancestor_of(parent_id, last):
-                    logger.warning(f"⚠️ مسیر {nodes} زیرشاخه‌ی مستقیم/غیرمستقیم {parent_id} نیست - نادیده گرفته شد.")
+                    logger.warning(f"⚠️ مسیر {nodes} زیرشاخه‌ی {parent_id} نیست - نادیده گرفته شد.")
                     continue
 
                 mode = sel.get('mode', 'only_products')
                 if mode == 'only_products':
-                    selected_scrape.add(last)
-                    selected_transfer.add(last)
+                    selected_scrape.add(last); selected_transfer.add(last)
                     add_ancestors_to_transfer(last, stop_at=parent_id)
                 else:  # all_subcats_and_products
-                    selected_scrape.add(last)
-                    selected_transfer.add(last)
+                    selected_scrape.add(last); selected_transfer.add(last)
                     for sub in add_descendants(last):
-                        selected_scrape.add(sub)
-                        selected_transfer.add(sub)
+                        selected_scrape.add(sub); selected_transfer.add(sub)
                     add_ancestors_to_transfer(last, stop_at=parent_id)
 
             else:
@@ -495,6 +512,7 @@ def login_eways(username, password):
         'X-Requested-With': 'XMLHttpRequest',
         'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'
     })
+    # eways SSL مشکل CA دارد؛ همین را نگه می‌داریم
     session.verify = False
     logger.info("⏳ در حال لاگین به پنل eways ...")
     resp = session.post(f"{BASE_URL}/User/Login",
@@ -984,7 +1002,7 @@ def process_price(price_value):
     return str(int(round(new_price, -4)))
 
 # ==============================================================================
-# ارسال/آپدیت ووکامرس با هندلینگ SKU تکراری و تصاویر مشروط
+# ارسال/آپدیت ووکامرس
 # ==============================================================================
 @retry(
     retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)),
@@ -1059,7 +1077,7 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
         raise
 
 # ==============================================================================
-# ناموجود کردن: Batch + Fallback تکی با retry
+# ناموجود کردن
 # ==============================================================================
 def chunked(iterable, size):
     iterable = list(iterable)
@@ -1206,7 +1224,7 @@ def process_product_wrapper(args):
         with stats['lock']: stats['failed'] += 1
 
 # ==============================================================================
-# ابزارهای تجمیع محصول به leaf و کش و جزئیات Selective
+# ابزارهای تجمیع/کش/جزئیات
 # ==============================================================================
 def condense_products_to_leaf(all_products_by_catkey, categories):
     occurrences = defaultdict(list)
@@ -1341,15 +1359,15 @@ def main():
         return
     init_category_index_global(all_cats)
 
-    # مثال DSL جدید مطابق سناریوی شما:
-    default_dsl = "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
-    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or default_dsl
+    # رشته ترکیبی (DSL جدید + فرمت قدیمی) مطابق درخواست شما:
+    default_selected = "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
+    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or default_selected
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
 
     # انتخاب‌ها
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
 
-    # اطمینان از حضور والدها در انتقال (ایمن‌سازی بیشتر)
+    # اطمینان از حضور والدها در انتقال (ایمنی بیشتر)
     parent_ids = [block['parent_id'] for block in parsed_selection]
     parent_cats = [cat for cat in all_cats if cat['id'] in parent_ids]
     transfer_by_id = {c['id']: c for c in transfer_categories}
