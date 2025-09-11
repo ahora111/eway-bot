@@ -35,7 +35,7 @@ OUTOFSTOCK_SLEEP_SEC = float(os.environ.get("OUTOFSTOCK_SLEEP_SEC", "0.2"))
 OUTOFSTOCK_TIMEOUT = float(os.environ.get("OUTOFSTOCK_TIMEOUT", "45"))
 BATCH_SIZE_OUTOFSTOCK = int(os.environ.get("BATCH_SIZE_OUTOFSTOCK", "30"))
 
-# سخت‌گیری مسیر DSL (فرزند مستقیم یا هر عمقی)
+# سخت‌گیری در اعتبار مسیرهای DSL (false = هر عمقی)
 DSL_REQUIRE_DIRECT_CHILD = os.environ.get("DSL_REQUIRE_DIRECT_CHILD", "false").lower() == "true"
 
 if DISABLE_TLS_WARNINGS:
@@ -240,7 +240,8 @@ def _mode_from_token(tok):
 
 def _parse_tree_piece_to_block(part):
     """
-    1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]
+    مثال:
+      1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]
     """
     tk = CategoryDSLTokenizer(part)
     parent_id = int(tk.expect('NUMBER'))
@@ -420,7 +421,7 @@ def get_selected_categories_according_to_selection(parsed_selection, all_cats):
                 if id_to_parent.get(nodes[i]) != nodes[i-1]:
                     return False
             return True
-        # حالت descendant-of
+        # descendant-of
         for i in range(1, len(nodes)):
             if not is_ancestor_of(nodes[i-1], nodes[i]):
                 return False
@@ -461,38 +462,37 @@ def get_selected_categories_according_to_selection(parsed_selection, all_cats):
                     continue
                 last = nodes[-1]
 
-                if not is_path_valid(nodes):
-                    # اگر مسیر میانی غلط است ولی leaf زیر parent است، فقط leaf را اعمال کن
-                    if parent_is_ancestor_of(parent_id, last):
-                        logger.warning(f"⚠️ مسیر نامعتبر (میانی) {nodes}؛ اما leaf={last} زیر {parent_id} است → فقط leaf اعمال شد.")
-                        mode = sel.get('mode', 'only_products')
-                        if mode == 'only_products':
-                            selected_scrape.add(last); selected_transfer.add(last)
-                            add_ancestors_to_transfer(last, stop_at=parent_id)
-                        else:
-                            selected_scrape.add(last); selected_transfer.add(last)
-                            for sub in add_descendants(last):
-                                selected_scrape.add(sub); selected_transfer.add(sub)
-                            add_ancestors_to_transfer(last, stop_at=parent_id)
-                        continue
+                path_ok = is_path_valid(nodes)
+                anc_ok = parent_is_ancestor_of(parent_id, last)
+
+                if path_ok and anc_ok:
+                    mode = sel.get('mode', 'only_products')
+                    if mode == 'only_products':
+                        selected_scrape.add(last); selected_transfer.add(last)
+                        add_ancestors_to_transfer(last, stop_at=parent_id)
                     else:
-                        logger.warning(f"⚠️ مسیر نامعتبر (رابطه اجدادی برقرار نیست): {nodes} - نادیده گرفته شد.")
-                        continue
-
-                # مسیر معتبر است؛ بررسی زیرمجموعه بودن leaf از parent
-                if not parent_is_ancestor_of(parent_id, last):
-                    logger.warning(f"⚠️ مسیر {nodes} زیرشاخه‌ی {parent_id} نیست - نادیده گرفته شد.")
-                    continue
-
-                mode = sel.get('mode', 'only_products')
-                if mode == 'only_products':
-                    selected_scrape.add(last); selected_transfer.add(last)
-                    add_ancestors_to_transfer(last, stop_at=parent_id)
-                else:  # all_subcats_and_products
-                    selected_scrape.add(last); selected_transfer.add(last)
-                    for sub in add_descendants(last):
-                        selected_scrape.add(sub); selected_transfer.add(sub)
-                    add_ancestors_to_transfer(last, stop_at=parent_id)
+                        selected_scrape.add(last); selected_transfer.add(last)
+                        for sub in add_descendants(last):
+                            selected_scrape.add(sub); selected_transfer.add(sub)
+                        add_ancestors_to_transfer(last, stop_at=parent_id)
+                else:
+                    # پذیرش leaf در صورت موجود بودن، حتی اگر مسیر/رابطه اجدادی درست نیست
+                    if last in id_set:
+                        if not path_ok:
+                            logger.warning(f"⚠️ مسیر نامعتبر (میانی) {nodes} → فقط leaf={last} اعمال شد.")
+                        elif not anc_ok:
+                            logger.warning(f"⚠️ مسیر نامعتبر (رابطه اجدادی برقرار نیست): {nodes} → فقط leaf={last} اعمال شد.")
+                        mode = sel.get('mode', 'only_products')
+                        # leaf
+                        selected_scrape.add(last); selected_transfer.add(last)
+                        # والدهای واقعی leaf تا ریشه (ممکن است شامل parent_id نباشد)
+                        add_ancestors_to_transfer(last, stop_at=parent_id)
+                        # نودهای میانی DSL را هم برای انتقال اضافه کن (اگر در لیست دسته‌ها هستند)
+                        for mid in nodes[:-1]:
+                            if mid in id_set:
+                                selected_transfer.add(mid)
+                    else:
+                        logger.warning(f"⚠️ leaf={last} در لیست دسته‌ها یافت نشد؛ مسیر {nodes} نادیده گرفته شد.")
 
             else:
                 logger.warning(f"⚠️ نوع انتخاب ناشناخته: {typ}")
@@ -1359,8 +1359,8 @@ def main():
         return
     init_category_index_global(all_cats)
 
-    # رشته ترکیبی (DSL جدید + فرمت قدیمی) مطابق درخواست شما:
-    default_selected = "1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
+    # رشته ترکیبی (DSL جدید + فرمت قدیمی) مطابق درخواست شما
+    default_selected = "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
     SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or default_selected
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
 
@@ -1375,6 +1375,7 @@ def main():
         transfer_by_id.setdefault(pc['id'], pc)
     transfer_categories = list(transfer_by_id.values())
 
+    # لاگ دسته‌ها
     scrape_list = [f"{c['id']} ({c['name']})" for c in scrape_categories]
     transfer_list = [f"{c['id']} ({c['name']})" for c in transfer_categories]
     logger.info(f"✅ دسته‌های اسکرپ: {scrape_list}")
