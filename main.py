@@ -35,8 +35,10 @@ OUTOFSTOCK_SLEEP_SEC = float(os.environ.get("OUTOFSTOCK_SLEEP_SEC", "0.2"))
 OUTOFSTOCK_TIMEOUT = float(os.environ.get("OUTOFSTOCK_TIMEOUT", "45"))
 BATCH_SIZE_OUTOFSTOCK = int(os.environ.get("BATCH_SIZE_OUTOFSTOCK", "30"))
 
-# سخت‌گیری در اعتبار مسیرهای DSL (false = هر عمقی)
+# سخت‌گیری مسیر DSL (فرزند مستقیم یا هر عمقی)
 DSL_REQUIRE_DIRECT_CHILD = os.environ.get("DSL_REQUIRE_DIRECT_CHILD", "false").lower() == "true"
+# دیباگ ساختار درخت (چاپ والد/فرزند/گام‌ها)
+DSL_DEBUG_TREE = os.environ.get("DSL_DEBUG_TREE", "true").lower() == "true"
 
 if DISABLE_TLS_WARNINGS:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -240,8 +242,7 @@ def _mode_from_token(tok):
 
 def _parse_tree_piece_to_block(part):
     """
-    مثال:
-      1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]
+    1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]
     """
     tk = CategoryDSLTokenizer(part)
     parent_id = int(tk.expect('NUMBER'))
@@ -375,6 +376,99 @@ def parse_selected_ids_string(selected_ids_string):
                 continue
     return result
 
+# ------------------- دیباگ ساختار درخت و مسیرهای DSL -------------------
+def _build_children_index(all_cats):
+    ch = defaultdict(list)
+    for c in all_cats:
+        pid = c.get('parent_id')
+        ch[pid].append(c['id'])
+    return ch
+
+def _fmt_cat(cid, id_to_name):
+    return f"{cid} ({id_to_name.get(cid, '?')})"
+
+def _is_ancestor_of(id_to_parent, anc, node):
+    cur = id_to_parent.get(node)
+    while cur is not None:
+        if cur == anc:
+            return True
+        cur = id_to_parent.get(cur)
+    return False
+
+def _chain_leaf_to_root(id_to_parent, id_to_name, cid):
+    chain = []
+    cur = cid
+    while cur is not None:
+        chain.append(f"{cur} ({id_to_name.get(cur,'?')})")
+        cur = id_to_parent.get(cur)
+    return " -> ".join(chain) if chain else "(empty)"
+
+def _list_children_line(children_index, id_to_name, node_id, max_items=40):
+    kids = children_index.get(node_id, [])
+    parts = [f"{k} ({id_to_name.get(k,'?')})" for k in kids[:max_items]]
+    more = "" if len(kids) <= max_items else f" ... +{len(kids)-max_items} more"
+    return f"[{', '.join(parts)}]{more} (count={len(kids)})"
+
+def debug_dsl_structure(parsed_selection, all_cats):
+    """
+    لاگ دیباگ برای مسیرهای DSL:
+      - صحت وجود هر نود
+      - زنجیره leaf→root
+      - فرزندهای مستقیم نودهای مسیر
+      - وضعیت direct/ancestor برای هر گام
+    """
+    id_to_parent = {c['id']: c.get('parent_id') for c in all_cats}
+    id_to_name   = {c['id']: (c.get('name') or '').strip() for c in all_cats}
+    id_set       = set(id_to_parent.keys())
+    children_idx = _build_children_index(all_cats)
+
+    any_path = False
+    for block in parsed_selection:
+        parent_id = block['parent_id']
+        path_selections = [s for s in block.get('selections', []) if s.get('type') == 'path']
+        if not path_selections:
+            continue
+        any_path = True
+
+        logger.info(f"🔎 DSL Debug | Parent Block: {_fmt_cat(parent_id, id_to_name)}")
+        logger.info(f"   • children of parent {parent_id}: {_list_children_line(children_idx, id_to_name, parent_id)}")
+
+        for sel in path_selections:
+            nodes = sel.get('path') or []
+            mode = sel.get('mode', 'only_products')
+            path_str_ids   = " > ".join(str(n) for n in nodes)
+            path_str_names = " > ".join(id_to_name.get(n, '?') for n in nodes)
+            logger.info(f"   • requested path: {path_str_ids}  |  {path_str_names}  |  mode={mode}")
+
+            for n in nodes:
+                exists = "yes" if n in id_set else "NO"
+                logger.info(f"      - exists? {_fmt_cat(n, id_to_name)} → {exists}")
+
+            for i in range(1, len(nodes)):
+                prev_, cur_ = nodes[i-1], nodes[i]
+                direct_ok = (id_to_parent.get(cur_) == prev_)
+                anc_ok    = _is_ancestor_of(id_to_parent, prev_, cur_)
+                logger.info(f"      - step {prev_} → {cur_}: direct={direct_ok}, ancestor={anc_ok}")
+
+            if nodes:
+                leaf = nodes[-1]
+                if leaf in id_set:
+                    logger.info(f"      - chain leaf→root: {_chain_leaf_to_root(id_to_parent, id_to_name, leaf)}")
+                else:
+                    logger.warning(f"      - leaf {leaf} در لیست دسته‌ها یافت نشد.")
+
+            for n in nodes:
+                if n in id_set:
+                    logger.info(f"      - children of {n}: {_list_children_line(children_idx, id_to_name, n)}")
+                else:
+                    logger.info(f"      - children of {n}: (node not found)")
+
+    if not any_path:
+        logger.info("ℹ️ DSL Debug: هیچ selection از نوع path پیدا نشد (احتمالا فقط فرمت قدیمی استفاده شده).")
+
+# ==============================================================================
+# انتخاب دسته‌ها طبق selection
+# ==============================================================================
 def get_direct_subcategories(parent_id, all_cats):
     return [cat['id'] for cat in all_cats if cat['parent_id'] == parent_id]
 
@@ -476,18 +570,14 @@ def get_selected_categories_according_to_selection(parsed_selection, all_cats):
                             selected_scrape.add(sub); selected_transfer.add(sub)
                         add_ancestors_to_transfer(last, stop_at=parent_id)
                 else:
-                    # پذیرش leaf در صورت موجود بودن، حتی اگر مسیر/رابطه اجدادی درست نیست
                     if last in id_set:
                         if not path_ok:
                             logger.warning(f"⚠️ مسیر نامعتبر (میانی) {nodes} → فقط leaf={last} اعمال شد.")
                         elif not anc_ok:
                             logger.warning(f"⚠️ مسیر نامعتبر (رابطه اجدادی برقرار نیست): {nodes} → فقط leaf={last} اعمال شد.")
                         mode = sel.get('mode', 'only_products')
-                        # leaf
                         selected_scrape.add(last); selected_transfer.add(last)
-                        # والدهای واقعی leaf تا ریشه (ممکن است شامل parent_id نباشد)
                         add_ancestors_to_transfer(last, stop_at=parent_id)
-                        # نودهای میانی DSL را هم برای انتقال اضافه کن (اگر در لیست دسته‌ها هستند)
                         for mid in nodes[:-1]:
                             if mid in id_set:
                                 selected_transfer.add(mid)
@@ -837,6 +927,7 @@ wc_session = requests.Session()
 wc_session.headers.update({
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'
 })
+# SSL verify (بهتر است فعال باشد)
 wc_session.verify = certifi.where() if WC_VERIFY_SSL else False
 
 def wc_request(method, path, params=None, json=None, timeout=30, allow_redirects=True):
@@ -1063,7 +1154,7 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
                         update_data["images"] = data["images"]
                     if MIGRATE_REMOTE_SKU_TO_CANONICAL:
                         update_data["sku"] = data["sku"]
-                    res2 = wc_request("put", f"/products/{resource_id}", json=update_data, timeout=40)
+                    res2 = wc_request("put", f"/products/{resource_id}", json=update_data}, timeout=40)
                     res2.raise_for_status()
                     with stats['lock']: stats['updated'] += 1
                 else:
@@ -1363,6 +1454,10 @@ def main():
     default_selected = "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
     SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or default_selected
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
+
+    # دیباگ ساختار DSL و چاپ والد/فرزند/گام‌ها
+    if DSL_DEBUG_TREE:
+        debug_dsl_structure(parsed_selection, all_cats)
 
     # انتخاب‌ها
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
