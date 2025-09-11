@@ -8,4 +8,4 @@ woocommerce
 selenium
 webdriver-manager
 tenacity
-unicodedata  
+ 
