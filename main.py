@@ -1360,7 +1360,7 @@ def main():
     init_category_index_global(all_cats)
 
     # رشته ترکیبی (DSL جدید + فرمت قدیمی) مطابق درخواست شما:
-    default_selected = "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
+    default_selected = "1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
     SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or default_selected
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
 
