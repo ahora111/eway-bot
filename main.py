@@ -142,34 +142,118 @@ def cat_label(catid):
     return f"{catid} ({name if name else 'نامشخص'})"
 
 # ==============================================================================
-# توابع انتخاب منعطف با SELECTED_IDS_STRING
+# توابع انتخاب منعطف با SELECTED_IDS_STRING (با پشتیبانی پرانتز و ; )
 # ==============================================================================
 def parse_selected_ids_string(selected_ids_string):
+    """
+    پشتیبانی از الگوهای:
+    - "pid:all|pid:allz|pid:all-allz"
+    - "pid:sub-allz,sub-all-allz"
+    - "pid:sub1(child1-allz;child2-all-allz);sub2(child3-allz,...)"  ← پرانتز و ;/,
+    - توکن‌های داخل پرانتز اگر 'all'/'allz'/'all-allz' باشند، نسبت به subId قبل پرانتز اعمال می‌شوند.
+    - آیدی تنها → معادل all_subcats_and_products
+    """
+    def split_top_level(s, seps=',;'):
+        parts, buf, depth = [], [], 0
+        for ch in s:
+            if ch == '(':
+                depth += 1
+                buf.append(ch)
+            elif ch == ')':
+                depth = max(0, depth - 1)
+                buf.append(ch)
+            elif ch in seps and depth == 0:
+                part = ''.join(buf).strip()
+                if part:
+                    parts.append(part)
+                buf = []
+            else:
+                buf.append(ch)
+        tail = ''.join(buf).strip()
+        if tail:
+            parts.append(tail)
+        return parts
+
+    def normalize_token(t):
+        return (t or '').strip().strip('"').strip("'").strip()
+
+    def parse_token(token, default_parent_id):
+        """
+        خروجی: لیستی از selection dictها مثل {"id": <int>, "type": یکی از
+          'all_subcats' | 'only_products' | 'all_subcats_and_products'}
+        """
+        out = []
+        tok = normalize_token(token)
+        if not tok:
+            return out
+
+        # گروه با پرانتز: 2389(....)
+        m = re.match(r'^(\d+)KATEX_INLINE_OPEN(.*)KATEX_INLINE_CLOSE$', tok)
+        if m:
+            group_id = int(m.group(1))
+            inner = m.group(2).strip()
+            inner_tokens = split_top_level(inner, seps=',;')
+            for it in inner_tokens:
+                # داخل پرانتز اگر all/allz/all-allz بیاید، relative به خود group_id تفسیر می‌شود
+                out.extend(parse_token(it, default_parent_id=group_id))
+            return out
+
+        # کلیدواژه‌ها روی parent فعلی
+        key = tok.lower()
+        if key == 'all':
+            out.append({"id": int(default_parent_id), "type": "all_subcats"})
+            return out
+        if key == 'allz':
+            out.append({"id": int(default_parent_id), "type": "only_products"})
+            return out
+        if key in ('all-allz', 'all+allz', 'all_allz'):
+            out.append({"id": int(default_parent_id), "type": "all_subcats_and_products"})
+            return out
+
+        # فرم‌های صریح با آیدی
+        m = re.match(r'^(\d+)-(all|allz|all-allz)$', key)
+        if m:
+            sid = int(m.group(1))
+            typ_key = m.group(2)
+            if typ_key == 'all':
+                typ = 'all_subcats'
+            elif typ_key == 'allz':
+                typ = 'only_products'
+            else:
+                typ = 'all_subcats_and_products'
+            out.append({"id": sid, "type": typ})
+            return out
+
+        # آیدی تنها (fallback): معادل all_subcats_and_products
+        if tok.isdigit():
+            out.append({"id": int(tok), "type": "all_subcats_and_products"})
+            return out
+
+        return out
+
+    s = normalize_token(selected_ids_string)
+    if not s:
+        return []
+
     result = []
-    for part in selected_ids_string.split('|'):
-        part = part.strip()
-        if not part or ':' not in part:
+    for block in s.split('|'):
+        block = normalize_token(block)
+        if not block or ':' not in block:
             continue
-        parent_id_str, children_str = part.split(':', 1)
-        parent_id = int(parent_id_str.strip())
+        parent_id_str, children_str = block.split(':', 1)
+        try:
+            parent_id = int(re.sub(r'\D', '', parent_id_str))
+        except:
+            continue
+
         selections = []
-        for sel in children_str.split(','):
-            sel = sel.strip()
-            if not sel:
-                continue
-            if sel == 'all':
-                selections.append({"id": parent_id, "type": "all_subcats"})
-            elif sel == 'allz':
-                selections.append({"id": parent_id, "type": "only_products"})
-            elif sel == 'all-allz':
-                selections.append({"id": parent_id, "type": "all_subcats_and_products"})
-            elif re.match(r'^\d+-allz$', sel):
-                sub_id = int(sel.split('-')[0])
-                selections.append({"id": sub_id, "type": "only_products"})
-            elif re.match(r'^\d+-all-allz$', sel):
-                sub_id = int(sel.split('-')[0])
-                selections.append({"id": sub_id, "type": "all_subcats_and_products"})
-        result.append({"parent_id": parent_id, "selections": selections})
+        # در سطح بالا هم , و هم ; را پشتیبانی کن و پرانتز را لحاظ کن
+        top_tokens = split_top_level(children_str, seps=',;')
+        for tok in top_tokens:
+            selections.extend(parse_token(tok, default_parent_id=parent_id))
+
+        if selections:
+            result.append({"parent_id": parent_id, "selections": selections})
     return result
 
 def get_direct_subcategories(parent_id, all_cats):
@@ -184,28 +268,55 @@ def get_all_subcategories(parent_id, all_cats):
     return result
 
 def get_selected_categories_according_to_selection(parsed_selection, all_cats):
+    """
+    - انواع پشتیبانی‌شده: 'all_subcats' | 'only_products' | 'all_subcats_and_products'
+    - برای هر دسته انتخابی، همه‌ی والدها تا ریشه به transfer اضافه می‌شوند تا ساختار در ووکامرس کامل باشد.
+    - 'all_subcats' برای هر آیدی (نه فقط والد بلاک) مجاز است و فقط زیرشاخه‌های مستقیم آن آیدی را اضافه می‌کند.
+    """
     selected_scrape = set()
     selected_transfer = set()
+
+    def add_direct_subs(cid):
+        for sub in get_direct_subcategories(cid, all_cats):
+            selected_scrape.add(sub)
+            selected_transfer.add(sub)
+
+    def add_all_subs(cid):
+        selected_scrape.add(cid); selected_transfer.add(cid)
+        for sub in get_all_subcategories(cid, all_cats):
+            selected_scrape.add(sub); selected_transfer.add(sub)
+
     for block in parsed_selection:
         parent_id = block['parent_id']
-        for sel in block['selections']:
+        for sel in block.get('selections', []):
             typ, sid = sel['type'], sel['id']
-            if typ == 'all_subcats' and sid == parent_id:
-                subs = get_direct_subcategories(parent_id, all_cats)
-                for sc_id in subs:
-                    selected_scrape.add(sc_id); selected_transfer.add(sc_id)
-            elif typ == 'only_products' and sid == parent_id:
-                selected_scrape.add(parent_id); selected_transfer.add(parent_id)
-            elif typ == 'all_subcats_and_products' and sid == parent_id:
-                selected_scrape.add(parent_id); selected_transfer.add(parent_id)
-                for sub in get_all_subcategories(parent_id, all_cats):
-                    selected_scrape.add(sub); selected_transfer.add(sub)
-            elif typ == 'only_products' and sid != parent_id:
+
+            # روی خود والد
+            if sid == parent_id:
+                if typ == 'all_subcats':
+                    add_direct_subs(parent_id)
+                elif typ == 'only_products':
+                    selected_scrape.add(parent_id); selected_transfer.add(parent_id)
+                elif typ == 'all_subcats_and_products':
+                    add_all_subs(parent_id)
+                continue
+
+            # روی زیرشاخه‌های مشخص‌شده
+            if typ == 'only_products':
                 selected_scrape.add(sid); selected_transfer.add(sid)
-            elif typ == 'all_subcats_and_products' and sid != parent_id:
-                selected_scrape.add(sid); selected_transfer.add(sid)
-                for sub in get_all_subcategories(sid, all_cats):
-                    selected_scrape.add(sub); selected_transfer.add(sub)
+            elif typ == 'all_subcats_and_products':
+                add_all_subs(sid)
+            elif typ == 'all_subcats':  # فقط زیرشاخه‌های مستقیم آن sid
+                add_direct_subs(sid)
+
+    # والدهای همه‌ی دسته‌های انتخاب‌شده را به transfer اضافه کن تا زنجیره در ووکامرس کامل باشد
+    parent_map = {c['id']: c.get('parent_id') for c in all_cats}
+    for cid in list(selected_transfer):
+        p = parent_map.get(cid)
+        while p:
+            selected_transfer.add(p)
+            p = parent_map.get(p)
+
     scrape_categories = [cat for cat in all_cats if cat['id'] in selected_scrape]
     transfer_categories = [cat for cat in all_cats if cat['id'] in selected_transfer]
     return scrape_categories, transfer_categories
@@ -710,6 +821,7 @@ def process_price(price_value):
     except (ValueError, TypeError):
         return "0"
     if price_value <= 1: return "0"
+    elif price_value <= 500000: new_price = price_value + 230000
     elif price_value <= 7000000: new_price = price_value + 260000
     elif price_value <= 10000000: new_price = price_value * 1.035
     elif price_value <= 20000000: new_price = price_value * 1.025
@@ -1083,13 +1195,13 @@ def main():
         return
     init_category_index_global(all_cats)
 
-    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or "1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
+    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or "1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz|1593:2389(13203-allz;12896-allz);2390(16711-allz;16712-allz;16710-allz)"
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
 
     # انتخاب‌ها
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
 
-    # اطمینان از حضور والدها در انتقال
+    # اطمینان از حضور والدها در انتقال (افزوده‌شده در get_selected... هم لحاظ شده؛ اینجا صرفاً اطمینان بیشتر)
     parent_ids = [block['parent_id'] for block in parsed_selection]
     parent_cats = [cat for cat in all_cats if cat['id'] in parent_ids]
     transfer_by_id = {c['id']: c for c in transfer_categories}
