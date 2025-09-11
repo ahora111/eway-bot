@@ -142,16 +142,17 @@ def cat_label(catid):
     return f"{catid} ({name if name else 'نامشخص'})"
 
 # ==============================================================================
-# توابع انتخاب منعطف با SELECTED_IDS_STRING (با پشتیبانی پرانتز و ; )
+# توابع انتخاب منعطف با SELECTED_IDS_STRING (با پشتیبانی پرانتز، ; و بالانس خودکار پرانتز)
 # ==============================================================================
 def parse_selected_ids_string(selected_ids_string):
     """
     پشتیبانی از الگوهای:
     - "pid:all|pid:allz|pid:all-allz"
     - "pid:sub-allz,sub-all-allz"
-    - "pid:sub1(child1-allz;child2-all-allz);sub2(child3-allz,...)"  ← پرانتز و ;/,
-    - توکن‌های داخل پرانتز اگر 'all'/'allz'/'all-allz' باشند، نسبت به subId قبل پرانتز اعمال می‌شوند.
+    - "pid:sub1(child1-allz;child2-all-allz);sub2(child3-allz,...)"
+    - داخل پرانتز اگر all/allz/all-allz باشد، نسبت به subId قبل پرانتز اعمال می‌شود.
     - آیدی تنها → معادل all_subcats_and_products
+    - اگر پرانتز بسته جا بیفتد، به‌صورت خودکار در انتها بسته می‌شود.
     """
     def split_top_level(s, seps=',;'):
         parts, buf, depth = [], [], 0
@@ -177,29 +178,44 @@ def parse_selected_ids_string(selected_ids_string):
     def normalize_token(t):
         return (t or '').strip().strip('"').strip("'").strip()
 
+    def balance_parens(text):
+        open_c = text.count('(')
+        close_c = text.count(')')
+        if close_c < open_c:
+            text = text + (')' * (open_c - close_c))
+        return text
+
     def parse_token(token, default_parent_id):
         """
-        خروجی: لیستی از selection dictها مثل {"id": <int>, "type": یکی از
-          'all_subcats' | 'only_products' | 'all_subcats_and_products'}
+        خروجی: [{"id": int, "type": 'all_subcats'|'only_products'|'all_subcats_and_products'}]
         """
         out = []
         tok = normalize_token(token)
         if not tok:
             return out
 
-        # گروه با پرانتز: 2389(....)
+        # گروه با پرانتز کامل: 2389(....)
         m = re.match(r'^(\d+)KATEX_INLINE_OPEN(.*)KATEX_INLINE_CLOSE$', tok)
         if m:
             group_id = int(m.group(1))
             inner = m.group(2).strip()
             inner_tokens = split_top_level(inner, seps=',;')
             for it in inner_tokens:
-                # داخل پرانتز اگر all/allz/all-allz بیاید، relative به خود group_id تفسیر می‌شود
                 out.extend(parse_token(it, default_parent_id=group_id))
             return out
 
-        # کلیدواژه‌ها روی parent فعلی
+        # گروه با پرانتز ناقص: 2390(....
+        m_unclosed = re.match(r'^(\d+)KATEX_INLINE_OPEN(.*)$', tok)
+        if m_unclosed:
+            group_id = int(m_unclosed.group(1))
+            inner = m_unclosed.group(2).strip()
+            inner_tokens = split_top_level(inner, seps=',;')
+            for it in inner_tokens:
+                out.extend(parse_token(it, default_parent_id=group_id))
+            return out
+
         key = tok.lower()
+        # کلیدواژه‌ها روی parent فعلی
         if key == 'all':
             out.append({"id": int(default_parent_id), "type": "all_subcats"})
             return out
@@ -210,21 +226,16 @@ def parse_selected_ids_string(selected_ids_string):
             out.append({"id": int(default_parent_id), "type": "all_subcats_and_products"})
             return out
 
-        # فرم‌های صریح با آیدی
-        m = re.match(r'^(\d+)-(all|allz|all-allz)$', key)
-        if m:
-            sid = int(m.group(1))
-            typ_key = m.group(2)
-            if typ_key == 'all':
-                typ = 'all_subcats'
-            elif typ_key == 'allz':
-                typ = 'only_products'
-            else:
-                typ = 'all_subcats_and_products'
+        # فرم صریح id-suffix
+        m2 = re.match(r'^(\d+)-(all|allz|all-allz)$', key)
+        if m2:
+            sid = int(m2.group(1))
+            typ_key = m2.group(2)
+            typ = 'all_subcats' if typ_key == 'all' else ('only_products' if typ_key == 'allz' else 'all_subcats_and_products')
             out.append({"id": sid, "type": typ})
             return out
 
-        # آیدی تنها (fallback): معادل all_subcats_and_products
+        # آیدی تنها → پیش‌فرض: all_subcats_and_products
         if tok.isdigit():
             out.append({"id": int(tok), "type": "all_subcats_and_products"})
             return out
@@ -241,19 +252,22 @@ def parse_selected_ids_string(selected_ids_string):
         if not block or ':' not in block:
             continue
         parent_id_str, children_str = block.split(':', 1)
+        children_str = balance_parens(children_str)
+
         try:
             parent_id = int(re.sub(r'\D', '', parent_id_str))
         except:
             continue
 
         selections = []
-        # در سطح بالا هم , و هم ; را پشتیبانی کن و پرانتز را لحاظ کن
         top_tokens = split_top_level(children_str, seps=',;')
         for tok in top_tokens:
             selections.extend(parse_token(tok, default_parent_id=parent_id))
 
         if selections:
             result.append({"parent_id": parent_id, "selections": selections})
+        else:
+            logger.debug(f"No valid selection in block: {block}")
     return result
 
 def get_direct_subcategories(parent_id, all_cats):
@@ -348,35 +362,58 @@ def login_eways(username, password):
     return None
 
 # ==============================================================================
-# دسته‌ها از eways
+# دریافت دسته‌ها از eways (مقاوم‌تر: تلاش JSON، سپس HTML)
 # ==============================================================================
 def get_and_parse_categories(session):
     logger.info(f"⏳ دریافت دسته‌بندی‌ها از: {SOURCE_CATS_API_URL}")
     try:
         response = session.get(SOURCE_CATS_API_URL, timeout=30)
         response.raise_for_status()
-        try:
-            data = response.json()
-            logger.info("✅ پاسخ JSON است. در حال پردازش با نگاشت والد-فرزند...")
+
+        def try_json_anyway(resp):
+            t = (resp.text or "").strip().lstrip('\ufeff')
+            try:
+                return resp.json()
+            except Exception:
+                pass
+            try:
+                return json.loads(t)
+            except Exception:
+                pass
+            start_candidates = [t.find('['), t.find('{')]
+            start_candidates = [i for i in start_candidates if i != -1]
+            start = min(start_candidates) if start_candidates else -1
+            end = max(t.rfind(']'), t.rfind('}'))
+            if start != -1 and end != -1 and end > start:
+                snippet = t[start:end+1]
+                try:
+                    return json.loads(snippet)
+                except Exception:
+                    return None
+            return None
+
+        data = try_json_anyway(response)
+        if isinstance(data, list) and data:
+            logger.info("✅ پاسخ JSON (یا شبه-JSON) دریافت شد. در حال نگاشت والد-فرزند...")
             id_map = {}
             for c in data:
                 real_id_match = re.search(r'/Store/List/(\d+)', (c.get('url') or ''))
                 real_id = int(real_id_match.group(1)) if real_id_match else c.get('id')
-                if c.get('id') is not None:
+                if c.get('id') is not None and real_id is not None:
                     id_map[c['id']] = real_id
             final_cats = []
             for c in data:
-                real_id = id_map.get(c.get('id'))
+                src_id = c.get('id')
+                real_id = id_map.get(src_id, None if src_id is None else src_id)
                 if real_id is None:
                     continue
                 parent_src = c.get('parent_id')
                 parent_real = id_map.get(parent_src) if parent_src is not None else None
-                final_cats.append({"id": real_id, "name": (c.get('name') or '').strip(), "parent_id": parent_real})
-            logger.info(f"✅ {len(final_cats)} دسته‌بندی با والد صحیح.")
+                final_cats.append({"id": int(real_id), "name": (c.get('name') or '').strip(), "parent_id": parent_real})
+            logger.info(f"✅ {len(final_cats)} دسته‌بندی از JSON.")
             return final_cats
-        except json.JSONDecodeError:
-            logger.warning("⚠️ پاسخ JSON نیست. تلاش برای پارس HTML...")
 
+        logger.warning("⚠️ پاسخ JSON قابل‌استفاده نبود. تلاش برای پارس HTML منو...")
         soup = BeautifulSoup(response.text, 'lxml')
         all_menu_items = soup.select("li[id^='menu-item-']")
         if not all_menu_items:
@@ -412,7 +449,7 @@ def get_and_parse_categories(session):
                     if cat_menu_id in cats_map and parent_menu_id in cats_map:
                         cats_map[cat_menu_id]['parent_id'] = cats_map[parent_menu_id]['id']
         final_cats = list(cats_map.values())
-        logger.info(f"✅ {len(final_cats)} دسته‌بندی معتبر استخراج شد.")
+        logger.info(f"✅ {len(final_cats)} دسته‌بندی معتبر از HTML منو.")
         return final_cats
     except requests.RequestException as e:
         logger.error(f"❌ خطا در دریافت دسته‌بندی‌ها: {e}")
@@ -420,6 +457,90 @@ def get_and_parse_categories(session):
     except Exception as e:
         logger.error(f"❌ خطای ناشناخته در پردازش دسته‌بندی‌ها: {e}")
         return None
+
+# ==============================================================================
+# تکمیل دسته‌های گمشده با خواندن breadcrumb صفحه هر دسته
+# ==============================================================================
+def fetch_category_breadcrumb(session, category_id):
+    url = f"{BASE_URL}/Store/List/{int(category_id)}"
+    try:
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, 'lxml')
+        anchors = []
+        selectors = [
+            'nav[aria-label="breadcrumb"] a[href*="/Store/List/"]',
+            'ul.breadcrumb a[href*="/Store/List/"]',
+            'ol.breadcrumb a[href*="/Store/List/"]',
+            '.breadcrumb a[href*="/Store/List/"]'
+        ]
+        for sel in selectors:
+            anchors = soup.select(sel)
+            if anchors:
+                break
+        crumbs = []
+        seen = set()
+        for a in anchors:
+            href = a.get('href', '')
+            m = re.search(r'/Store/List/(\d+)', href)
+            if m:
+                cid = int(m.group(1))
+                if cid in seen:
+                    continue
+                seen.add(cid)
+                name = a.get_text(strip=True)
+                crumbs.append((cid, name))
+        # افزودن خود دسته در صورت نبودن در anchor
+        if not any(cid == int(category_id) for cid, _ in crumbs):
+            last_label = None
+            last_sel = [
+                'nav[aria-label="breadcrumb"] li.active',
+                '.breadcrumb li.active',
+                '.breadcrumb .active'
+            ]
+            for sel in last_sel:
+                node = soup.select_one(sel)
+                if node:
+                    last_label = node.get_text(strip=True)
+                    break
+            crumbs.append((int(category_id), last_label or f"CAT-{category_id}"))
+        return crumbs
+    except Exception as e:
+        logger.debug(f"⚠️ نتوانستم breadcrumb دسته {category_id} را بخوانم: {e}")
+        return [(int(category_id), f"CAT-{category_id}")]
+
+def collect_selected_ids(parsed_selection):
+    ids = set()
+    for block in parsed_selection:
+        for sel in block.get('selections', []):
+            try:
+                ids.add(int(sel['id']))
+            except:
+                pass
+    return ids
+
+def ensure_categories_present(session, all_cats, desired_ids):
+    by_id = {c['id']: dict(c) for c in (all_cats or [])}
+    known = set(by_id.keys())
+    missing = [cid for cid in desired_ids if cid not in known]
+    if not missing:
+        return list(by_id.values())
+    logger.info(f"🔎 {len(missing)} دسته انتخاب‌شده در لیست اولیه نبود؛ تلاش برای تکمیل با breadcrumb ...")
+    for cid in missing:
+        crumbs = fetch_category_breadcrumb(session, cid)
+        prev = None
+        for (ccid, cname) in crumbs:
+            parent_id = prev[0] if prev else None
+            if ccid not in by_id:
+                by_id[ccid] = {"id": ccid, "name": cname or f"CAT-{ccid}", "parent_id": parent_id}
+            else:
+                if not by_id[ccid].get('name') and cname:
+                    by_id[ccid]['name'] = cname
+                if by_id[ccid].get('parent_id') is None and parent_id is not None:
+                    by_id[ccid]['parent_id'] = parent_id
+            prev = (ccid, cname)
+    logger.info(f"✅ دسته‌های گمشده با breadcrumb اضافه شدند. کل: {len(by_id)}")
+    return list(by_id.values())
 
 # ==============================================================================
 # جزئیات محصول از eways
@@ -972,7 +1093,7 @@ def smart_tags_for_product(product, cat_map):
         if part not in common_words: tags.add(part)
     if cat_name and cat_name not in common_words: tags.add(cat_name)
 
-    important_keys = ['رنگ','Color','حافظه','ظرفیت','اندازه','سایز','Size','مدل','برند']
+    important_keys = ['रنگ','Color','حافظه','ظرفیت','اندازه','سایز','Size','مدل','برند']
     for key, value in specs.items():
         if any(imp in key for imp in important_keys):
             val = value.strip()
@@ -1195,13 +1316,19 @@ def main():
         return
     init_category_index_global(all_cats)
 
-    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or "1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz|1593:2389(13203-allz;12896-allz);2390(16711-allz;16712-allz;16710-allz)"
+    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or \
+        "1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz|1593:2389(13203-allz;12896-allz);2390(16711-allz;16712-allz;16710-allz)"
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
+
+    # NEW: اطمینان از حضور دسته‌های انتخاب‌شده در all_cats (اگر نبودند، از breadcrumb تکمیل شود)
+    desired_ids = collect_selected_ids(parsed_selection)
+    all_cats = ensure_categories_present(session, all_cats, desired_ids)
+    init_category_index_global(all_cats)  # ایندکس‌ها با لیست جدید
 
     # انتخاب‌ها
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
 
-    # اطمینان از حضور والدها در انتقال (افزوده‌شده در get_selected... هم لحاظ شده؛ اینجا صرفاً اطمینان بیشتر)
+    # اطمینان از حضور والدها در انتقال (اضافی برای اطمینان)
     parent_ids = [block['parent_id'] for block in parsed_selection]
     parent_cats = [cat for cat in all_cats if cat['id'] in parent_ids]
     transfer_by_id = {c['id']: c for c in transfer_categories}
