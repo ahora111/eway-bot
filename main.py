@@ -142,162 +142,38 @@ def cat_label(catid):
     return f"{catid} ({name if name else 'نامشخص'})"
 
 # ==============================================================================
-# <<<<<<<<<<<< بخش اصلاح شده: توابع انتخاب منعطف با فرمت درختی و قدیمی >>>>>>>>>>
+# توابع انتخاب منعطف با SELECTED_IDS_STRING
 # ==============================================================================
-
-def _parse_selection_leaf(selection_str, context_id):
-    """یک دستورالعمل تکی مثل '123-allz' یا 'all' را پارس می‌کند."""
-    selection_str = selection_str.strip()
-    if not selection_str:
-        return None
-
-    if selection_str == 'all':
-        return {"id": context_id, "type": "all_subcats"}
-    elif selection_str == 'allz':
-        return {"id": context_id, "type": "only_products"}
-    elif selection_str == 'all-allz':
-        return {"id": context_id, "type": "all_subcats_and_products"}
-    
-    match_allz = re.match(r'^\s*(\d+)\s*-\s*allz\s*$', selection_str)
-    if match_allz:
-        sub_id = int(match_allz.group(1))
-        return {"id": sub_id, "type": "only_products"}
-
-    match_all_allz = re.match(r'^\s*(\d+)\s*-\s*all-allz\s*$', selection_str)
-    if match_all_allz:
-        sub_id = int(match_all_allz.group(1))
-        return {"id": sub_id, "type": "all_subcats_and_products"}
-
-    logger.warning(f"  - فرمت انتخاب ناشناخته: '{selection_str}' در زمینه ID={context_id}. نادیده گرفته شد.")
-    return None
-
-def _split_at_top_level(text, delimiter):
-    """یک رشته را بر اساس جداکننده در سطح بالا تقسیم می‌کند (داخل پرانتزها و براکت‌ها را نادیده می‌گیرد)."""
-    parts = []
-    balance = 0
-    last_split = 0
-    for i, char in enumerate(text):
-        if char in '([':
-            balance += 1
-        elif char in ')]':
-            balance -= 1
-        elif char == delimiter and balance == 0:
-            parts.append(text[last_split:i])
-            last_split = i + 1
-    parts.append(text[last_split:])
-    return [p.strip() for p in parts if p.strip()]
-
-def _parse_path_recursively(path_str, expected_parent_id):
-    """
-    یک مسیر مانند '1593 > [ ... ]' را به صورت بازگشتی پارس می‌کند.
-    expected_parent_id برای اعتبارسنجی ساختار درخت استفاده می‌شود.
-    """
-    path_str = path_str.strip()
-    final_selections = []
-
-    # حالت ۱: گروه موازی [...]
-    if path_str.startswith('[') and path_str.endswith(']'):
-        inner_content = path_str[1:-1].strip()
-        sub_paths = _split_at_top_level(inner_content, ',')
-        for sub_path in sub_paths:
-            final_selections.extend(_parse_path_recursively(sub_path, expected_parent_id))
-        return final_selections
-
-    # حالت ۲: گروه انتخاب نهایی (...)
-    if path_str.startswith('(') and path_str.endswith(')'):
-        inner_content = path_str[1:-1].strip()
-        leaf_selections = _split_at_top_level(inner_content, ',')
-        for leaf_str in leaf_selections:
-            parsed_leaf = _parse_selection_leaf(leaf_str, expected_parent_id)
-            if parsed_leaf:
-                # اعتبارسنجی: آیا این فرزند واقعاً زیرمجموعه والد مورد انتظار است؟
-                leaf_id = parsed_leaf['id']
-                if CATEGORY_PARENT.get(leaf_id) != expected_parent_id:
-                    logger.warning(
-                        f"  - عدم تطابق والد برای {cat_label(leaf_id)}! "
-                        f"انتظار والد {cat_label(expected_parent_id)} را داشتیم اما والد واقعی {cat_label(CATEGORY_PARENT.get(leaf_id))} است. "
-                        f"ممکن است این انتخاب نادیده گرفته شود."
-                    )
-                final_selections.append(parsed_leaf)
-        return final_selections
-
-    # حالت ۳: یک گره در مسیر (ID > rest_of_path)
-    path_parts = _split_at_top_level(path_str, '>')
-    if not path_parts:
-        return []
-
-    try:
-        current_id = int(path_parts[0])
-    except (ValueError, IndexError):
-        logger.error(f"  - شناسه نامعتبر در مسیر: '{path_parts[0]}'.")
-        return []
-
-    # اعتبارسنجی والد
-    if expected_parent_id is not None and CATEGORY_PARENT.get(current_id) != expected_parent_id:
-        logger.error(
-            f"  - مسیر نامعتبر! {cat_label(current_id)} فرزند {cat_label(expected_parent_id)} نیست. "
-            f"این شاخه از پردازش حذف می‌شود."
-        )
-        return []
-
-    if len(path_parts) > 1:
-        rest_of_path = '>'.join(path_parts[1:])
-        return _parse_path_recursively(rest_of_path, current_id)
-    else:
-        logger.error(f"  - مسیر ناقص: '{path_str}'. هر مسیر باید به یک گروه انتخاب (...) ختم شود.")
-        return []
-
 def parse_selected_ids_string(selected_ids_string):
-    """هر دو فرمت انتخاب (قدیمی و جدید) را پارس کرده و یک لیست مسطح از دستورالعمل‌ها برمی‌گرداند."""
-    final_selections = []
-    
-    # جدا کردن بلاک‌های اصلی با |
+    result = []
     for part in selected_ids_string.split('|'):
         part = part.strip()
-        if not part:
+        if not part or ':' not in part:
             continue
-            
-        # تشخیص فرمت جدید (درختی)
-        if '>' in part:
-            logger.info(f"🔍 پردازش انتخاب درختی: '{part}'")
-            final_selections.extend(_parse_path_recursively(part, None))
-        
-        # تشخیص فرمت قدیمی (مسطح)
-        elif ':' in part:
-            logger.info(f"🔍 پردازش انتخاب مسطح: '{part}'")
-            try:
-                parent_id_str, children_str = part.split(':', 1)
-                parent_id = int(parent_id_str.strip())
-                
-                for sel_str in children_str.split(','):
-                    parsed_leaf = _parse_selection_leaf(sel_str, parent_id)
-                    if parsed_leaf:
-                        # اعتبارسنجی ساده برای فرمت قدیمی
-                        leaf_id = parsed_leaf['id']
-                        if leaf_id != parent_id and CATEGORY_PARENT.get(leaf_id) != parent_id:
-                             logger.warning(
-                                f"  - عدم تطابق والد برای {cat_label(leaf_id)} در انتخاب مسطح! "
-                                f"انتظار والد {cat_label(parent_id)} را داشتیم."
-                            )
-                        final_selections.append(parsed_leaf)
-            except Exception as e:
-                logger.error(f"  - خطا در پردازش انتخاب مسطح '{part}': {e}")
-                
-    # حذف موارد تکراری احتمالی
-    unique_selections = []
-    seen = set()
-    for sel in final_selections:
-        # ساخت یک شناسه منحصر به فرد برای هر دیکشنری
-        identifier = (sel['id'], sel['type'])
-        if identifier not in seen:
-            unique_selections.append(sel)
-            seen.add(identifier)
-            
-    logger.info(f"✅ کل دستورالعمل‌های انتخاب پارس شده (منحصر به فرد): {len(unique_selections)}")
-    return unique_selections
+        parent_id_str, children_str = part.split(':', 1)
+        parent_id = int(parent_id_str.strip())
+        selections = []
+        for sel in children_str.split(','):
+            sel = sel.strip()
+            if not sel:
+                continue
+            if sel == 'all':
+                selections.append({"id": parent_id, "type": "all_subcats"})
+            elif sel == 'allz':
+                selections.append({"id": parent_id, "type": "only_products"})
+            elif sel == 'all-allz':
+                selections.append({"id": parent_id, "type": "all_subcats_and_products"})
+            elif re.match(r'^\d+-allz$', sel):
+                sub_id = int(sel.split('-')[0])
+                selections.append({"id": sub_id, "type": "only_products"})
+            elif re.match(r'^\d+-all-allz$', sel):
+                sub_id = int(sel.split('-')[0])
+                selections.append({"id": sub_id, "type": "all_subcats_and_products"})
+        result.append({"parent_id": parent_id, "selections": selections})
+    return result
 
 def get_direct_subcategories(parent_id, all_cats):
-    return [cat['id'] for cat in all_cats if cat.get('parent_id') == parent_id]
+    return [cat['id'] for cat in all_cats if cat['parent_id'] == parent_id]
 
 def get_all_subcategories(parent_id, all_cats):
     result = []
@@ -307,49 +183,31 @@ def get_all_subcategories(parent_id, all_cats):
         result.extend(get_all_subcategories(sub_id, all_cats))
     return result
 
-def get_selected_categories_according_to_selection(parsed_selections, all_cats):
-    """بر اساس لیست مسطح دستورالعمل‌ها، دسته‌های اسکرپ و انتقال را مشخص می‌کند."""
+def get_selected_categories_according_to_selection(parsed_selection, all_cats):
     selected_scrape = set()
     selected_transfer = set()
-
-    for sel in parsed_selections:
-        typ, sid = sel['type'], sel['id']
-
-        # محصولاتی که مستقیماً در یک دسته هستند
-        if typ == 'only_products':
-            selected_scrape.add(sid)
-            selected_transfer.add(sid)
-
-        # همه زیرشاخه‌های مستقیم
-        elif typ == 'all_subcats':
-            subs = get_direct_subcategories(sid, all_cats)
-            for sc_id in subs:
-                selected_scrape.add(sc_id)
-                selected_transfer.add(sc_id)
-        
-        # محصولات خود دسته + همه زیرشاخه‌ها (بازگشتی)
-        elif typ == 'all_subcats_and_products':
-            selected_scrape.add(sid)
-            selected_transfer.add(sid)
-            for sub in get_all_subcategories(sid, all_cats):
-                selected_scrape.add(sub)
-                selected_transfer.add(sub)
-    
-    # همچنین تمام والدهای دسته‌های انتخاب شده را به لیست انتقال اضافه می‌کنیم تا ساختار حفظ شود
-    all_transfer_ids = set(selected_transfer)
-    for cat_id in list(all_transfer_ids):
-        current_id = cat_id
-        while current_id is not None:
-            parent_id = CATEGORY_PARENT.get(current_id)
-            if parent_id is not None:
-                all_transfer_ids.add(parent_id)
-                current_id = parent_id
-            else:
-                break
-    
+    for block in parsed_selection:
+        parent_id = block['parent_id']
+        for sel in block['selections']:
+            typ, sid = sel['type'], sel['id']
+            if typ == 'all_subcats' and sid == parent_id:
+                subs = get_direct_subcategories(parent_id, all_cats)
+                for sc_id in subs:
+                    selected_scrape.add(sc_id); selected_transfer.add(sc_id)
+            elif typ == 'only_products' and sid == parent_id:
+                selected_scrape.add(parent_id); selected_transfer.add(parent_id)
+            elif typ == 'all_subcats_and_products' and sid == parent_id:
+                selected_scrape.add(parent_id); selected_transfer.add(parent_id)
+                for sub in get_all_subcategories(parent_id, all_cats):
+                    selected_scrape.add(sub); selected_transfer.add(sub)
+            elif typ == 'only_products' and sid != parent_id:
+                selected_scrape.add(sid); selected_transfer.add(sid)
+            elif typ == 'all_subcats_and_products' and sid != parent_id:
+                selected_scrape.add(sid); selected_transfer.add(sid)
+                for sub in get_all_subcategories(sid, all_cats):
+                    selected_scrape.add(sub); selected_transfer.add(sub)
     scrape_categories = [cat for cat in all_cats if cat['id'] in selected_scrape]
-    transfer_categories = [cat for cat in all_cats if cat['id'] in all_transfer_ids]
-    
+    transfer_categories = [cat for cat in all_cats if cat['id'] in selected_transfer]
     return scrape_categories, transfer_categories
 
 # ==============================================================================
@@ -1225,21 +1083,25 @@ def main():
         return
     init_category_index_global(all_cats)
 
-    # <<<<<<<<<<<< بخش اصلاح شده: استفاده از فرمت جدید و ترکیبی برای انتخاب دسته‌ها >>>>>>>>>>
-    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or \
-        "1582 > 1593 > [ 2389 > (13203-allz, 12896-allz), 2390 > (16711-allz, 16712-allz, 22570-allz) ]|16777:all-allz|4882 > (all-allz)"
-
-    # این تابع حالا هر دو فرمت قدیمی و جدید را می‌فهمد
+    SELECTED_IDS_STRING = os.environ.get("SELECTED_IDS_STRING") or "1582:14548-allz,1584-all-allz|16777:all-allz|1583:17893-allz|4882:all-allz|16778:22570-all-allz"
     parsed_selection = parse_selected_ids_string(SELECTED_IDS_STRING)
 
-    # این تابع با خروجی جدید پارسر کار می‌کند
+    # انتخاب‌ها
     scrape_categories, transfer_categories = get_selected_categories_according_to_selection(parsed_selection, all_cats)
-    
+
+    # اطمینان از حضور والدها در انتقال
+    parent_ids = [block['parent_id'] for block in parsed_selection]
+    parent_cats = [cat for cat in all_cats if cat['id'] in parent_ids]
+    transfer_by_id = {c['id']: c for c in transfer_categories}
+    for pc in parent_cats:
+        transfer_by_id.setdefault(pc['id'], pc)
+    transfer_categories = list(transfer_by_id.values())
+
     # لاگ دسته‌ها
-    scrape_list = sorted([f"{c['id']} ({c['name']})" for c in scrape_categories])
-    transfer_list = sorted([f"{c['id']} ({c['name']})" for c in transfer_categories])
-    logger.info(f"✅ دسته‌های اسکرپ ({len(scrape_list)}): {scrape_list}")
-    logger.info(f"✅ دسته‌های انتقال با والدها ({len(transfer_list)}): {transfer_list}")
+    scrape_list = [f"{c['id']} ({c['name']})" for c in scrape_categories]
+    transfer_list = [f"{c['id']} ({c['name']})" for c in transfer_categories]
+    logger.info(f"✅ دسته‌های اسکرپ: {scrape_list}")
+    logger.info(f"✅ دسته‌های انتقال (با والدها): {transfer_list}")
 
     # ساخت دسته‌ها در ووکامرس
     category_mapping = transfer_categories_to_wc(transfer_categories)
