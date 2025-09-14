@@ -13,6 +13,8 @@ from logging.handlers import RotatingFileHandler
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
 from collections import defaultdict, Counter
 from urllib.parse import urljoin
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # SSL helpers
 import certifi
@@ -34,6 +36,11 @@ OUTOFSTOCK_WORKERS = int(os.environ.get("OUTOFSTOCK_WORKERS", "2"))
 OUTOFSTOCK_SLEEP_SEC = float(os.environ.get("OUTOFSTOCK_SLEEP_SEC", "0.2"))
 OUTOFSTOCK_TIMEOUT = float(os.environ.get("OUTOFSTOCK_TIMEOUT", "45"))
 BATCH_SIZE_OUTOFSTOCK = int(os.environ.get("BATCH_SIZE_OUTOFSTOCK", "30"))
+
+# تنظیمات اتصال eways برای اجرا روی GitHub Actions
+EWAYS_USE_ENV_PROXIES = os.environ.get("EWAYS_USE_ENV_PROXIES", "false").lower() == "true"  # اگر می‌خوای از env های HTTPS_PROXY/HTTP_PROXY استفاده کنی
+EWAYS_PROXY = os.environ.get("EWAYS_PROXY")  # مثل: http://user:pass@host:port
+EWAYS_USE_CLOUDSCRAPER = os.environ.get("EWAYS_USE_CLOUDSCRAPER", "false").lower() == "true"  # اختیاری
 
 if DISABLE_TLS_WARNINGS:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -211,30 +218,144 @@ def get_selected_categories_according_to_selection(parsed_selection, all_cats):
     return scrape_categories, transfer_categories
 
 # ==============================================================================
-# لاگین به eways
+# لاگین به eways (مقاوم برای GitHub Actions)
 # ==============================================================================
 def login_eways(username, password):
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': f"{BASE_URL}/",
-        'X-Requested-With': 'XMLHttpRequest',
-        'Accept-Language': 'en-US,en;q=0.9,fa;q=0.8'
-    })
-    # eways SSL مشکل CA دارد؛ همین را نگه می‌داریم
+    # امکان عبور از کپچا/OTP با کوکی مرورگر (اختیاری)
+    EWAYS_COOKIE = os.environ.get("EWAYS_COOKIE", "").strip()  # مثال: "Aut=...; other=..."
+
+    # Session: ترجیحاً requests، در صورت نیاز cloudscraper (اختیاری)
+    session = None
+    if EWAYS_USE_CLOUDSCRAPER:
+        try:
+            import cloudscraper
+            session = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
+            logger.info("🧩 cloudscraper فعال شد.")
+        except Exception as e:
+            logger.warning(f"⚠️ cloudscraper در دسترس نیست/خطا: {e}. از requests استفاده می‌کنیم.")
+            session = requests.Session()
+    else:
+        session = requests.Session()
+
+    # SSL سایت مشکل CA دارد
     session.verify = False
-    logger.info("⏳ در حال لاگین به پنل eways ...")
-    resp = session.post(f"{BASE_URL}/User/Login",
-                        data={"UserName": username, "Password": password, "RememberMe": "true"},
-                        timeout=30)
-    if resp.status_code != 200:
-        logger.error(f"❌ لاگین ناموفق! کد وضعیت: {resp.status_code} - متن پاسخ: {resp.text[:200]}")
+
+    # پروکسی‌ها
+    session.trust_env = EWAYS_USE_ENV_PROXIES  # اگر می‌خوای از HTTPS_PROXY/HTTP_PROXY استفاده کنی، این رو true کن
+    if EWAYS_PROXY:
+        session.proxies.update({'http': EWAYS_PROXY, 'https': EWAYS_PROXY})
+
+    # Retry شبکه برای قطع و وصل‌های موقت
+    retry_conf = Retry(
+        total=3, connect=3, read=3,
+        backoff_factor=0.8,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=frozenset(["GET", "POST"])
+    )
+    adapter = HTTPAdapter(max_retries=retry_conf)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+    # هدرهای شبیه مرورگر معمولی (بدون X-Requested-With در لاگین)
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Referer': f"{BASE_URL}/User/Login",
+        'Origin': BASE_URL,
+    })
+
+    def _add_cookie_header_to_jar(cookie_header, domain="panel.eways.co"):
+        if not cookie_header:
+            return
+        for part in cookie_header.split(';'):
+            part = part.strip()
+            if '=' not in part:
+                continue
+            k, v = part.split('=', 1)
+            session.cookies.set(k.strip(), v.strip(), domain=domain, path='/')
+
+    try:
+        # اگر کوکی آماده داری اول تست کن
+        if EWAYS_COOKIE:
+            logger.info("🔑 استفاده از کوکی محیطی برای عبور از لاگین ...")
+            _add_cookie_header_to_jar(EWAYS_COOKIE)
+            try:
+                test = session.get(SOURCE_CATS_API_URL, timeout=20, allow_redirects=False)
+                if test.status_code in (200, 302, 304):
+                    logger.info("✅ کوکی معتبر است. لاگین را رد می‌کنیم.")
+                    return session
+                else:
+                    logger.warning(f"⚠️ کوکی معتبر نبود (status={test.status_code}). ادامه با لاگین معمولی.")
+            except Exception as e:
+                logger.warning(f"⚠️ تست کوکی خطا داد: {e}. ادامه با لاگین.")
+
+        logger.info("⏳ در حال لاگین به پنل eways ...")
+
+        # Preflight
+        try:
+            session.get(f"{BASE_URL}/", timeout=15, allow_redirects=True)
+        except Exception:
+            pass
+        r1 = session.get(f"{BASE_URL}/User/Login", timeout=20, allow_redirects=True)
+
+        # تلاش برای گرفتن CSRF (اگر وجود داشته باشد)
+        csrf_token = None
+        try:
+            soup = BeautifulSoup(r1.text or "", 'lxml')
+            tok = soup.select_one('input[name="__RequestVerificationToken"]')
+            if tok and tok.get('value'):
+                csrf_token = tok['value']
+                logger.debug("🔐 CSRF token یافت شد.")
+        except Exception:
+            pass
+
+        form_data = {
+            "UserName": username,
+            "Password": password,
+            "RememberMe": "true",  # در صورت نیاز "on" را هم می‌توان امتحان کرد
+        }
+        if csrf_token:
+            form_data["__RequestVerificationToken"] = csrf_token
+
+        # مهم: ریدایرکت را خودمان هندل کنیم تا در resolve_redirects تایم‌اوت نخوریم
+        resp = session.post(f"{BASE_URL}/User/Login",
+                            data=form_data,
+                            timeout=(10, 40),  # 10s connect, 40s read
+                            allow_redirects=False)
+
+        logger.info(f"🔁 پاسخ لاگین: status={resp.status_code} | Location={resp.headers.get('Location', '')}")
+
+        # دنبال‌کردن یک ریدایرکت (در صورت نیاز)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            next_url = urljoin(BASE_URL, resp.headers.get('Location', '/'))
+            r2 = session.get(next_url, timeout=40, allow_redirects=True)
+            logger.info(f"➡️ دنبال‌کردن ریدایرکت به: {next_url} | status={r2.status_code}")
+
+        # بررسی کوکی Aut
+        if 'Aut' in session.cookies:
+            logger.info("✅ لاگین موفق! کوکی Aut دریافت شد.")
+            return session
+
+        # گاهی لاگین موفق است ولی نام کوکی متفاوت/مسیر دیگر
+        cats_check = session.get(SOURCE_CATS_API_URL, timeout=20, allow_redirects=False)
+        if cats_check.status_code in (200, 302, 304):
+            logger.info("✅ به‌نظر سشن معتبر است (چک دسته‌ها موفق).")
+            return session
+
+        # تشخیص احتمالی کپچا/چلنچ
+        short = (resp.text or "")[:300].lower()
+        if "captcha" in short or "turnstile" in short or "cf_chl" in short:
+            logger.error("⚠️ احتمال کپچا/Cloudflare challenge. راهکار: EWAYS_COOKIE از مرورگر یا cloudscraper/پروکسی.")
+        logger.error(f"❌ لاگین ناموفق. status={resp.status_code}, متن کوتاه: {(resp.text or '')[:200]}")
         return None
-    if 'Aut' in session.cookies:
-        logger.info("✅ لاگین موفق! کوکی Aut دریافت شد.")
-        return session
-    logger.error("❌ کوکی Aut دریافت نشد.")
-    return None
+
+    except requests.exceptions.ReadTimeout as e:
+        logger.error(f"⏱️ ReadTimeout در لاگین. احتمالاً WAF/سرعت پایین یا بلاک IP. جزئیات: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"❌ خطای لاگین: {e}")
+        return None
 
 # ==============================================================================
 # دسته‌ها از eways
