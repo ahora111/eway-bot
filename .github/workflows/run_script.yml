@@ -14,39 +14,40 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # =========================================================
-    # 👇 بخش اضافه شده: ست کردن IP دستی برای دور زدن مشکل DNS
-    # =========================================================
     - name: Override DNS for eways
       run: |
         echo "79.175.182.57 panel.eways.co" | sudo tee -a /etc/hosts
         echo "✅ Hosts file updated:"
         grep eways /etc/hosts
-    # =========================================================
 
     - name: Connection Test
       run: |
         echo "--- Testing Ping ---"
         ping -c 3 panel.eways.co || true
-        echo "--- Testing HTTP(S) Connection ---"
-        curl -v --max-time 10 https://panel.eways.co || true
-    
+        echo "--- Testing HTTPS Connection ---"
+        curl -v --max-time 15 https://panel.eways.co || true
+
+    - name: Prepare cache file
+      run: |
+        touch products_cache.json
+
     - name: Cache products JSON
       uses: actions/cache@v4
       with:
         key: products-cache-${{ hashFiles('products_cache.json') }}
-        restore-keys: products-cache-
+        restore-keys: |
+          products-cache-
         path: products_cache.json
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.x'
+        python-version: '3.11'
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 tqdm tenacity lxml
+        pip install requests beautifulsoup4 tqdm tenacity lxml certifi urllib3
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
     - name: Run script
@@ -54,10 +55,9 @@ jobs:
         WC_API_URL: ${{ secrets.WC_API_URL }}
         WC_CONSUMER_KEY: ${{ secrets.WC_CONSUMER_KEY }}
         WC_CONSUMER_SECRET: ${{ secrets.WC_CONSUMER_SECRET }}
-        EWAYS_AUTH_TOKEN: ${{ secrets.EWAYS_AUTH_TOKEN }}
         EWAYS_USERNAME: ${{ secrets.EWAYS_USERNAME }}
         EWAYS_PASSWORD: ${{ secrets.EWAYS_PASSWORD }}
-        SELECTED_TREE: "1582:(21151-allz,1584-all-allz);16777:all-allz;4882:all-allz;16778:22570-all-allz"
+        SELECTED_IDS_STRING: "1582:21151-allz,1584-all-allz|16777:all-allz|4882:all-allz|16778:22570-all-allz"
       run: python main.py
 
     - name: Print logs for debugging
