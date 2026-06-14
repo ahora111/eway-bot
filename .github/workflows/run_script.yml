@@ -5,31 +5,41 @@ on:
     branches: [ main ]
   workflow_dispatch:
   schedule:
-    - cron: '*/20 * * * *'  # هر 5 دقیقه (اگر نخواید، comment کنید)
+    - cron: '*/20 * * * *'  # هر 20 دقیقه
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4  # بروزرسانی به v4
+    - uses: actions/checkout@v4
 
-
-    - name: DNS Test
+    # =========================================================
+    # 👇 بخش اضافه شده: ست کردن IP دستی برای دور زدن مشکل DNS
+    # =========================================================
+    - name: Override DNS for eways
       run: |
-        nslookup panel.eways.co || true
+        echo "79.175.182.57 panel.eways.co" | sudo tee -a /etc/hosts
+        echo "✅ Hosts file updated:"
+        grep eways /etc/hosts
+    # =========================================================
+
+    - name: Connection Test
+      run: |
+        echo "--- Testing Ping ---"
+        ping -c 3 panel.eways.co || true
+        echo "--- Testing HTTP(S) Connection ---"
         curl -v --max-time 10 https://panel.eways.co || true
-        curl -v --max-time 10 http://panel.eways.co || true
     
     - name: Cache products JSON
-      uses: actions/cache@v4  # بروزرسانی به v4
+      uses: actions/cache@v4
       with:
-        key: products-cache-${{ hashFiles('products_cache.json') }}  # کلید بر اساس محتوای فایل
-        restore-keys: products-cache-  # برای بازیابی اگر کلید دقیق نبود
-        path: products_cache.json  # فایلی که کش می‌شود
+        key: products-cache-${{ hashFiles('products_cache.json') }}
+        restore-keys: products-cache-
+        path: products_cache.json
 
     - name: Set up Python
-      uses: actions/setup-python@v5  # بروزرسانی به v5
+      uses: actions/setup-python@v5
       with:
         python-version: '3.x'
 
@@ -47,9 +57,9 @@ jobs:
         EWAYS_AUTH_TOKEN: ${{ secrets.EWAYS_AUTH_TOKEN }}
         EWAYS_USERNAME: ${{ secrets.EWAYS_USERNAME }}
         EWAYS_PASSWORD: ${{ secrets.EWAYS_PASSWORD }}
-        SELECTED_TREE: "1582:(21151-allz,1584-all-allz);16777:all-allz;4882:all-allz;16778:22570-all-allz"  # فرمت جدید برای درخت – ویرایش کنید
+        SELECTED_TREE: "1582:(21151-allz,1584-all-allz);16777:all-allz;4882:all-allz;16778:22570-all-allz"
       run: python main.py
 
     - name: Print logs for debugging
-      if: always()  # حتی اگر شکست بخوره، لاگ‌ها رو نشون بده
-      run: cat app.log || true  # چاپ محتوای app.log در output Actions
+      if: always()
+      run: cat app.log || true
