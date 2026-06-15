@@ -14,6 +14,24 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Debug hosts and connectivity
+      run: |
+        echo "=== HOSTS FILE ==="
+        cat /etc/hosts
+        echo ""
+        echo "=== CURL TO WOO IP DIRECT ==="
+        curl -4 -v --connect-timeout 10 --max-time 15 \
+          --resolve "www.pakhshemobile.ir:443:195.28.10.107" \
+          https://www.pakhshemobile.ir/ || true
+        echo ""
+        echo "=== PING WOO IP DIRECT ==="
+        ping -c 3 195.28.10.107 || true
+        echo ""
+        echo "=== CURL WOO WITHOUT SNI ==="
+        curl -4 -v --connect-timeout 10 --max-time 15 \
+          https://195.28.10.107/ -k \
+          -H "Host: www.pakhshemobile.ir" || true
+          
     - name: Override DNS for eways
       run: |
         echo "${{ vars.EWAYS_PANEL_IP }} panel.eways.co" | sudo tee -a /etc/hosts > /dev/null
