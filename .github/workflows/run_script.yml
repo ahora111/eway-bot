@@ -16,20 +16,30 @@ jobs:
 
     - name: Override DNS for eways
       run: |
-        echo "79.175.182.57 panel.eways.co" | sudo tee -a /etc/hosts
-        echo "✅ Hosts file updated:"
-        grep eways /etc/hosts
+        echo "${{ vars.EWAYS_PANEL_IP }} panel.eways.co" | sudo tee -a /etc/hosts > /dev/null
+        echo "✅ Eways hosts entry added."
 
-    - name: Connection Test
+    - name: Override DNS for Woo
       run: |
-        echo "--- Testing Ping ---"
-        ping -c 3 panel.eways.co || true
-        echo "--- Testing HTTPS Connection ---"
-        curl -v --max-time 15 https://panel.eways.co || true
+        echo "${{ vars.WC_SITE_IP }} www.pakhshemobile.ir pakhshemobile.ir" | sudo tee -a /etc/hosts > /dev/null
+        echo "✅ Woo hosts entry added."
+
+    - name: Test Eways Connection
+      run: |
+        echo "--- Eways test ---"
+        curl -4 -I -L --connect-timeout 10 --max-time 20 https://panel.eways.co || true
+
+    - name: Test Woo Connection
+      run: |
+        echo "--- Woo root ---"
+        curl -4 -I -L --connect-timeout 10 --max-time 20 https://www.pakhshemobile.ir || true
+        echo "--- Woo wp-json ---"
+        curl -4 -I -L --connect-timeout 10 --max-time 20 https://www.pakhshemobile.ir/wp-json/ || true
+        echo "--- Woo wc api ---"
+        curl -4 -I -L --connect-timeout 10 --max-time 20 https://www.pakhshemobile.ir/wp-json/wc/v3 || true
 
     - name: Prepare cache file
-      run: |
-        touch products_cache.json
+      run: touch products_cache.json
 
     - name: Cache products JSON
       uses: actions/cache@v4
