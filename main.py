@@ -652,18 +652,62 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
 # کش محصولات
 # ==============================================================================
 def load_cache():
-    if os.path.exists(CACHE_FILE):
+    """
+    بارگذاری امن کش محصولات.
+    فایل خالی/خراب باعث توقف برنامه نمی‌شود.
+    """
+    if not os.path.exists(CACHE_FILE):
+        logger.info("⚠️ فایل کش پیدا نشد؛ کش خالی استفاده می‌شود.")
+        return {}
+
+    try:
+        if os.path.getsize(CACHE_FILE) == 0:
+            logger.warning("⚠️ فایل کش خالی است؛ کش خالی استفاده می‌شود.")
+            return {}
+
         with open(CACHE_FILE, 'r', encoding='utf-8') as f:
             cache = json.load(f)
-            logger.info(f"✅ کش بارگذاری شد. تعداد: {len(cache)}")
-            return cache
-    logger.info("⚠️ کش پیدا نشد.")
-    return {}
+
+        if not isinstance(cache, dict):
+            logger.warning("⚠️ ساختار products_cache.json معتبر نیست؛ کش خالی استفاده می‌شود.")
+            return {}
+
+        logger.info(f"✅ کش بارگذاری شد. تعداد: {len(cache)}")
+        return cache
+
+    except json.JSONDecodeError as e:
+        logger.error(f"⚠️ products_cache.json خراب یا نامعتبر است: {e}")
+        logger.warning("↩️ برنامه با کش خالی ادامه می‌دهد.")
+        return {}
+
+    except OSError as e:
+        logger.error(f"⚠️ خطا در خواندن فایل کش: {e}")
+        return {}
+
 
 def save_cache(products):
-    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(products, f, ensure_ascii=False, indent=4)
-    logger.info(f"✅ کش ذخیره شد. تعداد: {len(products)}")
+    """
+    ذخیره امن کش محصولات.
+    ابتدا فایل موقت نوشته می‌شود و سپس جایگزین فایل اصلی می‌شود.
+    """
+    temp_file = CACHE_FILE + ".tmp"
+
+    try:
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(products, f, ensure_ascii=False, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(temp_file, CACHE_FILE)
+        logger.info(f"✅ کش ذخیره شد. تعداد: {len(products)}")
+
+    except Exception as e:
+        logger.error(f"❌ خطا در ذخیره کش: {e}")
+        try:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+        except Exception:
+            pass
 
 # ==============================================================================
 # رَپر ووکامرس (Query Auth + Session + SSL verify)
