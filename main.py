@@ -62,7 +62,7 @@ BASE_URL = "https://panel.eways.co"
 SOURCE_CATS_API_URL = f"{BASE_URL}/Store/GetCategories"
 PRODUCT_DETAIL_URL_TEMPLATE = f"{BASE_URL}/Store/Detail/{{cat_id}}/{{product_id}}"
 
-WC_API_URL = os.environ.get("WC_API_URL") or "https://www.pakhshemobile.ir/wp-json/wc/v3"
+WC_API_URL = os.environ.get("WC_API_URL") or "https://www.dev.pakhshemobile.ir//wp-json/wc/v3"
 WC_CONSUMER_KEY = os.environ.get("WC_CONSUMER_KEY") or "ck_xxx"
 WC_CONSUMER_SECRET = os.environ.get("WC_CONSUMER_SECRET") or "cs_xxx"
 
