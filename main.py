@@ -13,6 +13,8 @@ from logging.handlers import RotatingFileHandler
 from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
 from collections import defaultdict, Counter
 from urllib.parse import urljoin
+from concurrent.futures import ThreadPoolExecutor
+import html as html_lib
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -80,6 +82,26 @@ REFRESH_SPECS_DAYS = int(os.environ.get("REFRESH_SPECS_DAYS", "7"))
 ALWAYS_DETAILS_FOR_NEW = os.environ.get("ALWAYS_DETAILS_FOR_NEW", "true").lower() == "true"
 CREATE_WITHOUT_DETAILS = os.environ.get("CREATE_WITHOUT_DETAILS", "false").lower() == "true"
 
+# ==============================================================================
+# تنظیمات تصاویر: گالری چندعکسی + فیلتر عکس مرده + ضدتکرار کتابخانه رسانه
+# ==============================================================================
+MAX_IMAGES_PER_PRODUCT = int(os.environ.get("MAX_IMAGES_PER_PRODUCT", "5"))        # سقف عکس هر محصول؛ 0 = بدون محدودیت
+DEAD_IMAGE_CHECK = os.environ.get("DEAD_IMAGE_CHECK", "true").lower() == "true"    # فیلتر عکس مرده قبل از ارسال
+DEAD_IMAGE_TIMEOUT = float(os.environ.get("DEAD_IMAGE_TIMEOUT", "10"))
+DEAD_IMAGE_WORKERS = int(os.environ.get("DEAD_IMAGE_WORKERS", "8"))
+GALLERY_BACKFILL = os.environ.get("GALLERY_BACKFILL", "true").lower() == "true"    # تکمیل گالری محصولات موجود (پخش‌شده)
+MAX_IMAGE_UPDATES_PER_RUN = int(os.environ.get("MAX_IMAGE_UPDATES_PER_RUN", "40")) # سقف آپدیت گالری در هر اجرا؛ 0 = بی‌نهایت
+IMAGES_REPLACE_FOREIGN = os.environ.get("IMAGES_REPLACE_FOREIGN", "true").lower() == "true"  # جایگزینی عکس‌های دستی/خارجی با گالری منبع
+
+# ==============================================================================
+# تنظیمات ناموجود/حذف محصول
+# ==============================================================================
+UNAVAILABLE_MODE = os.environ.get("UNAVAILABLE_MODE", "delete")                     # delete = حذف کامل | outofstock = فقط ناموجود (رفتار قبلی)
+UNAVAILABLE_CONFIRM_RUNS = int(os.environ.get("UNAVAILABLE_CONFIRM_RUNS", "2"))    # اجراهای متوالی تأیید قبل از حذف
+DELETE_ABSENT_FROM_SOURCE = os.environ.get("DELETE_ABSENT_FROM_SOURCE", "true").lower() == "true"  # محصولاتی که کلاً از پنل حذف شده‌اند
+WP_MEDIA_DELETE = os.environ.get("WP_MEDIA_DELETE", "true").lower() == "true"      # حذف قطعی فایل تصاویر از کتابخانه رسانه
+CONFIRM_STATE_FILE = 'unavailable_confirm.json'
+
 class SimpleRateLimiter:
     def __init__(self, min_interval):
         self.min_interval = float(min_interval)
@@ -141,6 +163,186 @@ def extract_ids_from_href(href):
     if not m:
         return None, None
     return int(m.group(1)), m.group(2)
+
+# ==============================================================================
+# ابزارهای تصاویر: نام فایل، فیلتر عکس مرده، گالری، payload ضدتکرار
+# ==============================================================================
+# وردپرس برای فایل تکراری -1/-2 و برای تصاویر بزرگ -scaled اضافه می‌کند
+WP_SUFFIX_PATTERN = re.compile(r'-(?:\d+|scaled)(\.(?:jpg|jpeg|png|webp|gif))$', re.IGNORECASE)
+
+def img_basename(url):
+    """نام فایل نرمال‌شده برای مقایسه ضدتکرار (بدون پسوندهای وردپرس)."""
+    if not url:
+        return ''
+    name = str(url).split('?', 1)[0].split('#', 1)[0].rstrip('/')
+    name = name.rsplit('/', 1)[-1].lower()
+    name = WP_SUFFIX_PATTERN.sub(r'\1', name)
+    return name
+
+def img_basename_ordered(urls):
+    return [img_basename(u) for u in (urls or [])]
+
+image_check_session = requests.Session()
+
+def check_image_alive(url):
+    """بررسی زنده بودن URL تصویر (HEAD و در صورت نیاز GET با Range)."""
+    headers = {"User-Agent": "Mozilla/5.0 (eways-bot image check)"}
+    try:
+        r = image_check_session.head(url, timeout=DEAD_IMAGE_TIMEOUT, allow_redirects=True, headers=headers)
+        if r.status_code == 200:
+            ctype = (r.headers.get("Content-Type") or "").lower()
+            return (not ctype) or ctype.startswith("image/")
+    except requests.exceptions.RequestException:
+        pass
+    try:
+        r = image_check_session.get(url, timeout=DEAD_IMAGE_TIMEOUT, allow_redirects=True,
+                                    stream=True, headers={**headers, "Range": "bytes=0-0"})
+        ok = r.status_code in (200, 206)
+        ctype = (r.headers.get("Content-Type") or "").lower()
+        r.close()
+        return ok and ((not ctype) or ctype.startswith("image/"))
+    except requests.exceptions.RequestException:
+        return False
+
+def filter_alive_images(urls):
+    """بررسی موازی تصاویر؛ خروجی: (لیست زنده، لیست مرده) با حفظ ترتیب."""
+    urls = [u for u in (urls or []) if u]
+    if not DEAD_IMAGE_CHECK or not urls:
+        return list(urls), []
+    with ThreadPoolExecutor(max_workers=max(1, DEAD_IMAGE_WORKERS)) as pool:
+        results = dict(zip(urls, pool.map(check_image_alive, urls)))
+    alive = [u for u in urls if results.get(u)]
+    dead = [u for u in urls if not results.get(u)]
+    if dead:
+        logger.info(f"🖼️ فیلتر تصاویر: {len(alive)} زنده | {len(dead)} مرده (از ارسال حذف شد)")
+    return alive, dead
+
+def extract_gallery_urls(soup):
+    """استخراج گالری تصاویر از صفحه جزئیات ایویز (ShowPhotoGalleryDialog یا og:image)."""
+    urls = []
+    try:
+        img = soup.select_one('div.goods-image img[onclick*="ShowPhotoGalleryDialog"]')
+        if img:
+            onclick = html_lib.unescape(img.get('onclick', '') or '')
+            urls = re.findall(r'https?://[^"\'\s]+', onclick)
+    except Exception as e:
+        logger.debug(f"⚠️ خطا در پارس گالری onclick: {e}")
+    if not urls:
+        try:
+            urls = [m.get('content') for m in soup.select('meta[property="og:image"]') if m.get('content')]
+        except Exception:
+            pass
+    seen, unique = set(), []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            unique.append(u)
+    return unique
+
+def trim_gallery(urls):
+    """محدودسازی تعداد عکس هر محصول (عکس اول = تصویر شاخص)."""
+    urls = [u for u in (urls or []) if u]
+    if MAX_IMAGES_PER_PRODUCT and len(urls) > MAX_IMAGES_PER_PRODUCT:
+        return urls[:MAX_IMAGES_PER_PRODUCT]
+    return urls
+
+def wc_image_basenames(existing_images):
+    """لیست ترتیبی نام فایل تصاویر فعلی محصول در ووکامرس."""
+    out = []
+    for img in (existing_images or []):
+        if isinstance(img, dict) and img.get('src'):
+            out.append(img_basename(img['src']))
+    return out
+
+def dedupe_by_basename(urls):
+    """حذف URL های هم‌نام (فایل تکراری) با حفظ ترتیب."""
+    seen, out = set(), []
+    for u in (urls or []):
+        b = img_basename(u)
+        if b and b not in seen:
+            seen.add(b)
+            out.append(u)
+    return out
+
+def build_images_payload(desired_urls, existing_images):
+    """
+    ساخت آرایه images برای ووکامرس:
+    - عکس‌های موجود با id (بدون دانلود مجدد → بدون تکرار در کتابخانه رسانه)
+    - فقط URL های واقعاً جدید با src
+    خروجی: (payload, orphan_ids) — یتیم‌ها بعد از موفقیت PUT حذف می‌شوند.
+    """
+    ex_map = {}
+    for img in (existing_images or []):
+        if isinstance(img, dict) and img.get('id') and img.get('src'):
+            ex_map.setdefault(img_basename(img['src']), img['id'])
+    payload, referenced = [], set()
+    for u in (desired_urls or []):
+        b = img_basename(u)
+        if b in ex_map:
+            payload.append({"id": ex_map[b]})
+            referenced.add(ex_map[b])
+        else:
+            payload.append({"src": u})
+    orphans = [img['id'] for img in (existing_images or [])
+               if isinstance(img, dict) and img.get('id') and img['id'] not in referenced]
+    return payload, orphans
+
+def get_unavailable_products(session, category_id):
+    """
+    دریافت لیست محصولات ناموجود (تأییدشده) یک دسته از API لِیزی ایویز (Available=0).
+    خروجی: (موفق بودن دریافت کامل؟, دیکشنری pid → نام)
+    """
+    unavailable = {}
+    lazy_page = 1
+    referer_url = f"{BASE_URL}/Store/List/{category_id}/2/2/0/0/0/10000000000"
+    while lazy_page <= 50:  # محدودیت ایمنی
+        data = {
+            "ListViewType": 0,
+            "CatId": category_id,
+            "Order": 2,
+            "Sort": 2,
+            "LazyPageIndex": lazy_page,
+            "PageIndex": 0,
+            "PageSize": 24,
+            "Available": 0,
+            "MinPrice": 0,
+            "MaxPrice": 10000000000,
+            "IsLazyLoading": "true"
+        }
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": referer_url,
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+        }
+        try:
+            resp = session.post(f"{BASE_URL}/Store/ListLazy", data=data, headers=headers, timeout=30)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ خطای شبکه در دریافت ناموجودهای دسته {cat_label(category_id)}: {e}")
+            return False, {}
+        if resp.status_code != 200:
+            logger.error(f"❌ دریافت ناموجودهای دسته {cat_label(category_id)} - status: {resp.status_code}")
+            return False, {}
+        try:
+            result = resp.json()
+        except Exception:
+            logger.error(f"❌ JSON ناموجودهای دسته {cat_label(category_id)} نامعتبر است.")
+            return False, {}
+        if not isinstance(result, dict):
+            # صفحه خارج از محدوده → پایان طبیعی لیست (null)؛ ولی صفحه اول null یعنی مشکل واقعی
+            if lazy_page == 1:
+                logger.warning(f"⚠️ پاسخ ناموجودهای دسته {cat_label(category_id)} نامعتبر است (صفحه اول).")
+                return False, {}
+            break
+        goods = result.get("Goods") or []
+        if not goods:
+            break
+        for g in goods:
+            if g.get("Availability", True) is False:
+                unavailable[str(g.get("Id"))] = g.get("Name", "")
+        lazy_page += 1
+        time.sleep(random.uniform(0.05, 0.2))
+    return True, unavailable
 
 def cat_label(catid):
     if catid is None:
@@ -487,13 +689,16 @@ def get_product_details(session, cat_id, product_id):
                     if key and value:
                         specs[key] = value
 
-        return specs, canonical_cat_id
+        # گالری تصاویر از صفحه جزئیات (عکس اول = شاخص)
+        gallery_urls = extract_gallery_urls(soup)
+
+        return specs, canonical_cat_id, gallery_urls
     except requests.exceptions.RequestException as e:
         logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: {e}. Retry...")
         raise
     except Exception as e:
         logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
-        return {}, None
+        return {}, None, []
 
 # ==============================================================================
 # استخراج محصولات دسته (HTML + Lazy) - Light
@@ -710,6 +915,33 @@ def save_cache(products):
             pass
 
 # ==============================================================================
+# وضعیت تأیید حذف محصولات ناموجود (شمارنده اجراهای متوالی)
+# ==============================================================================
+def load_confirm_state():
+    """بارگذاری وضعیت تأیید حذف؛ فایل خراب برنامه را متوقف نمی‌کند."""
+    try:
+        if os.path.exists(CONFIRM_STATE_FILE) and os.path.getsize(CONFIRM_STATE_FILE) > 0:
+            with open(CONFIRM_STATE_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception as e:
+        logger.warning(f"⚠️ فایل وضعیت تأیید خوانده نشد ({e})؛ خالی استفاده می‌شود.")
+    return {}
+
+def save_confirm_state(state):
+    """ذخیره امن وضعیت تأیید حذف (نوشتن اتمی با فایل موقت)."""
+    temp_file = CONFIRM_STATE_FILE + ".tmp"
+    try:
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_file, CONFIRM_STATE_FILE)
+    except Exception as e:
+        logger.error(f"❌ خطا در ذخیره وضعیت تأیید: {e}")
+
+# ==============================================================================
 # رَپر ووکامرس (Query Auth + Session + SSL verify)
 # ==============================================================================
 wc_session = requests.Session()
@@ -730,6 +962,56 @@ def wc_request(method, path, params=None, json=None, timeout=30, allow_redirects
     res = wc_session.request(method=method.upper(), url=url, params=params, json=json,
                              auth=auth, timeout=timeout, allow_redirects=allow_redirects)
     return res
+
+# ==============================================================================
+# حذف فایل‌های رسانه (wp/v2) برای آزادسازی فضای هاست
+# ==============================================================================
+def _wp_v2_base_url():
+    if "/wc/v3" in WC_API_URL:
+        return WC_API_URL.split("/wc/v3")[0].rstrip('/') + "/wp/v2"
+    return None
+
+WP_API_URL = _wp_v2_base_url()
+_wp_media_auth_warned = False
+
+def wp_request(method, path, params=None, timeout=30):
+    """درخواست به REST وردپرس (wp/v2) با همان کلیدهای ووکامرس."""
+    if not WP_API_URL:
+        return None
+    url = f"{WP_API_URL}{path}"
+    params = dict(params or {})
+    params.update({"consumer_key": WC_CONSUMER_KEY, "consumer_secret": WC_CONSUMER_SECRET})
+    try:
+        return wc_session.request(method=method.upper(), url=url, params=params,
+                                  auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET), timeout=timeout)
+    except Exception as e:
+        logger.error(f"❌ خطای شبکه wp/v2 ({path}): {e}")
+        return None
+
+def delete_media_attachments(media_ids):
+    """حذف قطعی پیوست‌های رسانه برای آزادسازی فضا. خروجی: تعداد حذف‌شده."""
+    global _wp_media_auth_warned
+    media_ids = [int(m) for m in (media_ids or []) if m]
+    if not WP_MEDIA_DELETE or not media_ids:
+        return 0
+    deleted = 0
+    for mid in media_ids:
+        res = wp_request("delete", f"/media/{mid}", params={"force": "true"}, timeout=40)
+        if res is None:
+            break
+        if res.status_code in (200, 201, 404):  # 404 = قبلاً حذف شده
+            deleted += 1
+            continue
+        if res.status_code in (401, 403):
+            if not _wp_media_auth_warned:
+                logger.warning(
+                    "⚠️ حذف فایل رسانه با کلیدهای ووکامرس مجاز نشد (401/403 روی wp/v2). "
+                    "فایل‌های تصویر در هاست باقی می‌مانند. برای پاک‌سازی خودکار، یک Application Password در وردپرس بسازید."
+                )
+                _wp_media_auth_warned = True
+            break
+        logger.error(f"❌ حذف رسانه {mid} ناموفق: {res.status_code} - {res.text[:150]}")
+    return deleted
 
 # ==============================================================================
 # ووکامرس: دسته‌ها و محصولات
@@ -883,8 +1165,39 @@ def process_price(price_value):
     return str(int(round(new_price, -4)))
 
 # ==============================================================================
-# ارسال/آپدیت ووکامرس با هندلینگ SKU تکراری و تصاویر مشروط
+# ارسال/آپدیت ووکامرس (تصاویر جداگانه تا خطای تصویر، کل آپدیت را خراب نکند)
+# خروجی: (ok, images_ok) — images_ok: None=تصویری در کار نبود، True/False=وضعیت تصاویر
 # ==============================================================================
+def _update_payload(data, include_images=True):
+    payload = {
+        "regular_price": data["regular_price"],
+        "stock_quantity": data["stock_quantity"],
+        "stock_status": data["stock_status"],
+        "categories": data.get("categories", []),
+    }
+    if data.get("attributes") is not None:
+        payload["attributes"] = data["attributes"]
+    if data.get("tags") is not None:
+        payload["tags"] = data["tags"]
+    if include_images and data.get("images"):
+        payload["images"] = data["images"]
+    if MIGRATE_REMOTE_SKU_TO_CANONICAL:
+        payload["sku"] = data["sku"]
+    return payload
+
+def _put_images_safely(wc_id, data, sku, stats):
+    """PUT فقط تصاویر روی محصول موجود. خروجی: True/False."""
+    try:
+        res = wc_request("put", f"/products/{wc_id}", json={"images": data["images"]}, timeout=60)
+        res.raise_for_status()
+        return True
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"   ⚠️ ارسال تصاویر برای {sku} ناموفق بود (محصول بدون تغییر ماند): {str(e)[:200]}")
+        return False
+    except Exception as e:
+        logger.error(f"   ⚠️ خطای ارسال تصاویر برای {sku}: {e}")
+        return False
+
 @retry(
     retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)),
     stop=stop_after_attempt(3),
@@ -894,35 +1207,32 @@ def process_price(price_value):
 def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
     try:
         if existing_product_id:
-            update_data = {
-                "regular_price": data["regular_price"],
-                "stock_quantity": data["stock_quantity"],
-                "stock_status": data["stock_status"],
-                "categories": data.get("categories", []),
-            }
-            if data.get("attributes") is not None:
-                update_data["attributes"] = data["attributes"]
-            if data.get("tags") is not None:
-                update_data["tags"] = data["tags"]
-            # تصاویر فقط اگر عمداً گذاشته شده باشد
-            if data.get("images"):
-                update_data["images"] = data["images"]
-            if MIGRATE_REMOTE_SKU_TO_CANONICAL:
-                update_data["sku"] = data["sku"]
-
-            res = wc_request("put", f"/products/{existing_product_id}", json=update_data, timeout=40)
+            res = wc_request("put", f"/products/{existing_product_id}",
+                             json=_update_payload(data, include_images=True), timeout=40)
             res.raise_for_status()
             with stats['lock']: stats['updated'] += 1
+            return (True, True if data.get("images") else None)
         else:
             # ساخت: ترجیحاً با جزئیات؛ اگر نداریم و اجازه false است، رد
             if (data.get("attributes") is None) and (not CREATE_WITHOUT_DETAILS):
                 logger.warning(f"   ⚠️ ساخت {sku} رد شد؛ جزئیات نداریم و CREATE_WITHOUT_DETAILS=false است.")
                 with stats['lock']: stats['failed'] += 1
-                return
+                return (False, None)
+            # ساخت همیشه بدون تصویر تا خطای تصویر باعث fail کل نشود
+            create_data = {k: v for k, v in data.items() if k != "images"}
             try:
-                res = wc_request("post", "/products", json=data, timeout=40)
+                res = wc_request("post", "/products", json=create_data, timeout=40)
                 res.raise_for_status()
                 with stats['lock']: stats['created'] += 1
+                new_id = None
+                try:
+                    new_id = res.json().get("id")
+                except Exception:
+                    pass
+                images_ok = None
+                if data.get("images") and new_id:
+                    images_ok = _put_images_safely(new_id, data, sku, stats)
+                return (True, images_ok)
             except requests.exceptions.HTTPError as e:
                 try:
                     payload = e.response.json()
@@ -932,27 +1242,28 @@ def _send_to_woocommerce(sku, data, stats, existing_product_id=None):
                 resource_id = (payload or {}).get("data", {}).get("resource_id")
                 if code in ("product_invalid_sku", "woocommerce_product_sku_already_exists") and resource_id:
                     logger.info(f"   🔄 SKU تکراری برای {sku}؛ آپدیت روی resource_id={resource_id}")
-                    update_data = {
-                        "regular_price": data["regular_price"],
-                        "stock_quantity": data["stock_quantity"],
-                        "stock_status": data["stock_status"],
-                        "categories": data.get("categories", []),
-                    }
-                    if data.get("attributes") is not None:
-                        update_data["attributes"] = data["attributes"]
-                    if data.get("tags") is not None:
-                        update_data["tags"] = data["tags"]
-                    if data.get("images"):
-                        update_data["images"] = data["images"]
-                    if MIGRATE_REMOTE_SKU_TO_CANONICAL:
-                        update_data["sku"] = data["sku"]
-                    res2 = wc_request("put", f"/products/{resource_id}", json=update_data, timeout=40)
+                    res2 = wc_request("put", f"/products/{resource_id}",
+                                      json=_update_payload(data, include_images=True), timeout=40)
                     res2.raise_for_status()
                     with stats['lock']: stats['updated'] += 1
+                    return (True, True if data.get("images") else None)
                 else:
                     logger.error(f"   ❌ HTTP خطا برای {sku}: {e.response.status_code} - {e.response.text[:300]}")
                     raise
     except requests.exceptions.HTTPError as e:
+        # خطای مخصوص تصویر: بدون تصویر دوباره تلاش می‌کنیم تا قیمت/موجودی حتماً ذخیره شود
+        code = None
+        try:
+            code = e.response.json().get("code")
+        except Exception:
+            pass
+        if code == "woocommerce_product_image_upload_error" and existing_product_id:
+            logger.warning(f"   ⚠️ خطای آپلود تصویر برای {sku}؛ آپدیت بدون تصویر انجام می‌شود و تصاویر در اجرای بعدی تلاش می‌شوند.")
+            res = wc_request("put", f"/products/{existing_product_id}",
+                             json=_update_payload(data, include_images=False), timeout=40)
+            res.raise_for_status()
+            with stats['lock']: stats['updated'] += 1
+            return (True, False)
         logger.error(f"   ❌ HTTP خطا برای {sku}: {e.response.status_code} - {e.response.text[:300]}")
         raise
     except Exception as e:
@@ -1067,11 +1378,13 @@ def process_product_wrapper(args):
 
         # وجود در WC (بدون GET اضافه)
         existing_wc_id = None
+        existing_wcp = None
         candidate_skus = [f"{pref}{pid_str}" for pref in SKU_PREFIXES]
         for s in candidate_skus:
             wcp = wc_by_sku.get(s)
             if wcp:
                 existing_wc_id = wcp.get('id')
+                existing_wcp = wcp
                 break
 
         # جست‌وجوی alt SKU (اختیاری برای سرعت)
@@ -1081,12 +1394,43 @@ def process_product_wrapper(args):
                 logger.info(f"🔎 محصول یافت شد با SKU جایگزین: {alt_sku} → ID={alt_id} (آپدیت به‌جای ساخت)")
                 existing_wc_id = alt_id
 
-        # ارسال تصویر فقط اگر: جدید است یا در WC تصویر ندارد
-        include_images = (existing_wc_id is None) or any(s in wc_missing_image_skus for s in candidate_skus)
+        # ==================================================================
+        # تصاویر: گالری چندعکسی + ضدتکرار (مقایسه نام فایل) + فیلتر عکس مرده
+        # ==================================================================
+        existing_images = (existing_wcp or {}).get('images') or []
+        existing_basenames = wc_image_basenames(existing_images)
+        ex_basename_set = set(existing_basenames)
+
+        src_urls = [abs_url(u) for u in (product.get('images_all') or []) if u]
+        if not src_urls and product.get("image"):
+            src_urls = [abs_url(product.get("image"))]
+        desired_urls = trim_gallery(src_urls)
 
         images_data = None
-        if include_images and product.get("image"):
-            images_data = [{"src": abs_url(product.get("image"))}]
+        orphan_ids = []
+        if desired_urls:
+            dedup_urls = dedupe_by_basename(desired_urls)
+            final_basenames = img_basename_ordered(dedup_urls)
+            if final_basenames == existing_basenames:
+                logger.debug(f"   🖼️ تصاویر {sku} بدون تغییر؛ هیچ درخواستی زده نشد (ضدتکرار).")
+            elif (not IMAGES_REPLACE_FOREIGN) and existing_basenames \
+                    and (not set(existing_basenames).issubset(set(final_basenames))):
+                logger.info(f"   🖼️ تصاویر {sku} دستی/خارجی است؛ دست نخورد (IMAGES_REPLACE_FOREIGN=false).")
+            else:
+                # فقط عکس‌های واقعاً جدید چک می‌شوند؛ عکس‌های موجود روی محصول بدون چک حفظ می‌شوند
+                new_urls = [u for u in dedup_urls if img_basename(u) not in ex_basename_set]
+                if new_urls:
+                    alive_urls, dead_urls = filter_alive_images(new_urls)
+                    if dead_urls:
+                        with stats['lock']: stats['dead_images'] += len(dead_urls)
+                    final_urls = [u for u in dedup_urls if img_basename(u) in ex_basename_set or u in alive_urls]
+                else:
+                    final_urls = dedup_urls  # فقط ترتیب/ترکیب عکس‌های موجود عوض شده (بازچینش با id)
+                if final_urls and img_basename_ordered(final_urls) != existing_basenames:
+                    images_data, orphan_ids = build_images_payload(final_urls, existing_images)
+        elif existing_wc_id is not None and existing_basenames:
+            # منبع عکسی ندارد ولی محصول در WC عکس دارد؛ دست نمی‌زنیم
+            pass
 
         wc_data = {
             "name": product.get('name', 'بدون نام'),
@@ -1104,7 +1448,14 @@ def process_product_wrapper(args):
         if images_data:
             wc_data["images"] = images_data
 
-        _send_to_woocommerce(wc_data['sku'], wc_data, stats, existing_product_id=existing_wc_id)
+        ok_sent, images_ok = _send_to_woocommerce(wc_data['sku'], wc_data, stats, existing_product_id=existing_wc_id)
+        # پاک‌سازی پیوست‌های یتیم (فقط وقتی تصاویر واقعاً با موفقیت اعمال شدند)
+        if ok_sent and images_ok and orphan_ids:
+            n_media = delete_media_attachments(orphan_ids)
+            if n_media:
+                with stats['lock']: stats['media_deleted'] += n_media
+        elif ok_sent and images_ok is False:
+            with stats['lock']: stats['images_failed'] += 1
         if SENDER_SLEEP_SEC > 0:
             time.sleep(random.uniform(0, SENDER_SLEEP_SEC))
     except Exception as e:
@@ -1204,10 +1555,15 @@ def enrich_products_with_details(session, products_by_pid, pids_to_enrich):
             try:
                 p = products_by_pid[pid]
                 cat_for_detail = p.get('detail_hint_cat_id') or p.get('category_id')
-                specs, canonical_id = get_product_details(session, cat_for_detail, pid)
+                specs, canonical_id, gallery = get_product_details(session, cat_for_detail, pid)
                 if canonical_id:
                     p['category_id'] = pick_deepest(p.get('category_id'), p.get('detail_hint_cat_id'), canonical_id)
                 p['specs'] = specs or {}
+                if gallery:
+                    p['images_all'] = gallery
+                elif (not p.get('images_all')) and p.get('image'):
+                    p['images_all'] = [p.get('image')]
+                p['images_ts'] = int(time.time())
                 p['details_ts'] = int(time.time())
                 with lock:
                     stats['ok'] += 1
@@ -1405,6 +1761,26 @@ def main():
     if need_details:
         enrich_products_with_details(session, canonical_products, need_details)
 
+    # تکمیل تدریجی گالری در کش برای محصولات موجودی که هنوز گالری ندارند (پخش‌شده)
+    if GALLERY_BACKFILL:
+        wc_pids = set()
+        for wcp in wc_products:
+            s = (wcp.get('sku') or '')
+            for pref in SKU_PREFIXES:
+                if s.startswith(pref):
+                    wc_pids.add(s[len(pref):])
+                    break
+        missing_gallery = [pid for pid in canonical_products.keys()
+                           if pid in wc_pids and pid not in need_details
+                           and not canonical_products[pid].get('images_all')]
+        if MAX_IMAGE_UPDATES_PER_RUN:
+            missing_gallery = missing_gallery[:MAX_IMAGE_UPDATES_PER_RUN]
+        if missing_gallery:
+            logger.info(f"🖼️ تکمیل گالری در کش برای {len(missing_gallery)} محصول (پخش‌شده در چند اجرا)...")
+            enrich_products_with_details(session, canonical_products, set(missing_gallery))
+        elif wc_pids:
+            logger.info("🖼️ گالری همه محصولات موجود در کش تکمیل شده است.")
+
     # ذخیره کش به‌روز
     updated_cache = {}
     for pid, p in canonical_products.items():
@@ -1449,7 +1825,8 @@ def main():
     logger.info(f"\n🚀 شروع پردازش و ارسال {send_count} قلم به ووکامرس...")
 
     # ——— ارسال ———
-    stats = {'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0, 'outofstock_updated': 0, 'lock': Lock()}
+    stats = {'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0, 'outofstock_updated': 0,
+             'deleted': 0, 'media_deleted': 0, 'dead_images': 0, 'images_failed': 0, 'lock': Lock()}
 
     product_queue = Queue()
     for p in to_send_items.values():
@@ -1473,31 +1850,186 @@ def main():
     for t in threads:
         t.join()
 
-    # ——— ناموجودها ———
-    logger.info("\n🚧 آپدیت ناموجودها ...")
+    # ——— به‌روزرسانی تدریجی گالری محصولات بدون تغییر (پخش‌شده) ———
+    if GALLERY_BACKFILL:
+        logger.info("\n🖼️ بررسی گالری محصولات بدون تغییر ...")
+        backfill_updated = 0
+        backfill_cap = MAX_IMAGE_UPDATES_PER_RUN
+        for pid, p in canonical_products.items():
+            if pid in to_send_items:
+                continue
+            if backfill_cap and backfill_updated >= backfill_cap:
+                logger.info(f"⏸️ سقف {backfill_cap} به‌روزرسانی گالری در این اجرا پر شد؛ بقیه در اجراهای بعدی.")
+                break
+            urls = trim_gallery(p.get('images_all') or [])
+            if not urls:
+                continue
+            wcp = None
+            for s in sku_candidates_for_pid(pid):
+                wcp = wc_by_sku.get(s)
+                if wcp:
+                    break
+            if not wcp:
+                continue
+            existing_images = wcp.get('images') or []
+            existing_basenames = wc_image_basenames(existing_images)
+            ex_set = set(existing_basenames)
+            dedup_urls = dedupe_by_basename(urls)
+            if img_basename_ordered(dedup_urls) == existing_basenames:
+                continue  # بدون تغییر — هیچ درخواست شبکه‌ای
+            # فقط عکس‌های جدید چک می‌شوند؛ عکس‌های موجود روی محصول بدون چک حفظ می‌شوند
+            new_urls = [u for u in dedup_urls if img_basename(u) not in ex_set]
+            if new_urls:
+                alive_urls, dead_urls = filter_alive_images(new_urls)
+                if dead_urls:
+                    with stats['lock']: stats['dead_images'] += len(dead_urls)
+                final_urls = [u for u in dedup_urls if img_basename(u) in ex_set or u in alive_urls]
+            else:
+                final_urls = dedup_urls
+            if not final_urls:
+                continue
+            final_basenames = img_basename_ordered(final_urls)
+            if final_basenames == existing_basenames:
+                continue
+            if (not IMAGES_REPLACE_FOREIGN) and existing_basenames \
+                    and (not set(existing_basenames).issubset(set(final_basenames))):
+                continue
+            payload, orphans = build_images_payload(final_urls, existing_images)
+            if not payload:
+                continue
+            try:
+                res = wc_request("put", f"/products/{wcp['id']}", json={"images": payload}, timeout=60)
+                res.raise_for_status()
+                backfill_updated += 1
+                if orphans:
+                    n_media = delete_media_attachments(orphans)
+                    if n_media:
+                        with stats['lock']: stats['media_deleted'] += n_media
+                logger.info(f"   🖼️ گالری {pid} به‌روز شد ({len(payload)} عکس).")
+            except Exception as e:
+                logger.warning(f"   ⚠️ به‌روزرسانی گالری {pid} ناموفق: {e}")
+        logger.info(f"✅ گالری به‌روزرسانی‌شده: {backfill_updated}")
+
+    # ——— ناموجودها و حذف ———
+    logger.info("\n🚧 بررسی ناموجودها و حذف ...")
     extracted_skus = set()
+    extracted_pids = set(canonical_products.keys())
     for pid in canonical_products.keys():
         extracted_skus.update(sku_candidates_for_pid(pid))
 
-    to_oos_ids = set()
-    # از کش قبلی
-    for pid in cached_products.keys():
-        pid_str = str(pid)
-        # اگر هیچ‌یک از SKUهای آن pid در استخراج فعلی نیست
-        if not any(f"{pref}{pid_str}" in extracted_skus for pref in SKU_PREFIXES):
-            found_id = None
-            for s in sku_candidates_for_pid(pid_str):
-                wcp = wc_by_sku.get(s)
-                if wcp and wcp.get('stock_status') != "outofstock":
-                    found_id = wcp['id']; break
-            if found_id:
-                to_oos_ids.add(found_id)
+    # لیست ناموجودهای تأییدشده از منبع (Available=0) برای همه دسته‌های انتخابی
+    unavailable_by_cat = {}
+    selected_cat_ids = [cat['id'] for cat in scrape_categories]
+    for cid in selected_cat_ids:
+        ok_unav, unav_map = get_unavailable_products(session, cid)
+        if ok_unav:
+            unavailable_by_cat[cid] = unav_map
+    total_unav = sum(len(v) for v in unavailable_by_cat.values())
+    logger.info(f"✅ ناموجودهای تأییدشده منبع: {total_unav} قلم در {len(unavailable_by_cat)}/{len(selected_cat_ids)} دسته")
 
-    # از ووکامرس: هر محصول با پیشوند ما که در استخراج فعلی نیست و instock است
+    confirm_state = load_confirm_state()
+    to_oos_ids = set()
+    delete_queue = []
+
     for wcp in wc_products:
-        sku = wcp.get('sku')
-        if sku not in extracted_skus and wcp.get('stock_status') != "outofstock":
-            to_oos_ids.add(wcp['id'])
+        sku = (wcp.get('sku') or '')
+        pid_str = None
+        for pref in SKU_PREFIXES:
+            if sku.startswith(pref):
+                pid_str = sku[len(pref):]
+                break
+        if not pid_str:
+            continue
+        if pid_str in extracted_pids:
+            # محصول در منبع موجود است؛ شمارنده تأیید پاک می‌شود
+            if pid_str in confirm_state:
+                del confirm_state[pid_str]
+            continue
+        cached = cached_products.get(pid_str) or {}
+        cat_id = cached.get('category_id')
+        unav_map = unavailable_by_cat.get(cat_id)
+        confirmed = False
+        if cat_id is not None and cat_id in unavailable_by_cat:
+            if str(pid_str) in unav_map:
+                confirmed = True  # ناموجود تأییدشده از منبع
+            elif DELETE_ABSENT_FROM_SOURCE:
+                confirmed = True  # نه موجود نه ناموجود → از پنل ایویز حذف شده
+        if UNAVAILABLE_MODE == "delete" and confirmed:
+            entry = confirm_state.get(pid_str) or {
+                "count": 0, "category_id": cat_id,
+                "name": cached.get('name', ''), "wc_id": wcp.get('id'),
+            }
+            entry["count"] = int(entry.get("count", 0)) + 1
+            entry["wc_id"] = wcp.get('id')
+            confirm_state[pid_str] = entry
+            if entry["count"] >= UNAVAILABLE_CONFIRM_RUNS:
+                delete_queue.append((wcp, pid_str))
+            else:
+                logger.info(f"⏳ {pid_str} ناموجود/حذف‌شده تأیید شد ({entry['count']}/{UNAVAILABLE_CONFIRM_RUNS})؛ حذف در اجرای بعدی")
+                # در همین اجرا ناموجود شود تا فروش متوقف بماند
+                if wcp.get('stock_status') != 'outofstock':
+                    to_oos_ids.add(wcp['id'])
+        else:
+            # رفتار قبلی: فقط ناموجود کردن (خطای شبکه منبع، تغییر انتخاب دسته‌ها یا حالت outofstock)
+            if wcp.get('stock_status') != 'outofstock':
+                to_oos_ids.add(wcp['id'])
+
+    # پاک‌سازی کش محصولات تأییدشده‌ای که در ووکامرس هم نیستند
+    for pid_str in list(confirm_state.keys()):
+        if pid_str not in extracted_pids and pid_str not in [d[1] for d in delete_queue]:
+            cached = cached_products.get(pid_str)
+            if cached is not None:
+                cat_id = cached.get('category_id')
+                unav_map = unavailable_by_cat.get(cat_id)
+                if cat_id is not None and cat_id in unavailable_by_cat \
+                        and (str(pid_str) in unav_map or DELETE_ABSENT_FROM_SOURCE):
+                    cached_products.pop(pid_str, None)
+                    updated_cache.pop(pid_str, None)
+                    confirm_state.pop(pid_str, None)
+
+    # حذف قطعی محصولات تأییدشده (عکس‌ها + محصول) با چند نخ
+    if delete_queue:
+        logger.info(f"🗑️ حذف {len(delete_queue)} محصول تأییدشده از سایت (با پاک‌سازی عکس‌ها) ...")
+        delete_lock = Lock()
+
+        def delete_worker():
+            while True:
+                try:
+                    wcp, pid_str = delete_queue_q.get_nowait()
+                except Exception:
+                    break
+                try:
+                    media_ids = [img.get('id') for img in (wcp.get('images') or []) if img.get('id')]
+                    n_media = delete_media_attachments(media_ids)
+                    res = wc_request("delete", f"/products/{wcp['id']}", params={"force": "true"}, timeout=40)
+                    if res.status_code in (200, 201, 404):
+                        with delete_lock:
+                            stats['deleted'] += 1
+                            stats['media_deleted'] += n_media
+                            cached_products.pop(pid_str, None)
+                            updated_cache.pop(pid_str, None)
+                            confirm_state.pop(pid_str, None)
+                        logger.info(f"   🗑️ محصول {pid_str} (WC ID {wcp['id']}) حذف شد (+{n_media} فایل تصویر پاک شد).")
+                    else:
+                        logger.error(f"   ❌ حذف {pid_str} ناموفق: {res.status_code} - {res.text[:150]}")
+                except Exception as e:
+                    logger.error(f"   ❌ خطا در حذف {pid_str}: {e}")
+                if OUTOFSTOCK_SLEEP_SEC > 0:
+                    time.sleep(random.uniform(0, OUTOFSTOCK_SLEEP_SEC))
+                delete_queue_q.task_done()
+
+        delete_queue_q = Queue()
+        for item in delete_queue:
+            delete_queue_q.put(item)
+        del_threads = []
+        for _ in range(max(1, OUTOFSTOCK_WORKERS)):
+            t = Thread(target=delete_worker)
+            t.start()
+            del_threads.append(t)
+        for t in del_threads:
+            t.join()
+
+    save_confirm_state(confirm_state)
 
     # Batch اول
     failed_ids_after_batch = set()
@@ -1549,11 +2081,18 @@ def main():
         for t in out_threads:
             t.join()
 
+    # ذخیره نهایی کش و وضعیت تأیید (بعد از حذف‌ها)
+    save_cache(updated_cache)
+
     logger.info("\n===============================")
     logger.info(f"📦 موجود (ارسال‌شده): {send_count}")
     logger.info(f"🟢 ایجاد شده: {stats['created']}")
     logger.info(f"🔵 آپدیت شده: {stats['updated']}")
     logger.info(f"🟠 به ناموجود: {stats['outofstock_updated']}")
+    logger.info(f"🗑️ حذف شده از سایت: {stats['deleted']}")
+    logger.info(f"🧹 فایل رسانه حذف‌شده: {stats['media_deleted']}")
+    logger.info(f"🖼️ عکس مرده فیلترشده: {stats['dead_images']}")
+    logger.info(f"⚠️ شکست ارسال تصویر: {stats['images_failed']}")
     logger.info(f"🔴 شکست: {stats['failed']}")
     logger.info(f"🟡 بدون دسته: {stats.get('no_category', 0)}")
     logger.info("===============================\nتمام!")
