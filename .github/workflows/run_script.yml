@@ -65,20 +65,29 @@ jobs:
     # PRODUCTS CACHE
     # -------------------------------
 
-    - name: Prepare cache file
+    - name: Prepare cache files
       run: |
         if [ ! -s products_cache.json ]; then
           echo '{}' > products_cache.json
           echo "✅ Cache file created/reset to empty JSON object."
         else
-          echo "✅ Existing cache file found."
+          echo "✅ Existing products cache file found."
+        fi
+
+        if [ ! -s unavailable_confirm.json ]; then
+          echo '{}' > unavailable_confirm.json
+          echo "✅ Confirm-state file created."
+        else
+          echo "✅ Existing confirm-state file found."
         fi
 
     - name: Restore products cache
       id: restore-cache
       uses: actions/cache/restore@v4
       with:
-        path: products_cache.json
+        path: |
+          products_cache.json
+          unavailable_confirm.json
         key: products-cache-${{ github.run_id }}
         restore-keys: |
           products-cache-
@@ -86,38 +95,7 @@ jobs:
     - name: Verify products cache
       run: |
         echo "=== PRODUCTS CACHE ==="
-
-        if [ -f products_cache.json ]; then
-          ls -lh products_cache.json
-
-          python - <<'PY'
-        import json
-
-        path = "products_cache.json"
-
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            if isinstance(data, dict):
-                print(f"✅ Cache معتبر است: {len(data)} محصول")
-            else:
-                print("⚠️ Cache ساختار معتبری ندارد؛ {} ساخته می‌شود.")
-
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump({}, f)
-
-        except Exception as e:
-            print(f"⚠️ Cache خراب یا نامعتبر است: {e}")
-
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({}, f)
-        PY
-
-        else
-          echo '{}' > products_cache.json
-          echo "✅ Cache جدید ساخته شد."
-        fi
+        ls -lh products_cache.json unavailable_confirm.json || true
 
     # -------------------------------
     # PYTHON
@@ -149,6 +127,22 @@ jobs:
         EWAYS_USERNAME: ${{ secrets.EWAYS_USERNAME }}
         EWAYS_PASSWORD: ${{ secrets.EWAYS_PASSWORD }}
         SELECTED_IDS_STRING: "1582:21151-allz,1584-all-allz|16777:all-allz|4882:all-allz|16778:22570-all-allz"
+        # فیلتر موجودی (فقط محصولات موجود از منبع)
+        ONLY_AVAILABLE_FETCH: "true"
+        HTML_NO_COUNT_FILTER: "true"
+        SKIP_ZERO_PRICE: "true"
+        DETAIL_AVAILABLE_GUARD: "true"
+        # تصاویر
+        MAX_IMAGES_PER_PRODUCT: "5"
+        DEAD_IMAGE_CHECK: "true"
+        GALLERY_BACKFILL: "true"
+        MAX_IMAGE_UPDATES_PER_RUN: "40"
+        IMAGES_REPLACE_FOREIGN: "true"
+        # ناموجود/حذف
+        UNAVAILABLE_MODE: "delete"
+        UNAVAILABLE_CONFIRM_RUNS: "2"
+        DELETE_ABSENT_FROM_SOURCE: "true"
+        WP_MEDIA_DELETE: "true"
       run: python main.py
 
     # -------------------------------
@@ -159,7 +153,9 @@ jobs:
       if: always()
       uses: actions/cache/save@v4
       with:
-        path: products_cache.json
+        path: |
+          products_cache.json
+          unavailable_confirm.json
         key: products-cache-${{ github.run_id }}
 
     # -------------------------------
@@ -173,5 +169,5 @@ jobs:
         cat app.log || true
 
         echo ""
-        echo "=== CACHE FILE ==="
-        ls -lh products_cache.json || true
+        echo "=== CACHE FILES ==="
+        ls -lh products_cache.json unavailable_confirm.json || true
