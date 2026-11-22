@@ -94,6 +94,16 @@ MAX_IMAGE_UPDATES_PER_RUN = int(os.environ.get("MAX_IMAGE_UPDATES_PER_RUN", "40"
 IMAGES_REPLACE_FOREIGN = os.environ.get("IMAGES_REPLACE_FOREIGN", "true").lower() == "true"  # جایگزینی عکس‌های دستی/خارجی با گالری منبع
 
 # ==============================================================================
+# تنظیمات فیلتر موجودی (فقط محصولات موجود از منبع)
+# ==============================================================================
+# علت اصلی رسیدن محصولات ناموجود: آدرس /Store/List/{cat}/2/2/{page}/0/0/... سگمنت پنجم
+# «OnlyAvailable» است (طبق JS خود سایت) و مقدار 0 یعنی کل کاتالوگ شامل ناموجودها.
+ONLY_AVAILABLE_FETCH = os.environ.get("ONLY_AVAILABLE_FETCH", "true").lower() == "true"   # سگمنت OnlyAvailable=1 در URL لیست (فیلتر سمت سرور)
+HTML_NO_COUNT_FILTER = os.environ.get("HTML_NO_COUNT_FILTER", "true").lower() == "true"   # تشخیص کلاس noCount/soldOut در بلوک‌های HTML (مارکر فعلی ناموجودی)
+SKIP_ZERO_PRICE = os.environ.get("SKIP_ZERO_PRICE", "true").lower() == "true"             # محصول جدیدِ بدون قیمت معتبر از منبع، ساخته نشود
+DETAIL_AVAILABLE_GUARD = os.environ.get("DETAIL_AVAILABLE_GUARD", "true").lower() == "true" # چک ناموجودی در صفحه جزئیات قبل از ارسال
+
+# ==============================================================================
 # تنظیمات ناموجود/حذف محصول
 # ==============================================================================
 UNAVAILABLE_MODE = os.environ.get("UNAVAILABLE_MODE", "delete")                     # delete = حذف کامل | outofstock = فقط ناموجود (رفتار قبلی)
@@ -692,17 +702,66 @@ def get_product_details(session, cat_id, product_id):
         # گالری تصاویر از صفحه جزئیات (عکس اول = شاخص)
         gallery_urls = extract_gallery_urls(soup)
 
-        return specs, canonical_cat_id, gallery_urls
+        # محافظ ناموجودی: نشانه‌های noCount/soldOut در صفحه جزئیات
+        detail_unav = detail_page_unavailable(soup) if DETAIL_AVAILABLE_GUARD else False
+
+        return specs, canonical_cat_id, gallery_urls, detail_unav
     except requests.exceptions.RequestException as e:
         logger.warning(f"      - خطا در دریافت جزئیات محصول {product_id}: {e}. Retry...")
         raise
     except Exception as e:
         logger.warning(f"      - خطا در استخراج مشخصات محصول {product_id}: {e}")
-        return {}, None, []
+        return {}, None, [], False
 
 # ==============================================================================
 # استخراج محصولات دسته (HTML + Lazy) - Light
 # ==============================================================================
+def is_unavailable_record(block):
+    """
+    تشخیص محصول ناموجود در بلوک HTML لیست ایویز.
+    مارکر قدیمی سایت: .goods-record-unavailable
+    مارکر فعلی سایت (طبق قالب JS): کلاس noCount روی بلوک هنگام Availability=false
+      (row.replaceAll("##noCount##", item.Availability?"":"noCount"))
+      و soldOut برای سیم‌کارت‌های تمام‌شده.
+    """
+    try:
+        # مارکر قدیمی
+        if block.select_one(".goods-record-unavailable"):
+            return True
+        # کلاس noCount / soldOut روی خود بلوک یا والد goods_item
+        for el in (block, block.parent):
+            if el is None:
+                continue
+            cls = set(el.get("class") or [])
+            if "noCount" in cls or "soldOut" in cls:
+                return True
+        # المان‌های داخلی نسخه جدید
+        if block.select_one(".soldOut"):
+            return True
+        d = block.select_one(".noCount-desc")
+        if d is not None and d.get_text(strip=True):
+            return True
+        return False
+    except Exception:
+        return False
+
+def detail_page_unavailable(soup):
+    """
+    تشخیص ناموجودی از صفحه جزئیات (سیگنال مثبت فقط).
+    اگر هیچ نشانه‌ای نبود، None برنمی‌گردانیم؛ False یعنی «ناموجود تأییدشده».
+    """
+    try:
+        if soup.select_one(".goods-record-unavailable"):
+            return True
+        for el in soup.select(".noCount-desc"):
+            if el.get_text(strip=True):
+                return True
+        if soup.select_one(".soldOut"):
+            return True
+        return False
+    except Exception:
+        return False
+
 @retry(
     retry=retry_if_exception_type((requests.exceptions.RequestException, requests.exceptions.HTTPError)),
     stop=stop_after_attempt(4),
@@ -714,12 +773,15 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
     seen_product_ids = set()
     page = 1
     error_count = 0
+    only_av = 1 if ONLY_AVAILABLE_FETCH else 0
+    html_unav_filtered_total = 0
     while page <= max_pages:
-        # HTML
+        # HTML — طبق قالب JS خود سایت:
+        # /Store/List/{CatId}/{Order}/{Sort}/{PageIndex}/{OnlyAvailable}/{MinPrice}/{MaxPrice}
         if page == 1:
-            url = f"{BASE_URL}/Store/List/{category_id}/2/2/0/0/0/10000000000"
+            url = f"{BASE_URL}/Store/List/{category_id}/2/2/0/{only_av}/0/10000000000"
         else:
-            url = f"{BASE_URL}/Store/List/{category_id}/2/2/{page-1}/0/0/10000000000?brands=&isMobile=false"
+            url = f"{BASE_URL}/Store/List/{category_id}/2/2/{page-1}/{only_av}/0/10000000000?brands=&iscreditproduct=0"
         logger.info(f"⏳ دریافت HTML صفحه {page} برای دسته {cat_label(category_id)} ...")
         try:
             resp = session.get(url, timeout=30)
@@ -729,11 +791,13 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
             soup = BeautifulSoup(resp.text, 'lxml')
             product_blocks = soup.select(".goods-record")
             html_products = []
+            filtered_unav = 0
             for block in product_blocks:
                 a_tag = block.select_one("a")
                 name_tag = block.select_one("span.goods-record-title")
-                unavailable = block.select_one(".goods-record-unavailable")
-                is_available = unavailable is None
+                is_available = (not is_unavailable_record(block)) if HTML_NO_COUNT_FILTER else True
+                if not is_available:
+                    filtered_unav += 1
                 if a_tag and name_tag:
                     link_href = a_tag.get('href', '')
                     cat_from_link, pid = extract_ids_from_href(link_href)
@@ -765,7 +829,8 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                             'specs': {},  # فعلا نداریم
                         })
                         seen_product_ids.add(pid)
-            logger.info(f"🟢 محصولات موجود (HTML) صفحه {page}: {len(html_products)}")
+            logger.info(f"🟢 محصولات موجود (HTML) صفحه {page}: {len(html_products)} | ناموجود فیلترشده: {filtered_unav}")
+            html_unav_filtered_total += filtered_unav
 
             # Lazy
             lazy_products = []
@@ -850,7 +915,7 @@ def get_products_from_category_page(session, category_id, max_pages=10, delay=0.
                 logger.critical(f"🚨 خطاهای متوالی زیاد در دسته {cat_label(category_id)}. توقف.")
                 break
             time.sleep(2)
-    logger.info(f"    - کل محصولات موجود استخراج‌شده از دسته {cat_label(category_id)}: {len(all_products_in_category)}")
+    logger.info(f"    - کل محصولات موجود استخراج‌شده از دسته {cat_label(category_id)}: {len(all_products_in_category)} (ناموجودهای فیلترشده HTML: {html_unav_filtered_total})")
     return all_products_in_category
 
 # ==============================================================================
@@ -1366,6 +1431,13 @@ def process_product_wrapper(args):
         specs = product.get('specs') or {}
         has_details = bool(specs)
 
+        # محافظ موجودی: محصولی که صفحه جزئیات منبع آن ناموجودی را تأیید کرد،
+        # نه ساخته می‌شود نه آپدیت می‌شود (حذف/ناموجود شدنش با جریان تأیید انجام می‌شود)
+        if product.get('source_unavailable'):
+            logger.info(f"   ⛔️ محصول {product.get('id')} در صفحه جزئیات منبع ناموجود است؛ ارسال نشد.")
+            with stats['lock']: stats['skipped_unavailable'] = stats.get('skipped_unavailable', 0) + 1
+            return
+
         attributes = None
         if has_details:
             attributes = []
@@ -1393,6 +1465,15 @@ def process_product_wrapper(args):
             if alt_id:
                 logger.info(f"🔎 محصول یافت شد با SKU جایگزین: {alt_sku} → ID={alt_id} (آپدیت به‌جای ساخت)")
                 existing_wc_id = alt_id
+
+        # محافظ قیمت صفر برای محصولات جدید: محصول بدون قیمت معتبر معمولاً ناموجود/غیرقابل فروش است
+        if SKIP_ZERO_PRICE and existing_wc_id is None:
+            raw_price = str(product.get('price') or "0")
+            price_digits = re.sub(r'[^\d]', '', raw_price)
+            if not price_digits or int(price_digits) <= 0:
+                logger.info(f"   ⛔️ محصول جدید {pid_str} بدون قیمت معتبر از منبع؛ ساخته نشد (احتمالاً ناموجود).")
+                with stats['lock']: stats['skipped_zero_price'] = stats.get('skipped_zero_price', 0) + 1
+                return
 
         # ==================================================================
         # تصاویر: گالری چندعکسی + ضدتکرار (مقایسه نام فایل) + فیلتر عکس مرده
@@ -1555,10 +1636,11 @@ def enrich_products_with_details(session, products_by_pid, pids_to_enrich):
             try:
                 p = products_by_pid[pid]
                 cat_for_detail = p.get('detail_hint_cat_id') or p.get('category_id')
-                specs, canonical_id, gallery = get_product_details(session, cat_for_detail, pid)
+                specs, canonical_id, gallery, detail_unav = get_product_details(session, cat_for_detail, pid)
                 if canonical_id:
                     p['category_id'] = pick_deepest(p.get('category_id'), p.get('detail_hint_cat_id'), canonical_id)
                 p['specs'] = specs or {}
+                p['source_unavailable'] = bool(detail_unav)
                 if gallery:
                     p['images_all'] = gallery
                 elif (not p.get('images_all')) and p.get('image'):
@@ -1826,7 +1908,8 @@ def main():
 
     # ——— ارسال ———
     stats = {'created': 0, 'updated': 0, 'failed': 0, 'no_category': 0, 'outofstock_updated': 0,
-             'deleted': 0, 'media_deleted': 0, 'dead_images': 0, 'images_failed': 0, 'lock': Lock()}
+             'deleted': 0, 'media_deleted': 0, 'dead_images': 0, 'images_failed': 0,
+             'skipped_unavailable': 0, 'skipped_zero_price': 0, 'lock': Lock()}
 
     product_queue = Queue()
     for p in to_send_items.values():
@@ -2093,6 +2176,8 @@ def main():
     logger.info(f"🧹 فایل رسانه حذف‌شده: {stats['media_deleted']}")
     logger.info(f"🖼️ عکس مرده فیلترشده: {stats['dead_images']}")
     logger.info(f"⚠️ شکست ارسال تصویر: {stats['images_failed']}")
+    logger.info(f"⛔️ رد شده به‌علت ناموجودی منبع: {stats.get('skipped_unavailable', 0)}")
+    logger.info(f"⛔️ محصول جدید بدون قیمت رد شده: {stats.get('skipped_zero_price', 0)}")
     logger.info(f"🔴 شکست: {stats['failed']}")
     logger.info(f"🟡 بدون دسته: {stats.get('no_category', 0)}")
     logger.info("===============================\nتمام!")
